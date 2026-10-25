@@ -104,6 +104,14 @@ for c in "MXN 500" "BRL 700" "ARS 1500" "EUR 300"; do
     set_min_cap --currency $1 --cap_bps $2 >/dev/null
 done
 
+say "Mode démo : 90 jours en 5 minutes (time_factor)"
+# Échéance réelle = durée annoncée / DEMO_TIME_FACTOR ; le prix reste calculé sur la durée annoncée.
+# 25920 : 90 jours (7 776 000 s) → 300 s. DEMO_TIME_FACTOR=1 pour le temps réel.
+DEMO_TIME_FACTOR=${DEMO_TIME_FACTOR:-25920}
+stellar contract invoke --id $POOL --source-account $ADMIN --network $NET --quiet -- \
+  set_time_factor --factor $DEMO_TIME_FACTOR >/dev/null
+echo "   time_factor = $DEMO_TIME_FACTOR"
+
 say "Dépôt du LP dans le pool (1 000 000 USDC contre des parts)"
 LP_DEPOSIT=10000000000000   # 1 000 000 USDC, 7 décimales
 LP_USDC=$(stellar contract invoke --id $USDC_SAC --source-account $LP --network $NET --quiet -- \
