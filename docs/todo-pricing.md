@@ -1,9 +1,16 @@
 # TODO Pricing — détaillé
 
-> Équipe : **Lancelot = Pricing** (cette to-do), **Clément = Paiement** (`feat/payment`), **Hugo = Vault** + transversal. Le tableau « Qui fait quoi » de `TODO.md` (fichier d'Hugo) est à mettre à jour avec ces noms.
-> Branche `feat/pricing`. Fichiers à nous : `contracts/pool/src/pricing.rs`, bloc Pricing de `contracts/pool/src/test.rs`, `front/src/pricing/`, `scripts/crash.sh`, `sim/`.
+> Équipe : **Lancelot = Pricing** (cette to-do), **Clément = Paiement** (`feat/payment`), **Hugo = Vault + tout le front** + transversal (déploiement, merge, deck, vidéo, soumission).
+> Branche `feat/pricing`. Fichiers à nous : `contracts/pool/src/pricing.rs`, bloc Pricing de `contracts/pool/src/test.rs`, `scripts/crash.sh`, `sim/`. Le front (`front/src/pricing/` compris) est à Hugo depuis le 25/10 soir : on lui fournit appels et formules.
 > On ne touche pas à `lib.rs`, `hedge.rs`, `vault.rs`, `shared/` : on demande.
-> Deadline : **lundi 26/10 12h00**. Priorité absolue : `spot` + `forward_rate` + tests (bloque Paiement).
+> Deadline : **lundi 26/10 12h00**. Vidéo enregistrée par Hugo **avant 10h**.
+
+## État au 25/10, ~21h30
+
+- ✅ **Contrat Pricing complet et dans `main`** (codes d'erreur 300-311 compris, mergés par Hugo : `ea323b2`). 112 tests verts sur toute la suite, 0 ignoré ; les tests de Clément tournent sur le vrai Pricing.
+- ✅ **Testnet redéployé sur `main`** (`f3d65cd`), `set_rate` / `set_min_cap` / EUR dans le setup. `quote` sur le nouveau pool (`CAQY7OYO…`) vérifié : forward `5487305413412`, coût `548730541341`, marge `54873054135` = valeurs de référence exactes.
+- ✅ **Fixing à l'échéance** côté Pricing + historique du mock (§8.1) ; Clément branche `settle` dessus.
+- ⬜ 🔴 **Reste côté Pricing, par priorité** : `crash.sh` (§4.1) · mémo front pour Hugo (§3) · `sim/` (§4.2) · slides et objections (§6, §7).
 
 Légende : ⬜ à faire · 🔴 bloque quelqu'un d'autre · ✅ fait
 
@@ -101,6 +108,7 @@ Convention d'équipe (`TODO.md`) : Vault 100-199 · Paiement 200-299 · Pricing 
 | 309 | `RateTooHigh` | admin : `set_rate` > 100 %/an | (admin) |
 | 310 | `CapOutOfRange` | admin : `set_min_cap` à 0 ou > 50 % | (admin) |
 | 311 | `SpreadTooHigh` | admin : `set_spread` > 5 % | (admin) |
+| 312 | `NoFixing` | `settle` : pas de cours à l'échéance (échéance future, aucun prix avant, ou historique de l'oracle dépassé, ~12 h sur Reflector) | « Cours de règlement indisponible » |
 
 Tests : chaque refus est vérifié avec son code exact (`Err(Ok(err(PricingError::…)))` ou `Error(Contract, #3xx)`), y compris la propagation par `quote` (`pricing_quote_propagates_oracle_and_rate_errors`). 22 tests Pricing verts.
 
@@ -110,11 +118,11 @@ Tests : chaque refus est vérifié avec son code exact (`Err(Ok(err(PricingError
 
 Ce que `hedge.rs` attend de nous est conforme à ce qu'on a livré : `spot`, `forward_rate` (formule du README, pas celle inversée du transcript du council), `check_cap`, `to_usdc` inchangée. Points d'action :
 
-- ⬜ 🔴 **Fraîcheur du prix pendant la démo** : `settle` appelle `spot`, qui refuse un prix de plus de `MAX_PRICE_AGE_SECS` = 900 s (Clément pense 300 s : lui préciser). Le mock horodate au `set_price`. Conséquence pour la vidéo : le crash (ou un simple « rafraîchir le cours ») doit avoir lieu **moins de 15 min avant `settle`**. À prévoir dans `CrashButton` (bouton « Rafraîchir le cours ») et dans `scripts/crash.sh` (`--refresh` : repose le même prix pour mettre à jour l'horodatage). Le dire à Clément pour son script vidéo.
-- ⬜ **Marge** : Clément arrondit déjà vers le haut (`to_usdc × cap_bps / BPS`, ceil), donc marge prélevée = marge affichée par `quote`. Lui proposer quand même d'appeler `pricing::margin_for(usdc_cost, cap_bps)` pour n'avoir qu'une seule formule.
-- ⬜ **Durée nulle** : `open` refuse `duration_secs == 0`, `quote` l'accepte. Dans `QuoteCard`, imposer une durée ≥ 1 s pour ne pas afficher un devis que `open_hedge` refusera.
-- ⬜ **Tests après merge** : Clément ajoute `mock-oracle` en dev-dependency de `contracts/pool/Cargo.toml`. Une fois mergé, on pourra remplacer notre `TestOracle` par le vrai `mock_oracle::MockOracle` dans `pricing_tests` (optionnel, gain de fidélité). Conflit attendu sur `test.rs` : nul si chacun reste dans son bloc, nos imports sont dans le module `pricing_tests`.
-- ⬜ **Après merge**, les tests `open_*` de Clément prendront le vrai `forward_rate` : lui donner les valeurs exactes (spot 0,055, 400/700 bps, 90 j, spread 50 → Buy 5_487_305_413_412 ; marge 10 % sur 1 M MXN = 54_873_054_135).
+- ✅ 🔴 **Fraîcheur du prix pendant la démo** : `settle` appelle `spot`, qui refuse un prix de plus de `MAX_PRICE_AGE_SECS` = 900 s (Clément pense 300 s : lui préciser). Le mock horodate au `set_price`. Conséquence pour la vidéo : le crash (ou un simple « rafraîchir le cours ») doit avoir lieu **moins de 15 min avant `settle`**. À prévoir dans `CrashButton` (bouton « Rafraîchir le cours ») et dans `scripts/crash.sh` (`--refresh` : repose le même prix pour mettre à jour l'horodatage). Le dire à Clément pour son script vidéo. → **Fait côté Clément** (`docs/payment-cli.md`, `docs/video-script.md` : rafraîchir le mock avant `open_hedge` et avant `settle`) et `TODO.md` corrigé à 900 s. Reste notre `crash.sh --refresh` (§4.1).
+- ✅ **Marge** : Clément arrondit déjà vers le haut (`to_usdc × cap_bps / BPS`, ceil), donc marge prélevée = marge affichée par `quote`. Lui proposer quand même d'appeler `pricing::margin_for(usdc_cost, cap_bps)` pour n'avoir qu'une seule formule. → **Fait** : Clément utilise `margin_for` (`24534f3`).
+- ⬜ **Durée nulle** : `open` refuse `duration_secs == 0`, `quote` l'accepte. Dans `QuoteCard`, imposer une durée ≥ 1 s pour ne pas afficher un devis que `open_hedge` refusera. → Le front est à Hugo : à mettre dans le mémo front (§3).
+- ✅ **Tests après merge** : Clément ajoute `mock-oracle` en dev-dependency de `contracts/pool/Cargo.toml`. Une fois mergé, on pourra remplacer notre `TestOracle` par le vrai `mock_oracle::MockOracle` dans `pricing_tests` (optionnel, gain de fidélité). Conflit attendu sur `test.rs` : nul si chacun reste dans son bloc, nos imports sont dans le module `pricing_tests`. → Dev-dependency `mock-oracle` ajoutée (`Cargo.toml`). Bascule de notre `TestOracle` vers le vrai mock : optionnelle, non faite.
+- ✅ **Après merge**, les tests `open_*` de Clément prendront le vrai `forward_rate` : lui donner les valeurs exactes (spot 0,055, 400/700 bps, 90 j, spread 50 → Buy 5_487_305_413_412 ; marge 10 % sur 1 M MXN = 54_873_054_135). → **Fait** : tests de Clément sur le vrai Pricing (`24534f3`), 0 ignoré.
 - ✅ **Setup testnet** : sans `set_min_cap`, **aucune devise n'est cotable** (liste blanche). Bloc shell + message pour Hugo rédigés au §5 (25/10).
 - ⬜ Point de vive voix avec Hugo (relayé par Clément) : ses clés de stockage Vault et l'API d'exposition par devise. Côté Pricing, on n'utilise que `Oracle`, `SpreadBps`, `Rate`, `MinCap` de `DataKey` : pas d'impact tant que `lib.rs` ne bouge pas.
 
@@ -138,11 +146,15 @@ Tests à retirer de `#[ignore]` :
   - `pricing_set_rate_requires_admin` : sans `mock_all_auths` → échec d'auth.
   - `pricing_duration_zero_is_spot` : F(0 s) = S ± spread.
 - ✅ `cargo test -p pool` vert (21 tests Pricing)
-- ⬜ CI verte sur le push (rien n'est encore poussé)
+- ✅ CI verte (`TODO.md`, état au 25/10 soir)
 
 ---
 
 ## 3. Front `front/src/pricing/`
+
+> **Changement du 25/10 soir :** tout le front est à Hugo (`TODO.md`). Les cases ci-dessous deviennent ce qu'Hugo doit savoir pour coder `QuoteCard` / `CrashButton` ; notre livrable est le **mémo** ci-dessous.
+
+- ⬜ 🔴 **Mémo front pour Hugo** : lecture `lastprice` sur Reflector et sur le mock (simulation, `Asset::Other("MXN")`, i128 → bigint, 14 décimales), appel `quote` en simulation (champs et décimales de `Quote`), durée ≥ 1 s (`open` refuse 0), table des codes 300-311 (§1.7), coût de la protection (§7), avertissement prix > 900 s → bouton « Rafraîchir le cours ».
 
 Dépend de `shared/wallet.ts` et `shared/contract.ts` (Hugo, 🔴). En attendant : appeler le contrat en **simulation** directement avec `@stellar/stellar-sdk` (`rpc.Server.simulateTransaction`), ce qui ne requiert pas de wallet pour `quote` et `lastprice`.
 
@@ -191,8 +203,8 @@ Dépend de `shared/wallet.ts` et `shared/contract.ts` (Hugo, 🔴). En attendant
 
 ## 5. Livrables aux autres
 
-- ✅ 🔴 À Hugo, pour `scripts/setup-testnet.sh` : bloc rédigé et testé (25/10), message ci-dessous **à envoyer**
-- ⬜ 🔴 Appliqué par Hugo sur le testnet (redéploiement du pool + bloc), puis `quote` vérifié contre les valeurs de référence
+- ✅ 🔴 À Hugo, pour `scripts/setup-testnet.sh` : bloc rédigé, testé et envoyé (25/10)
+- ✅ 🔴 Appliqué par Hugo (`64ac3ba`), testnet redéployé sur `main` (`f3d65cd`), `quote` vérifié sur le nouveau pool : valeurs de référence exactes (25/10 ~21h30)
 
 **État vérifié le 25/10 vers 19h40 (lecture seule, `--send=no`) :**
 - Le pool déployé (`CBEUIYUG…6CJR`) date du squelette : `set_rate` et `quote` → `UnreachableCodeReached` (`panic!("TODO")`). **Il faut le redéployer** avec le wasm de `feat/pricing` (ou du merge) avant le bloc ci-dessous.
@@ -239,10 +251,10 @@ Dépend de `shared/wallet.ts` et `shared/contract.ts` (Hugo, 🔴). En attendant
 > Attendu : `spot` 5500000000000, `forward_rate` 5487305413412, `usdc_cost` 548730541341, `margin` 54873054135.
 > Au passage, le README dit « 54 870 USDC » : le chiffre exact est **54 873 USDC** (54 873,05), à corriger.
 
-- ⬜ À Hugo (front) : table des codes 300-311 du §1.7 pour les messages d'erreur de `QuoteCard` / écran Paiement. Message à copier :
+- ✅ À Hugo (front) : table des codes 300-311 du §1.7 pour les messages d'erreur de `QuoteCard` / écran Paiement. Message à copier : → Codes mergés dans `main` (`ea323b2`) ; table à reprendre dans le mémo front (§3).
   > Hugo, côté Pricing les refus sont maintenant des codes `PricingError` 300-311 (table + messages proposés dans `docs/todo-pricing.md` §1.7). Le client TS les reçoit comme `Error(Contract, #3xx)`. Les plus probables en démo : 302 (cours trop ancien → rafraîchir le mock), 307 (protection sous le minimum, MXN 5 %), 306 (devise non ouverte). Au passage : `spot` accepte un prix jusqu'à **900 s**, pas 300 s comme écrit dans `TODO.md`.
-- ⬜ À Hugo : dev-dependency `mock-oracle` dans `contracts/pool/Cargo.toml` (ou accord pour que je l'ajoute)
-- ⬜ À Paiement : props de `<QuoteCard />` figées + `onQuote` ; signaler tout changement du prix mock (offre DEX)
+- ✅ Dev-dependency `mock-oracle` dans `contracts/pool/Cargo.toml` (ajoutée par Clément, mergée)
+- ⬜ À Hugo (le front est à lui) : mémo front (§3) ; signaler à Clément tout changement du prix mock (offre DEX)
 - ✅ README corrigé : 54 873 USDC (25/10 soir)
 - ⬜ À Hugo : les slides pricing (§6)
 
@@ -280,12 +292,33 @@ Le README a gagné les sections *Ce que paie la PME*, *Tranche senior et tranche
   - « Comment les LPs se couvrent ? » → netting, puis détention de la devise en obligations d'État tokenisées ; le reste (sauts, écarts oracle/DEX) est petit et payé par le spread ; jamais « couverture totale » ;
   - « Le rendement LP bat-il un vault ? » → senior ≈ bons du Trésor + 1 pt ; le junior n'est bien payé qu'avec du netting, d'où le skew de prix.
 
-## Ordre d'attaque
+## 8. Points à trancher (`docs/points-a-trancher.md`, 25/10 soir)
+
+### 8.1 ✅ 🔴 Fixing à l'échéance (Clément branche `settle` dessus)
+`settle` lit le cours **au moment de l'appel**, pas à l'échéance : celui qui règle choisit son moment (option gratuite non facturée).
+- ✅ Décidé le 25/10 soir : Clément prend le côté `settle` (+ facteur d'accélération, option b : facteur 25 920 → 90 j en 5 min réelles), nous `fixing` + historique du mock.
+- ✅ `pricing::fixing(env, &currency, maturity) -> i128` : `price(asset, maturity)` de l'oracle ; 312 `NoFixing` si pas de prix, 301 si ≤ 0, 302 si le dernier prix avant l'échéance a plus de 900 s. 5 tests sur le vrai mock-oracle (crash avant l'échéance compté, prix après l'échéance ignoré, limite 900 s, 302, 312 ×2). Vérifié sur Reflector testnet : `price(ts)` arrondit à la période de 300 s, `null` si futur, historique ok à −12 h, `null` à −23 h.
+- ✅ `contracts/mock-oracle` (point 9 de la section Pricing de `TODO.md`) : `set_price` empile l'historique (64 prix max), `price(asset, ts)` = dernier prix posé à `ts` ou avant, `None` si futur ; `lastprice` inchangé. 2 tests.
+- ⬜ Clément remplace `pricing::spot` par `pricing::fixing(env, &hedge.currency, hedge.maturity)` dans `settle` (`hedge.rs:147`) + ses tests ; ensuite retirer le `#[allow(dead_code)]` de `fixing`.
+- ⬜ Hugo : redéployer le mock-oracle (nouvelle fonction `price`) et le pool après le merge.
+- Démo : le crash doit avoir lieu **avant l'échéance réelle** (5 min) ; plus besoin de rafraîchir le mock avant `settle`, mais toujours avant `open_hedge`.
+- Bonus : règle aussi la fraîcheur du prix au `settle` pendant la démo.
+
+### 8.2 ⬜ Durée de la démo vs prix affiché (Hugo + Clément + nous)
+La vidéo raconte 90 j (54 873 USDC) mais ouvre à 60 s (≈ 55 275 USDC). Options : a. assumer « échéance de démo 60 s » · b. facteur d'accélération (prix sur 90 j, échéance réelle 60 s ; à coder dans `hedge.rs`) · c. deux couvertures.
+- ⬜ Donner notre avis : côté Pricing, b ne demande **rien** (`forward_rate` prend la durée annoncée) ; c'est le calcul de `maturity` dans `hedge.rs` qui change. b montre l'écart forward / spot, le cœur du pricing.
+
+### 8.3 ⬜ Etherfuse (rendement du capital libre, attribué à Pricing dans `TODO.md`)
+- ⬜ Décision avec Hugo. Recommandation : **USDC pur pour la soumission**, Etherfuse au pitch (déjà dans « À dire dans la présentation » + point 26 de `TODO.md`). Les points 21-24 touchent `vault.rs` et l'invariant, risqués la veille de la soumission. Au mieux : `mock-stablebond` + interface d'adaptateur, sans brancher le vault.
+
+---
+
+## Ordre d'attaque (mis à jour le 25/10 ~21h30)
 
 | Quand | Quoi |
 |---|---|
-| Maintenant | §0 env · §1.1 `spot` · §1.2 `forward_rate` · §2 tests parité + spread → **push, prévenir Paiement** |
-| Dim. soir | §1.3–1.5 `quote`, plafonds, admin · reste des tests · §5 commandes pour Hugo |
-| Nuit / lun. 8h | §3.1 `QuoteCard` · §3.2 `CrashButton` · §4.1 `crash.sh` · §6 slides |
-| Lun. 8h | Merge avec Hugo, aligner le mock sur Reflector, vérifier le devis dans l'écran Paiement |
-| Lun. 8h–10h | §4.2 `sim/`, objections, relecture |
+| ~~Dim. après-midi / soir~~ | ~~§1 contrat · §2 tests · §5 setup · codes d'erreur~~ ✅ |
+| ~~Maintenant~~ | ~~§8.1 fixing + historique du mock~~ ✅ |
+| Ensuite | §4.1 `crash.sh` (`--refresh`, `--reset`) · §3 mémo front pour Hugo · §8.3 décision Etherfuse avec Hugo |
+| Nuit | §4.2 `sim/` · §6 et §7 slides et objections → à Hugo |
+| Lun. 8h–10h | Aligner le mock sur Reflector avant la vidéo (commande `crash.sh --reset` pour Hugo) · relecture |
