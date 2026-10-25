@@ -145,6 +145,11 @@ Règles du contrat :
 2. **Cascade** : les pertes touchent le junior d'abord ; les gains paient d'abord le taux du senior, le junior prend le surplus.
 3. **La part couverte est un réglage** : plus de junior, moins de couverture et plus de levier.
 4. **Junior épuisé** : le pool n'accepte plus que des couvertures entièrement couvertes.
+5. **Ratio minimum** : tant qu'il y a des seniors, le junior reste ≥ 20 % du capital (dépôt senior ou retrait junior refusé sinon).
+
+**Le rendement du senior est payé par le junior tant que le capital libre n'est pas placé** (bons du Trésor, CETES) : le prix de la part senior progresse de 4,5 %/an, et cette progression est retirée de la valeur du junior. Le placement de la trésorerie est en roadmap ; d'ici là, le junior paie le senior avec ses spreads.
+
+*Implémenté sur la branche `feat/tranches`* : un seul vault, deux catégories de parts. `deposit_lp` / `withdraw` = junior (inchangés), `deposit_senior` / `withdraw_senior` / `senior_balance` / `tranche_values` en plus. Prix senior capitalisé à chaque opération senior, valeur junior = capital − valeur senior, capacité = junior − réservé.
 
 Simulation d'un pool de démarrage : **500 k$** (400 k$ senior payé 4,5 %, 100 k$ junior utilisé à 15 % max), **contrats de 10 k$** à 90 jours dont le sens (importateur / exportateur) est tiré au hasard ; peso à 13 % de vol avec sauts de 15 % ; spread 0,4 % par 90 j dont 20 % pour le protocole ; 8 % en USDC, le reste en bons du Trésor à 4 % ; pas de Blend.
 
