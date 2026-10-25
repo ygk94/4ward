@@ -348,7 +348,7 @@ TODO.md                # setup et chantiers
 | Saut de cours entre deux rééquilibrages | Limites par devise, tranche junior en première perte |
 | LP qui retire avant un règlement perdant | Retraits différés à l'échéance suivante, ou prix des parts incluant les contrats ouverts |
 | Protocoles tiers (émetteurs des CETES et bons du Trésor, Blend si activé) | Plafond par protocole, réserve d'USDC dans le contrat |
-| Taux d'intérêt codés en dur | Limite assumée du MVP, lecture onchain en roadmap |
+| Taux d'intérêt poussés par l'admin | Taux synchronisés depuis Etherfuse (push oracle, `scripts/sync-rates.sh`), lecture onchain en roadmap |
 | Oracle manipulé au fixing | TWAP sur une fenêtre, bornes de cohérence, plusieurs oracles |
 | Écart oracle / cours réel du DEX ou de l'anchor | Résidu faible, affiché à l'utilisateur |
 

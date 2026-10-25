@@ -197,6 +197,17 @@ Dépend de `shared/wallet.ts` et `shared/contract.ts` (Hugo, 🔴). En attendant
 - ⬜ Reproduire les 3 chiffres de la démo : +12 % sans protection ≈ +6 600 $, avec protection 10 % ≈ +1 100 $ (les 2 % au-delà du plafond). Vérifier avec les mêmes formules i128 que le contrat (porter `forward_rate` en Python entier pour contrôle croisé).
 - ⬜ Calibration spread / plafond minimum : volatilité annualisée approximative (MXN ~12 %, BRL ~15 %, ARS >> ), proba de dépasser le cap en 90 j (normale, σ√t), espérance de perte du pool au-delà du cap → justifier MXN 5 %, BRL 7 %, ARS 15 % et le spread 50 bps. Un tableau suffit.
 
+### 4.3 ✅ Push oracle des taux (Etherfuse) : `scripts/sync-rates.sh`
+- ✅ Source publique, sans clé : `GET https://api.etherfuse.com/lookup/tokens/cost` (objet indexé par symbole ; on lit `current_basis_points`, rendement annuel en bps, déjà au format de `set_rate`). Surchargeable par `ETHERFUSE_URL`.
+- ✅ Correspondance : USD ← USTRY · MXN ← CETES · BRL ← TESOURO · EUR ← EUROB · GBP ← GILTS avec `--all` seulement (pas de `set_min_cap`, donc non cotable). ARS n'existe pas chez Etherfuse : taux en dur 2200. MEX et MEXE (à 0) ignorés.
+- ✅ Valeurs du 25/10 : USD 360 · MXN 555 · BRL 1148 · EUR 210 (GBP 351), contre 400 / 700 / 1050 / 200 en dur.
+- ✅ Repli par devise sur le taux en dur (en jaune) si l'API ne répond pas (timeout 10 s, HTTP en erreur), JSON invalide, champ absent, valeur à 0 ou hors de ]0, 5000] bps. Toutes en repli : avertissement, code de sortie 0.
+- ✅ `--dry-run`, `--all`, `--help` ; alias `POOL` / `ADMIN` / `NET` (repli sur `$POOL_ID`). Appelé par `setup-testnet.sh` juste après la boucle de taux en dur, sans bloquer.
+- ✅ Pas de getter `Rate` (interface figée) : le tableau affiche le taux en dur de référence, l'effet se vérifie par un `quote` en simulation.
+- ⬜ Écriture réelle sur le déploiement officiel par Hugo (fx-admin absent de la machine de Lancelot) : `./scripts/sync-rates.sh`, puis `quote` MXN BuyCurrency 1 000 000 MXN / 90 j / cap 1000 (avant : forward `5487305413412`).
+- **Fréquence** : une fois par jour suffit. Le rendement suit les banques centrales et les adjudications hebdomadaires ; le prix du token, lui, monte en continu mais ne nous sert pas.
+- **Limite assumée** : oracle centralisé, il faut faire confiance à l'admin qui pousse et à l'API Etherfuse. Suite logique : un taux publié onchain, lu directement par le contrat.
+
 ---
 
 ## 5. Livrables aux autres

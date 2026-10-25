@@ -96,6 +96,8 @@ for r in "USD 400" "MXN 700" "BRL 1050" "ARS 2200" "EUR 200"; do
   stellar contract invoke --id $POOL --source-account $ADMIN --network $NET --quiet -- \
     set_rate --currency $1 --rate_bps $2 >/dev/null
 done
+# Puis rendements des stablebonds Etherfuse par-dessus (push oracle) ; les taux en dur restent si l'API tombe.
+POOL=$POOL ADMIN=$ADMIN NET=$NET ./scripts/sync-rates.sh || echo "   taux en dur conservés"
 # Plafond minimum par devise. LISTE BLANCHE : une devise sans set_min_cap n'est PAS cotable
 # (quote et open_hedge refusent la devise).
 for c in "MXN 500" "BRL 700" "ARS 1500" "EUR 300"; do
