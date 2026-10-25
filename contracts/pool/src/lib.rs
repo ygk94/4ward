@@ -108,12 +108,15 @@ impl Pool {
 
     // ---- Vault ----
 
-    /// Dépose des USDC dans le pool. Retourne le nouveau solde du LP.
+    /// Dépose `amount` USDC (7 décimales) dans le pool contre des parts au prix plein.
+    /// Retourne le nombre de parts du LP après le dépôt (7 décimales).
     pub fn deposit_lp(env: Env, lp: Address, amount: i128) -> i128 {
         vault::deposit(&env, &lp, amount)
     }
 
-    /// Retire des USDC, limité au capital non réservé.
+    /// Brûle `amount` PARTS du LP et lui verse leur valeur au prix de sortie
+    /// ((TotalDeposits - Reserved) / TotalShares), donc jamais plus que le capital libre.
+    /// Retourne l'USDC versé (7 décimales).
     pub fn withdraw(env: Env, lp: Address, amount: i128) -> i128 {
         vault::withdraw(&env, &lp, amount)
     }
@@ -123,8 +126,29 @@ impl Pool {
         vault::capacity(&env)
     }
 
+    /// Valeur en USDC des parts du LP au prix de sortie (ce qu'il recevrait en retirant tout).
     pub fn lp_balance(env: Env, lp: Address) -> i128 {
         vault::balance(&env, &lp)
+    }
+
+    /// Parts détenues par le LP (7 décimales).
+    pub fn lp_shares(env: Env, lp: Address) -> i128 {
+        vault::lp_shares(&env, &lp)
+    }
+
+    /// Prix plein d'une part en USDC (7 décimales) : TotalDeposits / TotalShares.
+    pub fn share_price(env: Env) -> i128 {
+        vault::share_price(&env)
+    }
+
+    /// Prix de sortie d'une part en USDC (7 décimales) : (TotalDeposits - Reserved) / TotalShares.
+    pub fn exit_price(env: Env) -> i128 {
+        vault::exit_price(&env)
+    }
+
+    /// Capital des LPs (TotalDeposits), en USDC.
+    pub fn total_assets(env: Env) -> i128 {
+        vault::total_assets(&env)
     }
 
     // ---- Pricing ----

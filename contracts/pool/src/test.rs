@@ -3,16 +3,7 @@
 //! Scénario commun : 1 000 000 MXN, spot 0.055 USD/MXN, plafond 10 %, oracle = mock-oracle.
 
 // ---- Vault ----
-
-#[test]
-#[ignore = "TODO vault: dépôt puis retrait, soldes et TotalDeposits à jour"]
-fn vault_deposit_withdraw() {}
-
-#[test]
-#[ignore = "TODO vault: retrait refusé au-delà du capital non réservé"]
-fn vault_withdraw_limited_to_capacity() {}
-
-// reserve / release / book_gain / book_loss : tests dans vault.rs (mod tests).
+// Tests dans vault.rs (mod tests) : parts LP, dépôts / retraits, reserve / release / book_*.
 
 // ---- Pricing ----
 
