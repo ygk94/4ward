@@ -98,6 +98,7 @@ Règles de calcul : tout en `i128`, **arrondis en faveur du pool** (P&L payé pa
 - ✅ Tests `open_*` / `settle_*` recalés sur le vrai taux bloqué (0,0552750 à 60 s) ; tests d'événements adaptés aux événements du vault
 - ✅ `open` utilise `pricing::margin_for` (marge identique à celle de `quote`, demandé par Pricing)
 - ✅ Chiffres du script vidéo et de `payment-cli.md` recalculés avec le vrai Pricing (spot 0,055)
+- ✅ Parcours rejoué sur testnet avec le code fusionné (mon déploiement, commandes de `docs/payment-cli.md` telles quelles) : coût total 56 072,50 au centime, codes #200 / #201 / #202 vus sur le réseau
 - ⬜ Rejouer le parcours sur le déploiement d'Hugo (commandes `docs/payment-cli.md`)
 - ⬜ Vérifier les chiffres affichés par le front contre ceux de la CLI
 

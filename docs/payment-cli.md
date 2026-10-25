@@ -173,3 +173,25 @@ Avec un autre spot (mock aligné sur Reflector), recalculer avec `docs/video-scr
 | 6 | Path payment : 1 000 000 MXN au fournisseur pour 59 400 USDC | [7a1913d8…](https://stellar.expert/explorer/testnet/tx/7a1913d8cff6b26bb9435e728859564b8866d9f9b8c2bc527cf4a64e72f3c488) |
 
 Bilan Lucía : 200 000 → 145 130 USDC, soit **54 870 = le prix figé** (taux du stub de Pricing, 0,05487). Fait avant le branchement du vrai Vault et du vrai Pricing ; depuis, les tests Paiement passent sur le code fusionné.
+
+## Répétition du 25/10 sur le code fusionné (vrai Vault + vrai Pricing, crash +12 %)
+
+Déploiement de Clément refait avec `./scripts/setup-testnet.sh` de `main` (taux, plafonds minimum, dépôt LP de 1 000 000 USDC).
+
+| # | Transaction | Résultat | Lien |
+|---|---|---|---|
+| 0 | `set_price` 0,055 (prix frais) | | [bf99fec1…](https://stellar.expert/explorer/testnet/tx/bf99fec1480132cd932a0798039ea30fb8d8aa05bcbfb1e9ceb4bfda4053f0d8) |
+| — | `quote` (lecture) | taux 0,0552750, marge 5 527,50 | |
+| 2 | `open_hedge` → id 0 | `position_reserved` + `hedge_opened`, même marge que `quote` | [3d068ca7…](https://stellar.expert/explorer/testnet/tx/3d068ca7e79f85a9b08fdb4344b7429ccb6e9dae3f6ca2fa7c46ca004cd004e6) |
+| 3 | `set_price` +12 % | 0,0616 | [1cf406da…](https://stellar.expert/explorer/testnet/tx/1cf406daba881d15b77243e56239bdb31b363a13e4711ecee76de2f4bc73d2dd) |
+| — | `settle` 20 s après l'ouverture | refusé `#202 NotMatured` (simulation, rien envoyé) | |
+| 5 | Offre DEX réalignée (`616000:10000000`) | 0,0616 | [db3e392d…](https://stellar.expert/explorer/testnet/tx/db3e392d01bc1440dd9a72fd4cc6b4fe542896a7ae902706b36edffcd8c0373f) |
+| 6 | Path payment 1 000 000 MXN | 61 600 USDC débités | [2fb310c3…](https://stellar.expert/explorer/testnet/tx/2fb310c3bc141cead47b977f1417a8cf8991764882fb5a9e8fa2baa83302fc0f) |
+| 4 | `set_price` +12 % (rafraîchi) puis `settle` | `position_released` + `hedge_settled` : P&L plafonné 5 527,50, versé 11 055 | [0e7ff537…](https://stellar.expert/explorer/testnet/tx/0e7ff5373925826af2df7b069d9d7e213d7f7240a5a5056053c13b593d995507) |
+| — | 2ᵉ `settle` / id 42 | `#201 AlreadySettled` / `#200 UnknownHedge` | |
+
+Bilan Lucía : 545 130 → 489 057,50 USDC, soit **56 072,50** (le chiffre du script vidéo ; sans protection : 61 600).
+Après `settle` : USDC du pool = `total_assets` = `capacity` = 994 472,50, exposition MXN à 0.
+
+Note Windows : `setup-testnet.sh` appelle `python3`, qui sous Windows ouvre le Microsoft Store. Contournement : un alias `python3` → `python` dans le `PATH` le temps du script.
+
