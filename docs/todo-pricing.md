@@ -10,20 +10,20 @@ Légende : ⬜ à faire · 🔴 bloque quelqu'un d'autre · ✅ fait
 
 ## 0. Environnement (avant tout)
 
-- ⬜ `curl https://sh.rustup.rs -sSf | sh` puis `rustup target add wasm32v1-none` (Rust ≥ 1.84)
-- ⬜ `brew install stellar-cli` (≥ 28) · `brew install pnpm` (ou `corepack enable`)
-- ⬜ `cargo test` à la racine : tout doit compiler (10 tests `#[ignore]`)
-- ⬜ `stellar contract build` : wasm de `pool` et `mock_oracle` dans `target/wasm32v1-none/release/`
-- ⬜ Récupérer `front/.env.local` auprès d'Hugo (ou `./scripts/setup-testnet.sh`), `cd front && pnpm install && pnpm dev`
-- ⬜ Freighter en Testnet, importer `fx-admin` (nécessaire pour le bouton crash) et `fx-lucia`
+- ✅ `curl https://sh.rustup.rs -sSf | sh` puis `rustup target add wasm32v1-none` (Rust ≥ 1.84)
+- ✅ `brew install stellar-cli` (≥ 28) · `brew install pnpm` (ou `corepack enable`)
+- ✅ `cargo test` à la racine : tout doit compiler (10 tests `#[ignore]`)
+- ✅ `stellar contract build` : wasm de `pool` et `mock_oracle` dans `target/wasm32v1-none/release/`
+- ✅ Récupérer `front/.env.local` auprès d'Hugo (ou `./scripts/setup-testnet.sh`), `cd front && pnpm install && pnpm dev`
+- ✅ Freighter en Testnet, importer `fx-admin` (nécessaire pour le bouton crash) et `fx-lucia`
 
 ---
 
 ## 1. Contrat `pricing.rs`
 
-### 1.1 🔴 `spot(env, currency) -> i128`
+### 1.1 ✅ `spot(env, currency) -> i128`
 Doit marcher **à l'identique** sur le mock-oracle et sur Reflector FX.
-- ⬜ Déclarer un client SEP-40 minimal via `soroban_sdk::contractclient` :
+- ✅ Déclarer un client SEP-40 minimal via `soroban_sdk::contractclient` :
   ```rust
   #[contracttype] pub enum Asset { Stellar(Address), Other(Symbol) }
   #[contracttype] pub struct PriceData { pub price: i128, pub timestamp: u64 }
@@ -31,11 +31,11 @@ Doit marcher **à l'identique** sur le mock-oracle et sur Reflector FX.
   pub trait Sep40 { fn lastprice(env: Env, asset: Asset) -> Option<PriceData>; fn decimals(env: Env) -> u32; }
   ```
   Les types doivent avoir exactement les mêmes noms/variantes que ceux du mock (`Asset::Other(Symbol)`, `PriceData{price,timestamp}`) pour que l'encodage XDR coïncide.
-- ⬜ Lire `DataKey::Oracle` dans l'instance, appeler `lastprice(Asset::Other(currency))`
-- ⬜ `None` → `panic!("no price")` ; `price <= 0` → panic
-- ⬜ Fraîcheur : `env.ledger().timestamp() - timestamp > MAX_AGE` → `panic!("stale price")`.
+- ✅ Lire `DataKey::Oracle` dans l'instance, appeler `lastprice(Asset::Other(currency))`
+- ✅ `None` → `panic!("no price")` ; `price <= 0` → panic
+- ✅ Fraîcheur : `env.ledger().timestamp() - timestamp > MAX_AGE` → `panic!("stale price")`.
   Reflector met à jour toutes les 300 s → `MAX_AGE = 900` (3 résolutions) laisse de la marge. Attention : le mock horodate au `set_price`, donc en test il faut avancer le ledger avec `env.ledger().set_timestamp(...)` **avant** `set_price`, ou re-setter le prix.
-- ⬜ (option) vérifier `decimals() == 14` une fois, ou documenter l'hypothèse. Reflector FX = 14, mock = 14.
+- ✅ (option) vérifier `decimals() == 14` une fois, ou documenter l'hypothèse. Reflector FX = 14, mock = 14.
 
 ### 1.2 🔴 `forward_rate(env, currency, side, duration_secs) -> i128`
 ```
