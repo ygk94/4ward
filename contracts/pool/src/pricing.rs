@@ -172,7 +172,6 @@ pub(crate) fn spot(env: &Env, currency: &Symbol) -> i128 {
 /// Panique `NoFixing` si l'oracle n'a pas de prix à cette date, `InvalidPrice` si prix ≤ 0, `StalePrice`
 /// si le dernier prix avant l'échéance a plus de `MAX_PRICE_AGE_SECS` (oracle non mis à jour).
 /// Appelée par `hedge::settle` avec l'échéance réelle (`hedge.maturity`).
-#[allow(dead_code)] // branchée dans hedge::settle par Paiement
 pub(crate) fn fixing(env: &Env, currency: &Symbol, maturity: u64) -> i128 {
     let oracle: Address = env.storage().instance().get(&DataKey::Oracle).unwrap();
     let data = OracleClient::new(env, &oracle)

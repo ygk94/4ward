@@ -491,6 +491,7 @@ mod pricing_tests {
 // ---- Paiement ----
 
 use crate::hedge::{self, HedgeError};
+use crate::pricing::PricingError;
 use crate::vault::VaultError;
 use crate::{Hedge, Pool, PoolClient, Side};
 use mock_oracle::{Asset as OracleAsset, MockOracle, MockOracleClient};
@@ -1066,4 +1067,51 @@ fn settle_needs_no_signature() {
     let paid = s.pool.set_auths(&[]).settle(&id);
     assert_eq!(paid, HEDGE_MARGIN + hedge::pnl(Side::BuyCurrency, NOTIONAL, HEDGE_LOCKED, SPOT_0, HEDGE_MARGIN));
     assert!(s.pool.get_hedge(&id).unwrap().settled);
+}
+
+/// Avance le ledger à `ts` et y pose le cours MXN du mock (l'historique garde la date).
+fn price_at(s: &Setup, ts: u64, price: i128) {
+    s.env.ledger().set_timestamp(ts);
+    set_spot(s, price);
+}
+
+#[test]
+fn settle_uses_rate_at_maturity() {
+    let s = setup();
+    let now = s.env.ledger().timestamp();
+    let id = open_funded(&s, Side::BuyCurrency);
+
+    // crash +12 % 10 s avant l'échéance : c'est lui qui compte
+    price_at(&s, now + MATURITY_IN - 10, 6_160_000_000_000);
+    // le peso retombe (−8 %) après l'échéance : ignoré, même si on règle maintenant
+    price_at(&s, now + MATURITY_IN + 60, 5_060_000_000_000);
+
+    let paid = s.pool.settle(&id);
+    assert_settled(&s, id, paid, 2 * HEDGE_MARGIN, -HEDGE_MARGIN);
+}
+
+#[test]
+fn settle_refused_when_rate_at_maturity_is_stale() {
+    let s = setup();
+    fund_pool(&s);
+    let now = s.env.ledger().timestamp();
+    // échéance à 2 000 s, aucun prix posé entre l'ouverture et l'échéance
+    let id = s.pool.open_hedge(&s.lucia, &s.supplier, &Symbol::new(&s.env, "MXN"), &Side::BuyCurrency, &NOTIONAL, &2_000, &1000);
+
+    // un prix frais après l'échéance ne rattrape pas un oracle muet à l'échéance
+    price_at(&s, now + 2_010, SPOT_0);
+    assert_eq!(s.pool.try_settle(&id), Err(Ok(contract_err(PricingError::StalePrice as u32))));
+}
+
+#[test]
+fn settle_refused_when_no_rate_at_maturity() {
+    let s = setup();
+    let now = s.env.ledger().timestamp();
+    let id = open_funded(&s, Side::BuyCurrency);
+
+    // 64 prix posés après l'échéance : l'historique du mock ne remonte plus jusqu'à elle
+    for i in 1..=64 {
+        price_at(&s, now + MATURITY_IN + i, SPOT_0);
+    }
+    assert_eq!(s.pool.try_settle(&id), Err(Ok(contract_err(PricingError::NoFixing as u32))));
 }

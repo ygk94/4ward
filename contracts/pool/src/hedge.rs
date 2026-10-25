@@ -3,7 +3,7 @@
 //! open : prix bloqué (pricing::forward_rate), contrôle du plafond (pricing::check_cap),
 //!        marge = to_usdc(notional, locked_rate) × cap_bps / BPS, transférée owner → contrat,
 //!        vault::open_position(&hedge) (réserve la marge, exposition par devise), stockage (+ extend_ttl), événement.
-//! settle : après l'échéance, spot = pricing::spot ; P&L = pnl(side, notional, locked, spot, marge)
+//! settle : après l'échéance, spot = pricing::fixing(maturity) (cours en vigueur à l'échéance) ; P&L = pnl(side, notional, locked, spot, marge)
 //!        (écart notional × (spot − locked), signe selon Side, borné à ±marge) ; vault::close_position(&hedge) puis book_gain / book_loss ;
 //!        transfert au propriétaire de marge ± P&L ; settled = true ; événement.
 //! Ensuite, côté front : path payment USDC → devise vers `supplier` pour exactement `notional`.
@@ -163,7 +163,8 @@ pub(crate) fn settle(env: &Env, hedge_id: u64) -> i128 {
         panic_with_error!(env, HedgeError::NotMatured);
     }
 
-    let spot = pricing::spot(env, &hedge.currency);
+    // cours en vigueur à l'échéance réelle, pas au moment de l'appel : personne ne choisit son moment
+    let spot = pricing::fixing(env, &hedge.currency, hedge.maturity);
     let pnl = pnl(hedge.side, hedge.notional, hedge.locked_rate, spot, hedge.margin);
 
     vault::close_position(env, &hedge);

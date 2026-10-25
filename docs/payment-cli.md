@@ -12,7 +12,8 @@ cd fistea-hackmeridian
 source .env.testnet          # ISSUER, USDC_SAC, POOL_ID, … du déploiement
 ```
 
-**Prix du mock frais.** Dès que le vrai Pricing est branché, `forward_rate` (dans `open_hedge`) et `settle` lisent le spot, refusé s'il a plus de 300 s. Relancer `set_price` **juste avant `open_hedge` et juste avant `settle`** :
+**Prix du mock frais avant `open_hedge`.** `forward_rate` lit le spot, refusé s'il a plus de 900 s (#302). Relancer `set_price` **juste avant `open_hedge`**.
+`settle` ne lit plus le spot mais le **fixing** : le cours en vigueur à l'échéance (`price(asset, maturity)` de l'oracle). Il faut donc un prix posé **dans les 900 s avant l'échéance** (le crash suffit), et rien à rafraîchir au moment du `settle`. Le mock doit être celui de `main` après le fixing (fonction `price` avec historique).
 
 ```sh
 stellar contract invoke --id fx-mock-oracle --source-account fx-admin --network testnet -- \
@@ -54,13 +55,14 @@ stellar contract invoke --id fx-mock-oracle --source-account fx-admin --network 
 
 ## 4. Règlement à l'échéance (n'importe quel compte)
 
-Attendre `duration_secs` après l'ouverture (`get_hedge` → champ `maturity`, en secondes Unix), prix du mock frais (§ 0), puis :
+Attendre l'échéance réelle (`get_hedge` → champ `maturity`, en secondes Unix ; en mode démo, durée / facteur), puis :
 
 ```sh
 stellar contract invoke --id fx-pool --source-account fx-supplier --network testnet -- \
   settle --hedge_id 0
 ```
 Retour : l'USDC versé à Lucía (marge ± P&L, entre 0 et 2 × marge). Effets : transfert USDC pool → Lucía, événement `hedge_settled` (spot de fixing, P&L, versement).
+Le cours utilisé est celui **en vigueur à l'échéance**, quel que soit le moment de l'appel : un prix posé après l'échéance ne compte pas. Régler peu après l'échéance : l'historique de Reflector ne remonte qu'à ~12 h, celui du mock à 64 prix (au-delà : #312).
 
 ## 5. Réaligner l'offre DEX sur le nouveau prix (fx-admin)
 
@@ -146,7 +148,8 @@ Les textes de `panic!` sont effacés dans le WASM déployé : le front ne reçoi
 | #306 `CurrencyNotEnabled` | Pricing | Devise non disponible |
 | #307 `CapBelowMinimum` | Pricing | Protection minimale pour cette devise : x % |
 | #308 `CapTooHigh` | Pricing | Protection trop élevée |
-| #312 `NoFixing` (à venir) | Pricing | Cours à l'échéance indisponible (règlement trop tardif) |
+| #312 `NoFixing` | Pricing | Cours à l'échéance indisponible (règlement trop tardif) |
+| #302 `StalePrice` au `settle` | Pricing | Aucun cours publié dans les 15 min avant l'échéance |
 | autres 300-311 | Pricing | voir `PricingError` dans `pricing.rs` |
 | `op_too_few_offers` | Path payment | Pas assez de liquidité sur le DEX pour ce montant |
 | `op_over_source_max` | Path payment | Le cours a bougé au-delà de `send-max` : relancer avec un devis à jour |

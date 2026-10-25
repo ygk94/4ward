@@ -64,7 +64,7 @@ Chiffres calculés avec le vrai Pricing (USD 4 %, MXN 7 %, spread 0,5 %) sur un 
 2. Offre DEX alignée sur ce prix (`docs/payment-cli.md` § 5).
 3. Pool financé (`deposit_lp`), Lucía avec assez d'USDC (prix figé + marge), fournisseur avec la trustline MXN.
 4. **Le crash doit avoir lieu avant l'échéance réelle** (5 min après l'ouverture) : avec le fixing, `settle` prend le cours en vigueur à l'échéance, un crash posé après ne compte pas. Couper l'attente au montage.
-5. Après le crash : **réaligner l'offre DEX sur +12 %** (fx-admin). Avec le fixing de Lancelot, plus besoin de rafraîchir le mock avant `settle` ; lancer `settle` peu après l'échéance (sur Reflector, l'historique ne remonte qu'à ~12 h : au-delà, erreur 312).
+5. Après le crash : **réaligner l'offre DEX sur +12 %** (fx-admin). `settle` utilise le cours en vigueur à l'échéance (fixing) : rien à rafraîchir avant `settle`, mais le crash doit dater de **moins de 15 min avant l'échéance** et `settle` doit partir peu après l'échéance (historique de Reflector ~12 h, du mock 64 prix : au-delà, erreur 312). Le mock doit être redéployé avec la fonction `price` (Hugo).
 6. Freighter sur **Testnet**, compte `fx-lucia` importé ; fermer les autres onglets et notifications.
 7. Garder en secours le parcours CLI (`docs/payment-cli.md`) : si un écran plante, terminal + stellar.expert pour la partie 4.
 
