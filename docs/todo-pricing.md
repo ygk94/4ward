@@ -5,12 +5,15 @@
 > On ne touche pas à `lib.rs`, `hedge.rs`, `vault.rs`, `shared/` : on demande.
 > Deadline : **lundi 26/10 12h00**. Vidéo enregistrée par Hugo **avant 10h**.
 
-## État au 25/10, ~21h30
+## État au 25/10, ~23h
 
-- ✅ **Contrat Pricing complet et dans `main`** (codes d'erreur 300-311 compris, mergés par Hugo : `ea323b2`). 112 tests verts sur toute la suite, 0 ignoré ; les tests de Clément tournent sur le vrai Pricing.
-- ✅ **Testnet redéployé sur `main`** (`f3d65cd`), `set_rate` / `set_min_cap` / EUR dans le setup. `quote` sur le nouveau pool (`CAQY7OYO…`) vérifié : forward `5487305413412`, coût `548730541341`, marge `54873054135` = valeurs de référence exactes.
-- ✅ **Fixing à l'échéance** côté Pricing + historique du mock (§8.1) ; Clément branche `settle` dessus.
-- ⬜ 🔴 **Reste côté Pricing, par priorité** : ~~`crash.sh` (§4.1)~~ ✅ · ~~mémo front pour Hugo (§3)~~ ✅ · ~~`sim/` (§4.2)~~ ✅ · slides et objections (§6, §7).
+- ✅ **Tout le contrat est dans `main`** et redéployé (`6d760a1`) : Pricing (fixing, erreurs 300-312), Paiement (`settle` au fixing, `time_factor` 25 920), tranches. 143 tests verts. `crash.sh` et le mémo front mergés.
+- ✅ **`sim/` commité** (`a6a56e0`, local) ; **`sync-rates.sh` commité** (`7e8aee4`, local). Rien de poussé depuis.
+- ✅ **Décision d'Hugo (25/10 soir)** : taux Etherfuse adoptés et **figés** via un fichier commité `scripts/rates.snapshot` ; `setup-testnet.sh` lit ce fichier et n'appelle plus l'API. Push sur `feat/pricing` (pas `main`) ; Hugo merge, redéploie et fige les chiffres.
+- ⬜ 🔴 **En cours : §9** (snapshot des taux, puis chiffres figés partout).
+- ⬜ Ensuite : slides et objections (§6, §7) · écriture réelle de `crash.sh` par Hugo (§4.1).
+
+**Chiffres de référence de la démo (taux Etherfuse 25/10 : USD 360, MXN 555, spot 0,055, 90 j, ±10 %)** : forward `5501281368668` · prix figé **55 012,81** · dépôt **5 501,28** · payé après +12 % **56 098,72** (sans protection 61 600). Forward sans spread `5473911809619` (0,05474). Anciens chiffres (taux en dur 400/700) : 54 873,05 / 5 487,31 / 56 112,69.
 
 Légende : ⬜ à faire · 🔴 bloque quelqu'un d'autre · ✅ fait
 
@@ -206,9 +209,9 @@ Une commande : `~/.venvs/fistea-sim/bin/python sim/run_all.py` (venv hors du dé
 - ✅ Correspondance : USD ← USTRY · MXN ← CETES · BRL ← TESOURO · EUR ← EUROB · GBP ← GILTS avec `--all` seulement (pas de `set_min_cap`, donc non cotable). ARS n'existe pas chez Etherfuse : taux en dur 2200. MEX et MEXE (à 0) ignorés.
 - ✅ Valeurs du 25/10 : USD 360 · MXN 555 · BRL 1148 · EUR 210 (GBP 351), contre 400 / 700 / 1050 / 200 en dur.
 - ✅ Repli par devise sur le taux en dur (en jaune) si l'API ne répond pas (timeout 10 s, HTTP en erreur), JSON invalide, champ absent, valeur à 0 ou hors de ]0, 5000] bps. Toutes en repli : avertissement, code de sortie 0.
-- ✅ `--dry-run`, `--all`, `--help` ; alias `POOL` / `ADMIN` / `NET` (repli sur `$POOL_ID`). Appelé par `setup-testnet.sh` juste après la boucle de taux en dur, sans bloquer.
+- ✅ `--dry-run`, `--all`, `--snapshot`, `--help` ; alias `POOL` / `ADMIN` / `NET` (repli sur `$POOL_ID`). **N'est plus appelé par `setup-testnet.sh`** (décision d'Hugo, §9) : le setup lit `scripts/rates.snapshot`.
 - ✅ Pas de getter `Rate` (interface figée) : le tableau affiche le taux en dur de référence, l'effet se vérifie par un `quote` en simulation.
-- ⬜ Écriture réelle sur le déploiement officiel par Hugo (fx-admin absent de la machine de Lancelot) : `./scripts/sync-rates.sh`, puis `quote` MXN BuyCurrency 1 000 000 MXN / 90 j / cap 1000 (avant : forward `5487305413412`).
+- ⬜ ~~Écriture réelle par Hugo via `./scripts/sync-rates.sh`~~ → remplacé par le snapshot (§9) : `set_rate` est fait par `setup-testnet.sh` à partir de `scripts/rates.snapshot`.
 - **Fréquence** : une fois par jour suffit. Le rendement suit les banques centrales et les adjudications hebdomadaires ; le prix du token, lui, monte en continu mais ne nous sert pas.
 - **Limite assumée** : oracle centralisé, il faut faire confiance à l'admin qui pousse et à l'API Etherfuse. Suite logique : un taux publié onchain, lu directement par le contrat.
 
@@ -322,16 +325,37 @@ La vidéo raconte 90 j (54 873 USDC) mais ouvre à 60 s (≈ 55 275 USDC). Optio
 - ⬜ Donner notre avis : côté Pricing, b ne demande **rien** (`forward_rate` prend la durée annoncée) ; c'est le calcul de `maturity` dans `hedge.rs` qui change. b montre l'écart forward / spot, le cœur du pricing.
 
 ### 8.3 ⬜ Etherfuse (rendement du capital libre, attribué à Pricing dans `TODO.md`)
+- ✅ 25/10 soir : Etherfuse adopté pour les **taux d'intérêt** (push oracle figé, §9). Le **placement** du capital libre reste à trancher ci-dessous.
 - ⬜ Décision avec Hugo. Recommandation : **USDC pur pour la soumission**, Etherfuse au pitch (déjà dans « À dire dans la présentation » + point 26 de `TODO.md`). Les points 21-24 touchent `vault.rs` et l'invariant, risqués la veille de la soumission. Au mieux : `mock-stablebond` + interface d'adaptateur, sans brancher le vault.
 
 ---
 
-## Ordre d'attaque (mis à jour le 25/10 ~21h30)
+## 9. 🔴 Taux Etherfuse figés (décision d'Hugo, 25/10 soir)
+
+Condition d'Hugo : **`setup-testnet.sh` n'appelle pas l'API**. `sync-rates.sh` écrit les taux dans un fichier commité, le setup le lit ; on ne relance `sync-rates.sh` qu'exprès.
+
+- ✅ `sync-rates.sh --snapshot` : **écrit `scripts/rates.snapshot`** (une ligne par devise : devise, bps, date, source ; ARS 2200 en dur avec sa source BCRA) **sans appeler `set_rate`** (pas besoin de fx-admin pour écrire le fichier). Le mode `set_rate` direct reste disponible, explicite. Refuse d'écrire si aucun taux Etherfuse n'est utilisable (l'ancien snapshot reste).
+- ✅ `setup-testnet.sh` (accord d'Hugo) : plus d'appel à `sync-rates.sh` ni à l'API ; lit `scripts/rates.snapshot` → `set_rate` par devise ; repli sur les taux en dur si le fichier manque ou est vide. Lecture testée sous le bash 3.2 de macOS (snapshot / absent / vide).
+- ✅ **Un seul lancement** le 25/10 à 22:47 UTC : USD 360 · MXN 555 · BRL 1148 · ARS 2200 (en dur) · EUR 210, inchangés depuis le premier relevé, donc les chiffres annoncés par Hugo tiennent. ⚠️ Vérifier que l'API donne toujours USD 360 / MXN 555 : sinon les chiffres annoncés par Hugo (55 012,81 / 5 501,28 / 56 098,72) changent → recalculer et le prévenir **avant** qu'il fige.
+- ✅ Contrôle croisé : `sim/contract.py` avec les taux du snapshot (identiques au jeu `etherfuse`) retrouve exactement forward `5501281368668`, 55 012,81, 5 501,28, 56 098,72.
+- ⬜ Commit + **push sur `feat/pricing`** (pas `main`) : `7e8aee4` (sync-rates), `a6a56e0` (sim), le snapshot et le setup. Prévenir Hugo.
+- ⬜ Après le redéploiement d'Hugo : `quote` MXN 1 000 000 / 90 j / ±10 % en simulation = forward `5501281368668`, coût `550128136866`, marge `55012813687`.
+- ⬜ Chiffres figés partout (demande d'Hugo) :
+  - ⬜ `README.md` (accord d'Hugo) : 54 873 → 55 012,81, 5 487 → 5 501,28, 56 112,69 → 56 098,72, et les phrases qui disent « prix figé sous le cours du jour » (avec ces taux, le prix figé spread compris est **au-dessus** du spot : l'écart de taux sur 90 j, 0,48 %, est plus petit que le spread de 0,5 %).
+  - ⬜ `sim/` : `--rates etherfuse` par défaut (ou lu depuis `scripts/rates.snapshot`), régénérer `out/` (graphiques compris).
+  - ⬜ `docs/memo-front-pricing.md` : valeurs de référence (§2, §3, §8).
+  - ⬜ `scripts/crash.sh` : constantes du prorata `5487305` / `5611269` → `5501281` / `5609872`.
+  - ⬜ Cette to-do : §1.5 (sources des taux), §6 (exemple de slide : 0,0550 → **0,05474** sans spread, puis +0,5 % de spread).
+  - Clément (demandé par Hugo) : `docs/video-script.md`, `docs/payment-cli.md`.
+
+---
+
+## Ordre d'attaque (mis à jour le 25/10 ~23h)
 
 | Quand | Quoi |
 |---|---|
-| ~~Dim. après-midi / soir~~ | ~~§1 contrat · §2 tests · §5 setup · codes d'erreur~~ ✅ |
-| ~~Maintenant~~ | ~~§8.1 fixing + historique du mock~~ ✅ |
-| Ensuite | §4.1 `crash.sh` (`--refresh`, `--reset`) · §3 mémo front pour Hugo · §8.3 décision Etherfuse avec Hugo |
-| Nuit | §4.2 `sim/` · §6 et §7 slides et objections → à Hugo |
-| Lun. 8h–10h | Aligner le mock sur Reflector avant la vidéo (commande `crash.sh --reset` pour Hugo) · relecture |
+| ~~Dim. soir~~ | ~~§1 contrat · §2 tests · §5 setup · codes d'erreur · §8.1 fixing · §4.1 crash.sh · §3 mémo front · §4.2 sim/ · §4.3 sync-rates~~ ✅ |
+| **Maintenant** | §9 : snapshot des taux + setup qui le lit → un lancement → contrôle des chiffres → push `feat/pricing` → prévenir Hugo |
+| Après le redéploiement d'Hugo | §9 : vérifier `quote`, puis chiffres figés dans README, sim/, mémo, crash.sh, to-do |
+| Nuit | §6 et §7 slides et objections → à Hugo |
+| Lun. 8h–10h | `crash.sh --reset` / `--refresh` par Hugo avant la vidéo · relecture |

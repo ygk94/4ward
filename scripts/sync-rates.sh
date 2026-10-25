@@ -3,12 +3,13 @@
 #   ./scripts/sync-rates.sh            USD ← USTRY, MXN ← CETES, BRL ← TESOURO, EUR ← EUROB ; ARS garde son taux en dur
 #   ./scripts/sync-rates.sh --all      ajoute GBP ← GILTS
 #   ./scripts/sync-rates.sh --dry-run  calcule et affiche tout, sans envoyer set_rate
+#   ./scripts/sync-rates.sh --snapshot écrit les taux dans scripts/rates.snapshot (lu par setup-testnet.sh), sans set_rate
 # Repli sur le taux en dur de la devise si l'API ne répond pas, si la valeur manque, vaut 0 ou sort de ]0, 5000] bps.
 # Alias surchargeables : POOL=fx-pool ADMIN=fx-admin NET=testnet ETHERFUSE_URL=https://api.etherfuse.com/lookup/tokens/cost
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-usage() { sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; }
 
 say() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 warn() { printf '\033[33m   %s\033[0m\n' "$*"; }
@@ -17,11 +18,14 @@ die() { printf '\033[31mErreur : %s\033[0m\n' "$*" >&2; exit 1; }
 # ---- arguments ----
 DRY_RUN=0
 ALL=0
+SNAPSHOT=0
+SNAPSHOT_FILE=scripts/rates.snapshot
 for arg in "$@"; do
   case "$arg" in
     -h|--help) usage; exit 0 ;;
     --dry-run) DRY_RUN=1 ;;
     --all) ALL=1 ;;
+    --snapshot) SNAPSHOT=1 ;;
     *) die "option inconnue : $arg (voir --help)" ;;
   esac
 done
@@ -39,7 +43,7 @@ if [ -z "${POOL:-}" ]; then
   POOL=fx-pool
   stellar contract alias show "$POOL" --network "$NET" >/dev/null 2>&1 || POOL=${POOL_ID:-}
 fi
-[ -n "$POOL" ] || [ "$DRY_RUN" = 1 ] || die "pool introuvable : ni alias fx-pool ni POOL_ID dans .env.testnet (POOL=... pour le choisir)"
+[ -n "$POOL" ] || [ "$DRY_RUN" = 1 ] || [ "$SNAPSHOT" = 1 ] || die "pool introuvable : ni alias fx-pool ni POOL_ID dans .env.testnet (POOL=... pour le choisir)"
 
 # Devise, stablebond Etherfuse (- : aucun), taux en dur de référence en bps (- : aucun).
 # Taux en dur = ceux de setup-testnet.sh (Fed, Banxico, Selic, proxy BADLAR, BCE) : docs/todo-pricing.md §1.5
@@ -145,6 +149,28 @@ for n in ${NOTES[@]+"${NOTES[@]}"}; do warn "⚠️  $n"; done
 [[ " ${PUSH[*]} " != *" GBP "* ]] || echo "   GBP n'a pas de set_min_cap dans le setup : taux poussé, mais la devise reste non cotable."
 if [ "$N_EF" -eq 0 ]; then
   warn "⚠️  Aucun taux Etherfuse utilisable : toutes les devises restent sur leurs taux en dur."
+fi
+
+# ---- snapshot : taux figés pour setup-testnet.sh (aucun appel au pool) ----
+if [ "$SNAPSHOT" = 1 ]; then
+  [ "$N_EF" -gt 0 ] || die "aucun taux Etherfuse utilisable : snapshot non écrit (l'ancien est conservé)"
+  NOW=$(date -u '+%Y-%m-%dT%H:%MZ')
+  {
+    echo "# Taux d'intérêt annuels en bps, figés pour scripts/setup-testnet.sh (qui n'appelle pas l'API)."
+    echo "# Refaire exprès : ./scripts/sync-rates.sh --snapshot, puis relancer le setup et vérifier les chiffres de la démo."
+    echo "# Source : $ETHERFUSE_URL (current_basis_points) ; en_dur = docs/todo-pricing.md §1.5."
+    echo "# devise bps date source"
+    for t in "${TABLE[@]}"; do
+      set -- $t
+      [ "$5" = - ] && continue
+      if [ "$6" = etherfuse ]; then SRC="etherfuse:$2"; else SRC="en_dur"; fi
+      echo "$1 $5 $NOW $SRC"
+    done
+  } > "$SNAPSHOT_FILE"
+  say "Snapshot écrit : $SNAPSHOT_FILE"
+  sed 's/^/   /' "$SNAPSHOT_FILE"
+  [ "$N_FALLBACK" -eq 0 ] || warn "⚠️  $N_FALLBACK devise(s) en repli sur le taux en dur (voir ci-dessus)"
+  exit 0
 fi
 
 # ---- écriture ----

@@ -89,15 +89,26 @@ POOL=$(stellar contract deploy --wasm target/wasm32v1-none/release/pool.wasm \
 echo "   pool = $POOL"
 
 say "Paramètres Pricing (taux d'intérêt, plafonds minimum)"
-# Taux annuels en bps. Sources (oct. 2026) : Fed ≈ 4 %, Banxico ≈ 7 %, Selic ≈ 10,5 %, BCE ≈ 2 %,
-# ARS : pas de taux directeur BCRA, proxy BADLAR / plazo fijo ≈ 22 %. Détail : docs/todo-pricing.md §1.5
-for r in "USD 400" "MXN 700" "BRL 1050" "ARS 2200" "EUR 200"; do
+# Taux annuels en bps, figés dans scripts/rates.snapshot (rendements Etherfuse au jour du snapshot, ARS en dur) :
+# pas d'appel réseau ici. Le refaire exprès : ./scripts/sync-rates.sh --snapshot (les chiffres de la démo changent).
+# Repli si le snapshot manque ou est vide : Fed ≈ 4 %, Banxico ≈ 7 %, Selic ≈ 10,5 %, proxy BADLAR ≈ 22 %, BCE ≈ 2 %
+# (docs/todo-pricing.md §1.5).
+RATES=("USD 400" "MXN 700" "BRL 1050" "ARS 2200" "EUR 200")
+RATES_SRC="taux en dur (scripts/rates.snapshot absent ou vide)"
+if [ -f scripts/rates.snapshot ]; then
+  SNAP=()
+  while read -r c b _; do
+    if [[ $c =~ ^[A-Z]{3}$ && $b =~ ^[0-9]+$ ]]; then SNAP+=("$c $b"); fi
+  done < scripts/rates.snapshot
+  if [ ${#SNAP[@]} -gt 0 ]; then RATES=("${SNAP[@]}"); RATES_SRC="scripts/rates.snapshot"; fi
+fi
+echo "   taux : $RATES_SRC"
+for r in "${RATES[@]}"; do
   set -- $r
   stellar contract invoke --id $POOL --source-account $ADMIN --network $NET --quiet -- \
     set_rate --currency $1 --rate_bps $2 >/dev/null
+  echo "   $1 = $2 bps"
 done
-# Puis rendements des stablebonds Etherfuse par-dessus (push oracle) ; les taux en dur restent si l'API tombe.
-POOL=$POOL ADMIN=$ADMIN NET=$NET ./scripts/sync-rates.sh || echo "   taux en dur conservés"
 # Plafond minimum par devise. LISTE BLANCHE : une devise sans set_min_cap n'est PAS cotable
 # (quote et open_hedge refusent la devise).
 for c in "MXN 500" "BRL 700" "ARS 1500" "EUR 300"; do
