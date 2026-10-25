@@ -115,7 +115,7 @@ impl Pool {
     }
 
     /// Brûle `amount` PARTS du LP et lui verse leur valeur au prix de sortie
-    /// ((TotalDeposits - Reserved) / TotalShares), donc jamais plus que le capital libre.
+    /// ((valeur junior - Reserved) / TotalShares), donc jamais plus que le capital libre.
     /// Retourne l'USDC versé (7 décimales).
     pub fn withdraw(env: Env, lp: Address, amount: i128) -> i128 {
         vault::withdraw(&env, &lp, amount)
@@ -136,19 +136,41 @@ impl Pool {
         vault::lp_shares(&env, &lp)
     }
 
-    /// Prix plein d'une part en USDC (7 décimales) : TotalDeposits / TotalShares.
+    /// Prix plein d'une part junior en USDC (7 décimales) : valeur junior / TotalShares.
     pub fn share_price(env: Env) -> i128 {
         vault::share_price(&env)
     }
 
-    /// Prix de sortie d'une part en USDC (7 décimales) : (TotalDeposits - Reserved) / TotalShares.
+    /// Prix de sortie d'une part junior en USDC (7 décimales) : (valeur junior - Reserved) / TotalShares.
     pub fn exit_price(env: Env) -> i128 {
         vault::exit_price(&env)
     }
 
-    /// Capital des LPs (TotalDeposits), en USDC.
+    /// Capital des LPs, senior + junior (TotalDeposits), en USDC.
     pub fn total_assets(env: Env) -> i128 {
         vault::total_assets(&env)
+    }
+
+    /// Dépose `amount` USDC dans la tranche senior (rendement fixe, protégée par le junior).
+    /// Retourne le nombre de parts senior du LP après le dépôt (7 décimales).
+    pub fn deposit_senior(env: Env, lp: Address, amount: i128) -> i128 {
+        vault::deposit_senior(&env, &lp, amount)
+    }
+
+    /// Brûle `shares` PARTS senior du LP et lui verse leur valeur au prix courant.
+    /// Retourne l'USDC versé (7 décimales).
+    pub fn withdraw_senior(env: Env, lp: Address, shares: i128) -> i128 {
+        vault::withdraw_senior(&env, &lp, shares)
+    }
+
+    /// Valeur en USDC des parts senior du LP au prix courant.
+    pub fn senior_balance(env: Env, lp: Address) -> i128 {
+        vault::senior_balance(&env, &lp)
+    }
+
+    /// Valeur des deux tranches (senior + junior = total_assets) et prix d'une part senior.
+    pub fn tranche_values(env: Env) -> vault::TrancheValues {
+        vault::tranche_values(&env)
     }
 
     /// Exposition du pool sur une devise (couvertures ouvertes) : volumes acheteur / vendeur

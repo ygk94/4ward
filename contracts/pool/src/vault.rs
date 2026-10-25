@@ -20,6 +20,20 @@
 //! maximale d'une devise (deux couvertures de sens opposé, bloquées à des dates différentes,
 //! peuvent gagner toutes les deux contre le pool).
 //!
+//! Tranches : `TotalDeposits` = capital senior + capital junior.
+//! - Senior : parts dont le prix progresse au taux fixe `SENIOR_RATE_BPS` (intérêts simples entre
+//!   deux opérations senior, capitalisés à chaque `deposit_senior` / `withdraw_senior` dans
+//!   `SeniorPrice` / `SeniorUpdatedAt`). Valeur senior = parts × prix courant, plafonnée à
+//!   `TotalDeposits`.
+//! - Junior : le reste, `TotalDeposits − valeur senior`. Les parts LP historiques (`deposit_lp`,
+//!   `withdraw`) sont les parts junior : prix plein, prix de sortie et capacité se calculent sur
+//!   la valeur junior. `book_gain` / `book_loss` font bouger `TotalDeposits`, donc le junior
+//!   absorbe gains et pertes en premier, sans code de cascade.
+//! - Le rendement senior est payé par le junior : tant que le capital libre n'est pas placé,
+//!   il sort du capital junior.
+//! - Ratio minimum : tant qu'il y a des parts senior, junior ≥ `MIN_JUNIOR_BPS` du capital ;
+//!   un dépôt senior ou un retrait junior qui passerait dessous est refusé.
+//!
 //! Netting : `basket_max_loss` calcule la perte maximale exacte d'un panier de couvertures,
 //! mais n'est PAS branché sur la réserve. Conditions pour le brancher :
 //! 1. fixing commun à l'échéance : toutes les couvertures d'un panier réglées au même cours
@@ -63,6 +77,10 @@ pub enum VaultError {
     UnknownPosition = 109,
     /// Débordement d'un calcul (montant démesuré).
     Overflow = 110,
+    /// Dépôt senior ou retrait junior refusé : le junior passerait sous `MIN_JUNIOR_BPS` du capital.
+    JuniorRatioTooLow = 111,
+    /// Retrait de plus de parts senior que le LP n'en détient.
+    InsufficientSeniorShares = 112,
 }
 
 /// Clés de stockage propres au vault.
@@ -77,6 +95,26 @@ pub enum VaultKey {
     Exposure(Symbol),
     /// Limite d'une devise en bps du capital (persistent), absente = sans limite.
     CurrencyLimit(Symbol),
+    /// Parts senior d'un LP (persistent).
+    SeniorShares(Address),
+    /// Total des parts senior émises (instance).
+    SeniorTotalShares,
+    /// Prix d'une part senior à `SeniorUpdatedAt`, 18 décimales (instance).
+    SeniorPrice,
+    /// Horodatage (secondes) de la dernière capitalisation du prix senior (instance).
+    SeniorUpdatedAt,
+}
+
+/// Valeur des deux tranches en USDC (7 décimales). senior + junior = TotalDeposits.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TrancheValues {
+    /// Parts senior × prix courant, plafonné à TotalDeposits.
+    pub senior: i128,
+    /// TotalDeposits − senior : absorbe gains et pertes en premier.
+    pub junior: i128,
+    /// Prix courant d'une part senior, 7 décimales (1 USDC au premier dépôt).
+    pub senior_price: i128,
 }
 
 /// Exposition du pool sur une devise, couvertures ouvertes seulement (USDC, 7 décimales).
@@ -133,6 +171,26 @@ pub struct PositionReleased {
     pub margin: i128,
 }
 
+/// Un LP senior a déposé des USDC. `shares` = parts senior émises par ce dépôt.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SeniorDeposited {
+    #[topic]
+    pub lp: Address,
+    pub amount: i128,
+    pub shares: i128,
+}
+
+/// Un LP senior a brûlé `shares` parts senior contre `usdc`.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SeniorWithdrew {
+    #[topic]
+    pub lp: Address,
+    pub shares: i128,
+    pub usdc: i128,
+}
+
 /// L'admin a changé la limite d'une devise.
 #[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -150,6 +208,14 @@ const PRICE_ONE: i128 = 10_000_000;
 const DAY_IN_LEDGERS: u32 = 17_280;
 const TTL_THRESHOLD: u32 = 30 * DAY_IN_LEDGERS;
 const TTL_EXTEND_TO: u32 = 120 * DAY_IN_LEDGERS;
+
+/// Taux fixe du senior, en bps par an (intérêts simples entre deux opérations senior).
+pub(crate) const SENIOR_RATE_BPS: i128 = 450;
+/// Part minimale du junior dans le capital tant qu'il y a des parts senior (2 000 = 20 %).
+pub(crate) const MIN_JUNIOR_BPS: i128 = 2_000;
+/// Prix senior en 18 décimales : à 7 décimales, l'intérêt de quelques secondes s'arrondirait à 0.
+const SENIOR_PRICE_ONE: i128 = 1_000_000_000_000_000_000;
+const SECS_PER_YEAR: i128 = 31_536_000;
 
 /// `a × b / c` arrondi vers le bas, `Overflow` (110) au lieu d'une panique sans code.
 pub(crate) fn mul_div(env: &Env, a: i128, b: i128, c: i128) -> i128 {
@@ -227,10 +293,76 @@ fn free_capital(env: &Env) -> i128 {
     capacity(env).max(0)
 }
 
+// ---- tranches ----
+
+fn senior_total_shares(env: &Env) -> i128 {
+    env.storage().instance().get(&VaultKey::SeniorTotalShares).unwrap_or(0)
+}
+
+fn set_senior_total_shares(env: &Env, value: i128) {
+    env.storage().instance().set(&VaultKey::SeniorTotalShares, &value);
+}
+
+fn senior_shares(env: &Env, lp: &Address) -> i128 {
+    read_persistent(env, &VaultKey::SeniorShares(lp.clone())).unwrap_or(0)
+}
+
+fn set_senior_shares(env: &Env, lp: &Address, value: i128) {
+    let key = VaultKey::SeniorShares(lp.clone());
+    if value == 0 {
+        env.storage().persistent().remove(&key);
+    } else {
+        write_persistent(env, &key, &value);
+    }
+}
+
+/// Prix courant d'une part senior (18 décimales) : prix stocké + intérêts simples depuis
+/// `SeniorUpdatedAt`. 1 au premier dépôt.
+fn senior_price_now(env: &Env) -> i128 {
+    let s = env.storage().instance();
+    let stored: i128 = s.get(&VaultKey::SeniorPrice).unwrap_or(SENIOR_PRICE_ONE);
+    let updated_at: u64 = s.get(&VaultKey::SeniorUpdatedAt).unwrap_or(env.ledger().timestamp());
+    let elapsed = env.ledger().timestamp().saturating_sub(updated_at) as i128;
+    let rate_time = SENIOR_RATE_BPS.checked_mul(elapsed).unwrap_or_else(|| panic_with_error!(env, VaultError::Overflow));
+    add(env, stored, mul_div(env, stored, rate_time, BPS * SECS_PER_YEAR))
+}
+
+/// Capitalise les intérêts : à appeler avant toute opération senior, pour que chaque dépôt
+/// et chaque retrait se fasse au prix du moment (et non depuis le premier dépôt).
+fn accrue_senior(env: &Env) -> i128 {
+    let price = senior_price_now(env);
+    let s = env.storage().instance();
+    s.set(&VaultKey::SeniorPrice, &price);
+    s.set(&VaultKey::SeniorUpdatedAt, &env.ledger().timestamp());
+    price
+}
+
+/// Valeur senior = parts × prix courant, plafonnée au capital (le junior ne descend pas sous 0).
+fn senior_value(env: &Env) -> i128 {
+    let promised = mul_div(env, senior_total_shares(env), senior_price_now(env), SENIOR_PRICE_ONE);
+    promised.min(total_deposits(env).max(0))
+}
+
+/// Valeur junior = capital − valeur senior, ≥ 0.
+fn junior_value(env: &Env) -> i128 {
+    (total_deposits(env) - senior_value(env)).max(0)
+}
+
+/// Refuse un état où le junior serait sous `MIN_JUNIOR_BPS` du capital.
+/// À appeler seulement quand il y a (ou va y avoir) des parts senior.
+fn check_junior_ratio(env: &Env, junior: i128, total: i128) {
+    // junior / total ≥ MIN / BPS, en produits croisés : pas d'arrondi en défaveur du senior.
+    let lhs = junior.checked_mul(BPS).unwrap_or_else(|| panic_with_error!(env, VaultError::Overflow));
+    let rhs = total.checked_mul(MIN_JUNIOR_BPS).unwrap_or_else(|| panic_with_error!(env, VaultError::Overflow));
+    if lhs < rhs {
+        panic_with_error!(env, VaultError::JuniorRatioTooLow);
+    }
+}
+
 // ---- appelé par lib.rs (points d'entrée publics) ----
 
-/// Dépose `amount` USDC contre des parts au prix plein, arrondi vers le bas.
-/// Retourne les parts du LP après le dépôt.
+/// Dépose `amount` USDC contre des parts junior au prix plein (valeur junior / parts junior),
+/// arrondi vers le bas. Retourne les parts du LP après le dépôt.
 /// Erreurs : `InvalidAmount`, `PoolDepleted`, `DepositTooSmall`, `Overflow`.
 pub(crate) fn deposit(env: &Env, lp: &Address, amount: i128) -> i128 {
     lp.require_auth();
@@ -239,14 +371,15 @@ pub(crate) fn deposit(env: &Env, lp: &Address, amount: i128) -> i128 {
         panic_with_error!(env, VaultError::InvalidAmount);
     }
     let total = total_deposits(env);
+    let junior = junior_value(env);
     let shares_total = total_shares(env);
     let minted = if shares_total == 0 {
         amount
     } else {
-        if total == 0 {
+        if junior == 0 {
             panic_with_error!(env, VaultError::PoolDepleted);
         }
-        mul_div(env, amount, shares_total, total)
+        mul_div(env, amount, shares_total, junior)
     };
     if minted == 0 {
         panic_with_error!(env, VaultError::DepositTooSmall);
@@ -264,10 +397,12 @@ pub(crate) fn deposit(env: &Env, lp: &Address, amount: i128) -> i128 {
     shares
 }
 
-/// Brûle `shares` parts du LP et lui verse leur valeur au prix de sortie, arrondi vers le bas.
+/// Brûle `shares` parts junior du LP et lui verse leur valeur au prix de sortie
+/// ((valeur junior − Reserved) / parts junior), arrondi vers le bas.
 /// Le capital réservé n'est pas versé : le montant ne dépasse jamais `capacity()`.
 /// Retourne l'USDC versé.
-/// Erreurs : `InvalidAmount`, `InsufficientShares`, `WithdrawTooSmall`, `Overflow`.
+/// Erreurs : `InvalidAmount`, `InsufficientShares`, `WithdrawTooSmall`, `JuniorRatioTooLow`,
+/// `Overflow`.
 pub(crate) fn withdraw(env: &Env, lp: &Address, shares: i128) -> i128 {
     lp.require_auth();
     bump_instance(env);
@@ -284,11 +419,15 @@ pub(crate) fn withdraw(env: &Env, lp: &Address, shares: i128) -> i128 {
     if amount <= 0 {
         panic_with_error!(env, VaultError::WithdrawTooSmall);
     }
+    let total_after = total_deposits(env) - amount;
+    if senior_total_shares(env) > 0 {
+        check_junior_ratio(env, junior_value(env) - amount, total_after);
+    }
 
     // État mis à jour avant le transfert sortant.
     set_lp_shares(env, lp, owned - shares);
     set_total_shares(env, shares_total - shares);
-    set_total_deposits(env, total_deposits(env) - amount);
+    set_total_deposits(env, total_after);
 
     usdc(env).transfer(&env.current_contract_address(), lp, &amount);
     LpWithdrew { lp: lp.clone(), shares, usdc: amount }.publish(env);
@@ -310,13 +449,14 @@ pub(crate) fn lp_shares(env: &Env, lp: &Address) -> i128 {
     read_persistent(env, &VaultKey::Shares(lp.clone())).unwrap_or(0)
 }
 
-/// Prix plein d'une part : TotalDeposits / TotalShares (7 décimales), 1 USDC si aucune part.
+/// Prix plein d'une part junior : valeur junior / TotalShares (7 décimales), 1 USDC si aucune part.
+/// Sans senior, valeur junior = TotalDeposits.
 pub(crate) fn share_price(env: &Env) -> i128 {
     bump_instance(env);
-    price(env, total_deposits(env))
+    price(env, junior_value(env))
 }
 
-/// Prix de sortie d'une part : (TotalDeposits - Reserved) / TotalShares (7 décimales), ≥ 0.
+/// Prix de sortie d'une part junior : (valeur junior − Reserved) / TotalShares (7 décimales), ≥ 0.
 pub(crate) fn exit_price(env: &Env) -> i128 {
     bump_instance(env);
     price(env, free_capital(env))
@@ -340,10 +480,93 @@ fn usdc(env: &Env) -> token::Client<'_> {
     token::Client::new(env, &address)
 }
 
+/// Valeur junior − Reserved : seul le junior porte les couvertures. Sans senior,
 /// TotalDeposits − Reserved. Négatif seulement en cas de mauvais usage (voir `free_capital`).
 pub(crate) fn capacity(env: &Env) -> i128 {
     bump_instance(env);
-    total_deposits(env) - reserved(env)
+    junior_value(env) - reserved(env)
+}
+
+/// Dépose `amount` USDC contre des parts senior au prix courant (capitalisé à cet instant),
+/// arrondi vers le bas. Retourne les parts senior du LP après le dépôt.
+/// Erreurs : `InvalidAmount`, `DepositTooSmall`, `JuniorRatioTooLow`, `Overflow`.
+pub(crate) fn deposit_senior(env: &Env, lp: &Address, amount: i128) -> i128 {
+    lp.require_auth();
+    bump_instance(env);
+    if amount <= 0 {
+        panic_with_error!(env, VaultError::InvalidAmount);
+    }
+    let price = accrue_senior(env);
+    let minted = mul_div(env, amount, SENIOR_PRICE_ONE, price);
+    if minted == 0 {
+        panic_with_error!(env, VaultError::DepositTooSmall);
+    }
+    // Le dépôt ne change pas la valeur junior : seul le capital total grossit.
+    let new_total = add(env, total_deposits(env), amount);
+    let shares = add(env, senior_shares(env, lp), minted);
+    let new_senior_total = add(env, senior_total_shares(env), minted);
+    check_junior_ratio(env, junior_value(env), new_total);
+
+    usdc(env).transfer(lp, &env.current_contract_address(), &amount);
+
+    set_senior_shares(env, lp, shares);
+    set_senior_total_shares(env, new_senior_total);
+    set_total_deposits(env, new_total);
+    SeniorDeposited { lp: lp.clone(), amount, shares: minted }.publish(env);
+    shares
+}
+
+/// Brûle `shares` parts senior du LP et lui verse leur valeur (valeur senior × parts / parts
+/// senior totales), arrondi vers le bas. Le retrait senior ne touche pas la valeur junior,
+/// donc ni la capacité ni le ratio ne bougent. Retourne l'USDC versé.
+/// Erreurs : `InvalidAmount`, `InsufficientSeniorShares`, `WithdrawTooSmall`, `Overflow`.
+pub(crate) fn withdraw_senior(env: &Env, lp: &Address, shares: i128) -> i128 {
+    lp.require_auth();
+    bump_instance(env);
+    if shares <= 0 {
+        panic_with_error!(env, VaultError::InvalidAmount);
+    }
+    let owned = senior_shares(env, lp);
+    if shares > owned {
+        panic_with_error!(env, VaultError::InsufficientSeniorShares);
+    }
+    accrue_senior(env);
+    // shares ≤ owned ≤ SeniorTotalShares, donc SeniorTotalShares > 0.
+    let senior_total = senior_total_shares(env);
+    let amount = mul_div(env, shares, senior_value(env), senior_total);
+    if amount <= 0 {
+        panic_with_error!(env, VaultError::WithdrawTooSmall);
+    }
+
+    // État mis à jour avant le transfert sortant.
+    set_senior_shares(env, lp, owned - shares);
+    set_senior_total_shares(env, senior_total - shares);
+    set_total_deposits(env, total_deposits(env) - amount);
+
+    usdc(env).transfer(&env.current_contract_address(), lp, &amount);
+    SeniorWithdrew { lp: lp.clone(), shares, usdc: amount }.publish(env);
+    amount
+}
+
+/// Valeur en USDC des parts senior du LP au prix courant.
+pub(crate) fn senior_balance(env: &Env, lp: &Address) -> i128 {
+    bump_instance(env);
+    let senior_total = senior_total_shares(env);
+    if senior_total == 0 {
+        return 0;
+    }
+    mul_div(env, senior_shares(env, lp), senior_value(env), senior_total)
+}
+
+/// Valeur des deux tranches et prix courant d'une part senior (7 décimales).
+pub(crate) fn tranche_values(env: &Env) -> TrancheValues {
+    bump_instance(env);
+    let senior = senior_value(env);
+    TrancheValues {
+        senior,
+        junior: (total_deposits(env) - senior).max(0),
+        senior_price: mul_div(env, senior_price_now(env), PRICE_ONE, SENIOR_PRICE_ONE),
+    }
 }
 
 // ---- appelé par hedge.rs (interface Paiement → Vault) ----
@@ -1660,5 +1883,247 @@ mod tests {
         let mut h = make_hedge(&s, symbol_short!("MXN"), Side::BuyCurrency, MXN_1M, RATE_055, 1000);
         h.notional = 0;
         open_pos(&s, &h);
+    }
+
+    // ---- Tranches senior / junior ----
+
+    const YEAR: u64 = 31_536_000;
+
+    impl Setup {
+        /// Nouveau LP senior : reçoit `amount` USDC puis les dépose via `deposit_senior`.
+        fn new_senior(&self, amount: i128) -> Address {
+            let lp = Address::generate(&self.env);
+            self.mint(&lp, amount);
+            self.client().deposit_senior(&lp, &amount);
+            lp
+        }
+
+        fn advance_secs(&self, secs: u64) {
+            self.env.ledger().with_mut(|l| l.timestamp += secs);
+        }
+
+        /// Règle comptable des tranches : senior + junior = TotalDeposits, et le junior est
+        /// bien la base des prix et de la capacité. Complète `assert_invariant` (solde USDC).
+        fn assert_tranches(&self, owed_to_smes: i128) {
+            self.assert_invariant(owed_to_smes);
+            let t = self.client().tranche_values();
+            assert_eq!(t.senior + t.junior, self.total_deposits(), "senior + junior = TotalDeposits");
+            assert!(t.senior >= 0 && t.junior >= 0);
+            assert_eq!(self.client().capacity(), t.junior - self.reserved(), "capacité = junior − réservé");
+        }
+    }
+
+    /// Pool type : 200 000 junior, 800 000 senior (ratio minimum de 20 % tout juste respecté).
+    fn tranched() -> (Setup, Address, Address) {
+        let s = setup();
+        let junior = s.new_lp(200_000 * USDC);
+        let senior = s.new_senior(800_000 * USDC);
+        s.assert_tranches(0);
+        (s, junior, senior)
+    }
+
+    #[test]
+    fn hedge_loss_only_reduces_junior() {
+        let (s, junior, senior) = tranched();
+        let c = s.client();
+
+        settle_pool_loses_margin(&s, 5_500 * USDC);
+        s.assert_tranches(0);
+
+        let t = c.tranche_values();
+        assert_eq!(t.senior, 800_000 * USDC);
+        assert_eq!(t.junior, 194_500 * USDC);
+        assert_eq!(c.senior_balance(&senior), 800_000 * USDC);
+        assert_eq!(c.lp_balance(&junior), 194_500 * USDC);
+        // Prix de la part junior : 194 500 / 200 000.
+        assert_eq!(c.share_price(), 9_725_000);
+    }
+
+    #[test]
+    fn hedge_gain_only_raises_junior() {
+        let (s, junior, senior) = tranched();
+        settle_pool_gains_margin(&s, 4_400 * USDC);
+        s.assert_tranches(0);
+        assert_eq!(s.client().senior_balance(&senior), 800_000 * USDC);
+        assert_eq!(s.client().lp_balance(&junior), 204_400 * USDC);
+    }
+
+    #[test]
+    fn senior_value_grows_at_fixed_rate_paid_by_junior() {
+        let (s, junior, senior) = tranched();
+        let c = s.client();
+        s.advance_secs(YEAR);
+
+        // 800 000 × 4,5 % = 36 000, payés par le junior (capital libre non placé).
+        let t = c.tranche_values();
+        assert_eq!(t.senior, 836_000 * USDC);
+        assert_eq!(t.junior, 164_000 * USDC);
+        assert_eq!(t.senior_price, 10_450_000);
+        assert_eq!(c.senior_balance(&senior), 836_000 * USDC);
+        assert_eq!(c.lp_balance(&junior), 164_000 * USDC);
+        s.assert_tranches(0);
+
+        // Le senior retire tout : 836 000 versés, le junior garde 164 000.
+        assert_eq!(c.withdraw_senior(&senior, &(800_000 * USDC)), 836_000 * USDC);
+        assert_eq!(s.usdc_balance(&senior), 836_000 * USDC);
+        assert_eq!(c.tranche_values(), TrancheValues { senior: 0, junior: 164_000 * USDC, senior_price: 10_450_000 });
+        s.assert_tranches(0);
+    }
+
+    #[test]
+    fn capacity_is_junior_minus_reserved() {
+        let (s, _, _) = tranched();
+        let sme = Address::generate(&s.env);
+        s.open_margin(&sme, 10_000 * USDC);
+        // Le senior ne compte pas : 200 000 − 10 000.
+        assert_eq!(s.client().capacity(), 190_000 * USDC);
+        s.assert_tranches(10_000 * USDC);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #101)")]
+    fn senior_capital_cannot_back_hedges() {
+        let (s, _, _) = tranched();
+        s.vault(|env| reserve(env, 200_000 * USDC + 1));
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #111)")]
+    fn senior_deposit_below_junior_ratio_panics() {
+        let (s, _, _) = tranched();
+        // Junior déjà à 20 % pile : un stroop de senior de plus le ferait passer dessous.
+        s.new_senior(1);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #111)")]
+    fn first_senior_without_junior_panics() {
+        let s = setup();
+        s.new_senior(1_000 * USDC);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #111)")]
+    fn junior_withdraw_below_ratio_panics() {
+        let (s, junior, _) = tranched();
+        s.client().withdraw(&junior, &(1 * USDC));
+    }
+
+    #[test]
+    fn junior_withdraw_pays_exit_price_without_reserved_capital() {
+        let s = setup();
+        let junior = s.new_lp(300_000 * USDC);
+        s.new_senior(800_000 * USDC);
+        let sme = Address::generate(&s.env);
+        s.open_margin(&sme, 100_000 * USDC);
+
+        // Prix de sortie : (300 000 − 100 000) / 300 000 ; 30 000 parts → 20 000 USDC.
+        assert_eq!(s.client().withdraw(&junior, &(30_000 * USDC)), 20_000 * USDC);
+        assert_eq!(s.client().capacity(), 180_000 * USDC);
+        s.assert_tranches(100_000 * USDC);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #101)")]
+    fn junior_at_zero_blocks_new_hedges() {
+        let (s, _, senior) = tranched();
+        settle_pool_loses_margin(&s, 200_000 * USDC);
+        let t = s.client().tranche_values();
+        assert_eq!(t.junior, 0);
+        assert_eq!(t.senior, 800_000 * USDC);
+        assert_eq!(s.client().senior_balance(&senior), 800_000 * USDC);
+        assert_eq!(s.client().capacity(), 0);
+        s.assert_tranches(0);
+        s.vault(|env| reserve(env, 1));
+    }
+
+    #[test]
+    fn two_seniors_at_different_dates_each_earn_from_their_entry() {
+        let s = setup();
+        s.new_lp(1_000_000 * USDC);
+        let a = s.new_senior(800_000 * USDC);
+        let c = s.client();
+
+        // Un an plus tard, B entre au prix 1,045 : il reçoit moins de parts que A.
+        s.advance_secs(YEAR);
+        let b = s.new_senior(800_000 * USDC);
+        assert_eq!(c.tranche_values().senior_price, 10_450_000);
+        assert_eq!(s.vault(|env| senior_shares(env, &b)), 7_655_502_392_344);
+        s.assert_tranches(0);
+
+        // Encore un an : prix capitalisé à l'entrée de B, 1,045 × 1,045 = 1,092025.
+        // A a gagné deux ans, B un an : avec un seul « SeniorSince », B toucherait aussi deux ans.
+        s.advance_secs(YEAR);
+        assert_eq!(c.tranche_values().senior_price, 10_920_250);
+        // Arrondis vers le bas (en faveur du pool) : au plus 2 stroops sous la valeur exacte.
+        let near = |value: i128, exact: i128| value <= exact && exact - value <= 2;
+        let a_value = c.senior_balance(&a);
+        assert!(near(a_value, 873_620 * USDC), "A ≈ 800 000 × 1,092025 : {a_value}");
+        let b_value = c.senior_balance(&b);
+        assert!(near(b_value, 836_000 * USDC), "B ≈ 800 000 × 1,045 : {b_value}");
+        s.assert_tranches(0);
+
+        assert!(near(c.withdraw_senior(&a, &(800_000 * USDC)), 873_620 * USDC));
+        assert!(near(c.withdraw_senior(&b, &7_655_502_392_344), 836_000 * USDC));
+        assert_eq!(c.tranche_values().senior, 0);
+        s.assert_tranches(0);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #112)")]
+    fn withdraw_more_senior_shares_than_owned_panics() {
+        let (s, _, senior) = tranched();
+        s.client().withdraw_senior(&senior, &(800_000 * USDC + 1));
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #100)")]
+    fn deposit_senior_zero_panics() {
+        let (s, _, _) = tranched();
+        let lp = Address::generate(&s.env);
+        s.client().deposit_senior(&lp, &0);
+    }
+
+    #[test]
+    fn senior_value_capped_when_junior_is_exhausted() {
+        // Junior épuisé puis un an d'intérêts : le senior ne peut pas valoir plus que le capital.
+        let (s, _, senior) = tranched();
+        settle_pool_loses_margin(&s, 200_000 * USDC);
+        s.advance_secs(YEAR);
+        let t = s.client().tranche_values();
+        assert_eq!(t.senior, 800_000 * USDC);
+        assert_eq!(t.junior, 0);
+        assert_eq!(s.client().withdraw_senior(&senior, &(800_000 * USDC)), 800_000 * USDC);
+        s.assert_tranches(0);
+    }
+
+    #[test]
+    fn senior_deposit_and_withdraw_emit_events_and_extend_ttl() {
+        let s = setup();
+        s.new_lp(200_000 * USDC);
+        let lp = s.new_senior(800_000 * USDC);
+        assert_eq!(
+            s.env.events().all().filter_by_contract(&s.pool),
+            [SeniorDeposited { lp: lp.clone(), amount: 800_000 * USDC, shares: 800_000 * USDC }
+                .to_xdr(&s.env, &s.pool)]
+        );
+        assert_eq!(persistent_ttl(&s, &VaultKey::SeniorShares(lp.clone())), TTL_EXTEND_TO);
+
+        advance_days(&s, 100);
+        assert_eq!(s.client().senior_balance(&lp), 800_000 * USDC);
+        assert_eq!(persistent_ttl(&s, &VaultKey::SeniorShares(lp.clone())), TTL_EXTEND_TO);
+
+        s.client().withdraw_senior(&lp, &(100_000 * USDC));
+        assert_eq!(
+            s.env.events().all().filter_by_contract(&s.pool),
+            [SeniorWithdrew { lp, shares: 100_000 * USDC, usdc: 100_000 * USDC }.to_xdr(&s.env, &s.pool)]
+        );
+    }
+
+    #[test]
+    fn senior_balance_of_unknown_lp_is_zero() {
+        let s = setup();
+        assert_eq!(s.client().senior_balance(&Address::generate(&s.env)), 0);
+        assert_eq!(s.client().tranche_values(), TrancheValues { senior: 0, junior: 0, senior_price: PRICE_ONE });
     }
 }
