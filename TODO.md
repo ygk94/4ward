@@ -55,12 +55,12 @@ Légende : ✅ fait · ⬜ à faire · 🔴 bloquant pour les autres ou pour la 
 
 ## État au 25/10 soir
 
-- ✅ **Contrat complet et mergé dans `main`** : vault (phases 1 à 6), paiement (`open` / `settle` branchés sur le vault, codes 200-204), pricing (spot, taux forward, plafonds, liste blanche des devises). 96 tests verts, CI verte.
+- ✅ **Contrat complet et mergé dans `main`** : vault (phases 1 à 6), paiement (`open` / `settle` branchés sur le vault, codes 200-204), pricing (spot, taux forward, plafonds, liste blanche des devises). 112 tests verts (0 ignoré), CI verte.
 - ✅ **Testnet redéployé sur `main`** (IDs dans `.env.testnet`) ; parcours complet rejoué : devis 54 873,05 USDC sur 90 j, ouverture, crash +12 %, règlement plafonné (Lucía reçoit 11 055), paiement du fournisseur 1 000 000 MXN.
 - ⬜ 🔴 **Front** : en cours (Hugo).
 - ⬜ 🔴 **Vidéo, deck, nom, soumission.**
 
-**Points ouverts à trancher :** voir `docs/points-a-trancher.md` (fixing à l'échéance, durée de la démo vs prix affiché, codes d'erreur du Pricing).
+**Points ouverts à trancher :** voir `docs/points-a-trancher.md` (fixing à l'échéance, durée de la démo vs prix affiché ; codes d'erreur du Pricing réglés).
 
 ---
 
@@ -150,7 +150,7 @@ Commencer avec des données factices, brancher le contrat après le merge.
 2. ✅ `open` : `require_auth(owner)`, `pricing::check_cap`, `locked_rate = pricing::forward_rate`, marge = `to_usdc(notional, locked_rate) × cap_bps / BPS`, transfert de la marge, `vault::reserve(marge)`, stockage + `extend_ttl`
 3. ✅ Événements `open` / `settle` (pour le front et l'explorateur)
 5. ✅ Branché sur le vault (`open_position` / `close_position`), codes `HedgeError` 200-204
-6. ⬜ 🔴 Retirer les `#[ignore]` des 13 tests d'intégration : ajouter `set_rate` / `set_min_cap` dans leur préparation (liste blanche du Pricing)
+6. ✅ Retirer les `#[ignore]` des 13 tests d'intégration : ajouter `set_rate` / `set_min_cap` dans leur préparation (liste blanche du Pricing)
 7. ⬜ 🔴 Régler au **cours de fixing à l'échéance** (`pricing::fixing(currency, maturity)` de Lancelot) au lieu du spot au moment de l'appel : sinon option gratuite pour qui choisit quand régler
 4. ✅ (obsolète) Tant que Vault et Pricing ne sont pas prêts : remplacer leurs `panic!("TODO")` par des valeurs en dur en local, **sans les committer**
 
@@ -178,7 +178,7 @@ Un prix faux = arbitrage contre le pool : c'est ce qui rend le produit crédible
 5. ✅ `set_rate`, `set_spread` (admin, `require_auth`) avec des valeurs réalistes et sourcées : USD 4 %, MXN 7 %, BRL 10,5 %, ARS
 6. ✅ Tests du bloc Pricing : parité chiffrée (r_MXN 7 %, r_USD 4 %, 90 j → F ≈ 0,05460), sens du spread, plafond minimum
 7. ✅ Donner à Hugo les appels `set_rate` / `set_min_cap` à ajouter au script de setup
-8. ⬜ 🔴 Remplacer les `panic!("...")` (`currency not enabled`, `stale price`, `rate not set`…) par `#[contracterror] enum PricingError` (codes 300-399) : les textes sont effacés dans le WASM, le front ne peut pas les distinguer
+8. ✅ Remplacer les `panic!("...")` (`currency not enabled`, `stale price`, `rate not set`…) par `#[contracterror] enum PricingError` (codes 300-399) : les textes sont effacés dans le WASM, le front ne peut pas les distinguer
 9. ⬜ 🔴 `fixing(currency, maturity)` pour `settle` : lecture `price(asset, timestamp)` de Reflector ; historique des prix dans le mock-oracle (`price(asset, ts)`)
 
 ### Oracle et scripts

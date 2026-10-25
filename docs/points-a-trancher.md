@@ -1,6 +1,6 @@
 # Points à trancher
 
-État au 25/10 soir. Le contrat est complet dans `main` et le testnet est vérifié ; ces trois points restent ouverts.
+État au 25/10 soir. Le contrat est complet dans `main` et le testnet est vérifié. Points 1 et 2 ouverts, point 3 réglé.
 
 ---
 
@@ -39,7 +39,7 @@
 
 ---
 
-## 3. Codes d'erreur du Pricing
+## 3. ✅ Codes d'erreur du Pricing (réglé le 25/10 : PricingError 300-311, mergé)
 
 **Qui :** Lancelot
 
