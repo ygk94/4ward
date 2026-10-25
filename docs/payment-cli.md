@@ -211,3 +211,25 @@ Après `settle` : USDC du pool = `total_assets` = `capacity` = 994 472,50, expos
 
 Note Windows : `setup-testnet.sh` appelle `python3`, qui sous Windows ouvre le Microsoft Store. Contournement : un alias `python3` → `python` dans le `PATH` le temps du script.
 
+## Validation du fixing et du mode démo (25/10, code de `feat/payment` 9c37868)
+
+**Fixing** (couverture à 120 s, sans mode démo) : crash +12 % posé 115 s avant l'échéance, puis peso à −8 % posé après l'échéance.
+`lastprice` = 0,0506, `price(…, maturity)` = 0,0616 ; `settle` règle à **0,0616** et verse 2 × marge (11 054,99). Le prix posé après l'échéance est ignoré.
+[crash](https://stellar.expert/explorer/testnet/tx/ca073de883d271aca4422662587f3fb14b16564f8e951cb6006a8be2d74a57f0) ·
+[−8 % après l'échéance](https://stellar.expert/explorer/testnet/tx/48fb13e307b13a8a2210c6434754ab7e1b33c714f2be4433b9f79eb39ca8f334) ·
+[settle](https://stellar.expert/explorer/testnet/tx/3546c5095230fafa4c42b16445f8c3e03917c98be3bfc914025b909a5060639c)
+
+**Scénario de la vidéo** (mode démo 25 920, couverture à 90 jours, crash +12 %, `settle` sans rafraîchir le prix) :
+
+| # | Transaction | Résultat | Lien |
+|---|---|---|---|
+| 0 | `set_time_factor 25920` | événement `time_factor_set` | [ebfa2300…](https://stellar.expert/explorer/testnet/tx/ebfa2300b85ab6863d3cf765fdc17233512c6f728db3645dc1f93c10ca3b6ff2) |
+| — | `quote` 90 jours | taux 0,0548731, marge 5 487,31 | |
+| 2 | `open_hedge` 7 776 000 s → id 1 | même taux et marge, échéance réelle +300 s | [b1f9fdbd…](https://stellar.expert/explorer/testnet/tx/b1f9fdbd71adcb4ecce4f35e28cf7e0adcb2cb82f8a65022e68d5efd9ea64192) |
+| 3 | crash +12 % | avant l'échéance | [ffda98a4…](https://stellar.expert/explorer/testnet/tx/ffda98a465028fecaa8e896022118a8005c157f1c99172b2bee5f9b7d71d8c5a) |
+| 5 | offre DEX à 0,0616 | | [9858c368…](https://stellar.expert/explorer/testnet/tx/9858c368ddff73a9a5735815f927534bd942bec637a5f1a514c55519bd91dade) |
+| 6 | path payment 1 000 000 MXN | 61 600 USDC | [1361ff9b…](https://stellar.expert/explorer/testnet/tx/1361ff9b5626703364e53de0b4159ea904165b63d533e3a38a6319b7aefe6938) |
+| 4 | `settle` 10 s après l'échéance | fixing 0,0616, versé 10 974,61 | [bc3f506f…](https://stellar.expert/explorer/testnet/tx/bc3f506f54060c2bf18d897e30ac2a1a87d5908ca713ad956a4f7487388b62ef) |
+
+Coût total de Lucía : **56 112,69 USDC** au centime, le chiffre du script vidéo.
+

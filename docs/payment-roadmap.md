@@ -107,6 +107,7 @@ Règles de calcul : tout en `i128`, **arrondis en faveur du pool** (P&L payé pa
 
 - ✅ Point 2, durée de démo (option b) : `set_time_factor` / `time_factor` (admin, 1 par défaut, #205 si 0, événement `time_factor_set`) ; prix sur la durée annoncée, échéance réelle = durée / facteur (au moins 1 s). Démo : 25 920 → 90 jours en 300 s ; chiffres du script et de `payment-cli.md` passés à 90 jours
 - ✅ Point 1, fixing à l'échéance : `settle` appelle `pricing::fixing(env, &hedge.currency, hedge.maturity)` (feat/pricing de Lancelot fusionné dans feat/payment) ; tests : crash avant l'échéance compté et prix posé après ignoré, #302 si oracle muet à l'échéance, #312 si l'historique ne remonte plus ; `#[allow(dead_code)]` de `fixing` retiré
+- ✅ Validés sur testnet : fixing (prix posé après l'échéance ignoré) et scénario complet de la vidéo en mode démo (90 jours en 5 min, coût total 56 112,69 au centime)
 
 ---
 
