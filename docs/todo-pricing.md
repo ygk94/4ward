@@ -1,5 +1,6 @@
 # TODO Pricing — détaillé
 
+> Équipe : **Lancelot = Pricing** (cette to-do), **Clément = Paiement** (`feat/payment`), **Hugo = Vault** + transversal. Le tableau « Qui fait quoi » de `TODO.md` (fichier d'Hugo) est à mettre à jour avec ces noms.
 > Branche `feat/pricing`. Fichiers à nous : `contracts/pool/src/pricing.rs`, bloc Pricing de `contracts/pool/src/test.rs`, `front/src/pricing/`, `scripts/crash.sh`, `sim/`.
 > On ne touche pas à `lib.rs`, `hedge.rs`, `vault.rs`, `shared/` : on demande.
 > Deadline : **lundi 26/10 12h00**. Priorité absolue : `spot` + `forward_rate` + tests (bloque Paiement).
@@ -85,6 +86,20 @@ F = S × (1 + r_USD·t) / (1 + r_dev·t)      t = duration_secs / 31_536_000
 
 ---
 
+## 1bis. Retours de Clément (Paiement, commit 9d215de sur `feat/payment`) — à prendre en compte
+
+Ce que `hedge.rs` attend de nous est conforme à ce qu'on a livré : `spot`, `forward_rate` (formule du README, pas celle inversée du transcript du council), `check_cap`, `to_usdc` inchangée. Points d'action :
+
+- ⬜ 🔴 **Fraîcheur du prix pendant la démo** : `settle` appelle `spot`, qui refuse un prix de plus de `MAX_PRICE_AGE_SECS` = 900 s (Clément pense 300 s : lui préciser). Le mock horodate au `set_price`. Conséquence pour la vidéo : le crash (ou un simple « rafraîchir le cours ») doit avoir lieu **moins de 15 min avant `settle`**. À prévoir dans `CrashButton` (bouton « Rafraîchir le cours ») et dans `scripts/crash.sh` (`--refresh` : repose le même prix pour mettre à jour l'horodatage). Le dire à Clément pour son script vidéo.
+- ⬜ **Marge** : Clément arrondit déjà vers le haut (`to_usdc × cap_bps / BPS`, ceil), donc marge prélevée = marge affichée par `quote`. Lui proposer quand même d'appeler `pricing::margin_for(usdc_cost, cap_bps)` pour n'avoir qu'une seule formule.
+- ⬜ **Durée nulle** : `open` refuse `duration_secs == 0`, `quote` l'accepte. Dans `QuoteCard`, imposer une durée ≥ 1 s pour ne pas afficher un devis que `open_hedge` refusera.
+- ⬜ **Tests après merge** : Clément ajoute `mock-oracle` en dev-dependency de `contracts/pool/Cargo.toml`. Une fois mergé, on pourra remplacer notre `TestOracle` par le vrai `mock_oracle::MockOracle` dans `pricing_tests` (optionnel, gain de fidélité). Conflit attendu sur `test.rs` : nul si chacun reste dans son bloc, nos imports sont dans le module `pricing_tests`.
+- ⬜ **Après merge**, les tests `open_*` de Clément prendront le vrai `forward_rate` : lui donner les valeurs exactes (spot 0,055, 400/700 bps, 90 j, spread 50 → Buy 5_487_305_413_412 ; marge 10 % sur 1 M MXN = 54_873_054_135).
+- ⬜ **Setup testnet** : sans `set_min_cap`, **aucune devise n'est cotable** (liste blanche). Les appels `set_rate` / `set_min_cap` du §5 deviennent bloquants pour le parcours complet de Clément : les donner à Hugo dès maintenant.
+- ⬜ Point de vive voix avec Hugo (relayé par Clément) : ses clés de stockage Vault et l'API d'exposition par devise. Côté Pricing, on n'utilise que `Oracle`, `SpreadBps`, `Rate`, `MinCap` de `DataKey` : pas d'impact tant que `lib.rs` ne bouge pas.
+
+---
+
 ## 2. Tests (bloc Pricing de `test.rs`)
 
 Mise en place commune (helper dans le bloc Pricing, ne pas toucher aux autres blocs) :
@@ -159,7 +174,7 @@ Dépend de `shared/wallet.ts` et `shared/contract.ts` (Hugo, 🔴). En attendant
   ```sh
   for r in "USD 400" "MXN 700" "BRL 1050" "ARS 3500"; do set -- $r
     stellar contract invoke --id $POOL --source-account $ADMIN --network $NET --quiet -- set_rate --currency $1 --rate_bps $2; done
-  for c in "MXN 500" "BRL 700" "ARS 1500"; do set -- $c
+  for c in "MXN 500" "BRL 700" "ARS 1500"; do set -- $c   # sans set_min_cap la devise n'est PAS cotable (liste blanche)
     stellar contract invoke --id $POOL --source-account $ADMIN --network $NET --quiet -- set_min_cap --currency $1 --cap_bps $2; done
   ```
 - ⬜ À Hugo : dev-dependency `mock-oracle` dans `contracts/pool/Cargo.toml` (ou accord pour que je l'ajoute)
