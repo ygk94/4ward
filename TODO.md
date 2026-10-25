@@ -57,14 +57,15 @@ Légende : ✅ fait · ⬜ à faire · 🔴 bloquant pour les autres ou pour la 
 
 ### Contrat (`vault.rs`)
 
-**Principe :** le vault ne contient **que des dollars** (USDC). Chaque couverture se décompose en jambes contre l'USD : peso → yen = jambe USD/MXN + jambe USD/JPY. Le capital libre est placé en **stablebonds Etherfuse (USTRY, bons du Trésor US)** pour rapporter un rendement : Etherfuse remplace Blend.
+**Principe :** le vault ne contient **que des dollars** (USDC). Chaque couverture est une jambe devise contre USD, sur les devises de Reflector testnet (EUR, GBP, CHF, CAD, MXN, ARS, BRL, THB). Couvertures croisées (MXN → EUR) : plus tard. Option : placer le capital libre en **stablebonds Etherfuse (USTRY)** ; Etherfuse n'a pas d'actifs sur le testnet Stellar, on émet les nôtres et on le présente comme la cible mainnet.
+
+Checklist cochable : https://claude.ai/artifact/9hWHDQW8siGsCBVb3TZHmY
 
 **Invariant à tenir partout :** `USDC liquide + valeur USTRY = capital des LPs + Σ marges des couvertures ouvertes`
 
 #### Phase 0 — Préparation
 1. ⬜ Ne pas toucher `lib.rs` pour le stockage : définir ses propres clés (`enum VaultKey`) et ses erreurs (`#[contracterror] enum VaultError`, codes 100+) dans `vault.rs`
-2. ⬜ Recherche Etherfuse : docs.etherfuse.com, actif USTRY sur Stellar (émetteur, contrat), achat et rachat (API avec KYC, ou marché USTRY/USDC sur le DEX), existence d'un testnet. **Par défaut : mock sur testnet**
-3. ⬜ Prévenir Paiement et Pricing : les couvertures croisées (MXN → JPY) changent `open_hedge` (paire de devises au lieu d'une devise). Le JPY n'est pas dans Reflector testnet (EUR, GBP, CHF, CAD, MXN, ARS, BRL, THB, XAU) → mock-oracle
+2. ⬜ Aide de test qui vérifie l'invariant après chaque opération
 
 #### Phase 1 — Cœur comptable 🔴 (Paiement en dépend)
 4. ⬜ `reserve(m)` : erreur `InsufficientCapacity` si `m > capacity()`, sinon `Reserved += m`
@@ -80,14 +81,16 @@ Légende : ✅ fait · ⬜ à faire · 🔴 bloquant pour les autres ou pour la 
 12. ⬜ Nouveaux points d'entrée à ajouter dans `lib.rs` (ajout seulement, sans casser l'existant, prévenir l'équipe) : `share_price`, `lp_shares`, `total_assets`
 13. ⬜ Tests : un gain du pool fait monter le prix de la part ; dépôt après un gain = moins de parts ; retrait limité
 
-#### Phase 3 — Exposition par devise (multi-devises)
+#### Phase 3 — Exposition par devise (une devise par couverture pour l'instant)
 14. ⬜ Suivre l'exposition **nette** par devise contre l'USD : `Exposure(Symbol)` = volume acheteur − volume vendeur, en USD
 15. ⬜ API pour Paiement : `add_exposure(devise, montant_usd, sens)` / `remove_exposure(...)`, une fois par jambe
 16. ⬜ Règle de capacité avec netting : `Reserved = Σ |exposition nette par devise| × plafond`, à la place de la somme brute des marges (deux couvertures opposées ne consomment plus de capital)
 17. ⬜ Limite par devise : exposition nette ≤ x % du capital (ex. MXN 30 %, ARS 10 %), paramétrable par l'admin
-18. ⬜ Tests : MXN→USD + USD→MXN se compensent ; EUR→MXN et MXN→JPY se compensent sur la jambe MXN ; limite par devise refusée
+18. ⬜ Tests : un acheteur et un vendeur de MXN se compensent ; limite par devise refusée
 
-#### Phase 4 — Rendement Etherfuse (USTRY)
+#### Phase 4 — Rendement du capital libre (optionnel)
+
+0. ⬜ Décision : USDC pur (simple, les LPs ne gagnent que le spread) ou placement USTRY (~4 %/an en plus, KYC et délai de rachat en vrai). Regarder le sandbox d'API Etherfuse (`api.sand.etherfuse.com`)
 19. ⬜ Interface d'adaptateur de rendement : `invest(montant)`, `divest(montant)`, `value()` (pour pouvoir changer de source plus tard : Etherfuse, Blend…)
 20. ⬜ Contrat `contracts/mock-stablebond` pour le testnet : token USTRY dont la valeur de rachat monte avec le temps (~4 %/an), `buy(usdc)` / `redeem(ustry)`
 21. ⬜ `total_assets()` = USDC liquide (hors marges) + quantité d'USTRY × prix ; le capital des LPs devient calculé, et le rendement fait monter le prix de la part
