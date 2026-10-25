@@ -46,9 +46,9 @@ Règles de calcul : tout en `i128`, **arrondis en faveur du pool** (P&L payé pa
 
 ## 3. Script vidéo (3 min, 5 temps) 🔴
 
-- ⬜ Rédiger les 5 temps du § Démo du TODO : texte dit, écran montré, action, durée
-- ⬜ Chiffres exacts de la démo (facture, prix figé, marge, crash +12 %, coût avec et sans protection)
-- ⬜ Phrase honnête sur les 2 signatures (`settle` puis path payment, atomicité en roadmap)
+- ✅ (`docs/video-script.md`) Rédiger les 5 temps du § Démo du TODO : texte dit, écran montré, action, durée
+- ✅ Chiffres exacts de la démo (facture, prix figé, marge, crash +12 %, coût avec et sans protection)
+- ✅ Phrase honnête sur les 2 signatures (`settle` puis path payment, atomicité en roadmap)
 - ⬜ Livrer à Hugo
 
 ## 4. `open`
@@ -93,7 +93,13 @@ Règles de calcul : tout en `i128`, **arrondis en faveur du pool** (P&L payé pa
 
 ## 9. Après le merge
 
-- ⬜ Rejouer tout le parcours sur le pool redéployé par Hugo
+- ✅ `main` (Vault phases 5-6, Pricing de Lancelot) fusionné dans `feat/payment`, stubs supprimés
+- ✅ `#[ignore]` retirés : 111/111 tests sur le vrai Vault et le vrai Pricing (fixture : `set_rate` USD 4 % / MXN 7 %, `set_min_cap` MXN 5 %)
+- ✅ Tests `open_*` / `settle_*` recalés sur le vrai taux bloqué (0,0552750 à 60 s) ; tests d'événements adaptés aux événements du vault
+- ✅ `open` utilise `pricing::margin_for` (marge identique à celle de `quote`, demandé par Pricing)
+- ✅ Chiffres du script vidéo et de `payment-cli.md` recalculés avec le vrai Pricing (spot 0,055)
+- ✅ Parcours rejoué sur testnet avec le code fusionné (mon déploiement, commandes de `docs/payment-cli.md` telles quelles) : coût total 56 072,50 au centime, codes #200 / #201 / #202 vus sur le réseau
+- ⬜ Rejouer le parcours sur le déploiement d'Hugo (commandes `docs/payment-cli.md`)
 - ⬜ Vérifier les chiffres affichés par le front contre ceux de la CLI
 
 ---

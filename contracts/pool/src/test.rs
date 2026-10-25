@@ -463,6 +463,10 @@ fn setup<'a>() -> Setup<'a> {
 
     let pool_id = env.register(Pool, (&admin, &usdc_id, &oracle_id, 50u32));
     let pool = PoolClient::new(&env, &pool_id);
+    // paramètres Pricing du setup testnet : taux annuels et MXN ouverte (plafond minimum 5 %)
+    pool.set_rate(&Symbol::new(&env, "USD"), &400);
+    pool.set_rate(&Symbol::new(&env, "MXN"), &700);
+    pool.set_min_cap(&Symbol::new(&env, "MXN"), &500);
 
     Setup {
         usdc: TokenClient::new(&env, &usdc_id),
@@ -535,6 +539,14 @@ fn pnl_unchanged_spot_is_zero() {
     assert_eq!(hedge::pnl(Side::BuyCurrency, NOTIONAL, LOCKED, LOCKED, MARGIN), 0);
 }
 
+/// Taux bloqué réel de la couverture de démo (vrai Pricing, paramètres du setup testnet :
+/// USD 4 %, MXN 7 %, spread 0,5 %, 60 s) : spot 0.055 → F = 0.05499999686, × 1,005 = 0.0552749968.
+const HEDGE_LOCKED: i128 = 5_527_499_684_504;
+/// Coût figé en USDC de 1 000 000 MXN à ce taux : 55 274,99 USDC.
+const HEDGE_COST: i128 = 552_749_968_450;
+/// Marge du plafond 10 % (`margin_for`, arrondie vers le haut) : 5 527,50 USDC.
+const HEDGE_MARGIN: i128 = 55_274_996_845;
+
 /// Capital des LPs dans le pool : 100 000 USDC.
 const LP_CAPITAL: i128 = 1_000_000_000_000;
 /// Solde USDC de Lucía avant sa marge : 200 000 USDC.
@@ -573,7 +585,8 @@ fn pool_books(s: &Setup) -> (i128, i128) {
 /// Vérifie l'état après `settle` : versement à Lucía, P&L du pool, capital libéré, couverture close.
 fn assert_settled(s: &Setup, id: u64, paid: i128, payout: i128, pool_pnl: i128) {
     assert_eq!(paid, payout);
-    assert_eq!(s.usdc.balance(&s.lucia), LUCIA_START - MARGIN + payout);
+    let margin = s.pool.get_hedge(&id).unwrap().margin;
+    assert_eq!(s.usdc.balance(&s.lucia), LUCIA_START - margin + payout);
     assert_eq!(pool_books(s), (LP_CAPITAL + pool_pnl, 0));
     // Plus aucune marge en dépôt : tout l'USDC du contrat appartient aux LPs
     assert_eq!(s.usdc.balance(&s.pool.address), LP_CAPITAL + pool_pnl);
@@ -581,43 +594,39 @@ fn assert_settled(s: &Setup, id: u64, paid: i128, payout: i128, pool_pnl: i128) 
 }
 
 #[test]
-#[ignore = "attend Pricing"]
 fn settle_currency_up_pool_pays() {
     let s = setup();
     let id = open_funded(&s, Side::BuyCurrency);
     at_maturity(&s, 5_940_000_000_000); // +8 %
 
-    // marge 5 487 + P&L 4 530 = 10 017 USDC
+    // marge 5 527,50 + P&L 4 125,00 = 9 652,50 USDC
     let paid = s.pool.settle(&id);
-    assert_settled(&s, id, paid, 100_170_000_000, -45_300_000_000);
+    assert_settled(&s, id, paid, 96_525_028_394, -41_250_031_549);
 }
 
 #[test]
-#[ignore = "attend Pricing"]
 fn settle_currency_down_user_pays() {
     let s = setup();
     let id = open_funded(&s, Side::BuyCurrency);
     at_maturity(&s, 5_060_000_000_000); // −8 %
 
-    // marge 5 487 − perte 4 270 = 1 217 USDC
+    // marge 5 527,50 − perte 4 675,00 = 852,50 USDC
     let paid = s.pool.settle(&id);
-    assert_settled(&s, id, paid, 12_170_000_000, 42_700_000_000);
+    assert_settled(&s, id, paid, 8_525_028_394, 46_749_968_451);
 }
 
 #[test]
-#[ignore = "attend Pricing"]
 fn settle_beyond_cap_is_capped() {
     let s = setup();
     let id = open_funded(&s, Side::BuyCurrency);
     at_maturity(&s, 6_325_000_000_000); // +15 %
 
-    // écart 8 380 borné à la marge : 2 × 5 487 = 10 974 USDC
+    // écart 7 975 borné à la marge : 2 × 5 527,50 = 11 055 USDC
     let paid = s.pool.settle(&id);
-    assert_settled(&s, id, paid, 2 * MARGIN, -MARGIN);
+    assert_settled(&s, id, paid, 2 * HEDGE_MARGIN, -HEDGE_MARGIN);
 }
 
 #[test]
-#[ignore = "attend Pricing"]
 fn settle_total_loss_pays_nothing() {
     let s = setup();
     let id = open_funded(&s, Side::BuyCurrency);
@@ -625,23 +634,21 @@ fn settle_total_loss_pays_nothing() {
 
     // perte bornée à la marge : rien à rendre, toute la marge va au pool
     let paid = s.pool.settle(&id);
-    assert_settled(&s, id, paid, 0, MARGIN);
+    assert_settled(&s, id, paid, 0, HEDGE_MARGIN);
 }
 
 #[test]
-#[ignore = "attend Pricing"]
 fn settle_sell_side() {
     let s = setup();
     let id = open_funded(&s, Side::SellCurrency);
     at_maturity(&s, 5_060_000_000_000); // −8 %, l'exportateur est protégé
 
-    // marge 5 487 + P&L 4 270 = 9 757 USDC
+    // taux vendeur 0.0547250 (spread vers le bas) : marge 5 472,50 + P&L 4 125,00 = 9 597,50 USDC
     let paid = s.pool.settle(&id);
-    assert_settled(&s, id, paid, 97_570_000_000, -42_700_000_000);
+    assert_settled(&s, id, paid, 95_974_965_641, -41_249_968_764);
 }
 
 #[test]
-#[ignore = "attend Pricing"]
 fn settle_guards() {
     let s = setup();
     let id = open_funded(&s, Side::BuyCurrency);
@@ -658,7 +665,7 @@ fn settle_guards() {
     set_spot(&s, SPOT_0);
     s.pool.settle(&id);
     assert_eq!(s.pool.try_settle(&id), Err(Ok(contract_err(HedgeError::AlreadySettled as u32))));
-    assert_eq!(s.usdc.balance(&s.lucia), LUCIA_START - MARGIN + MARGIN + hedge::pnl(Side::BuyCurrency, NOTIONAL, LOCKED, SPOT_0, MARGIN));
+    assert_eq!(s.usdc.balance(&s.lucia), LUCIA_START + hedge::pnl(Side::BuyCurrency, NOTIONAL, HEDGE_LOCKED, SPOT_0, HEDGE_MARGIN));
 }
 
 /// Lucía ouvre la couverture de la démo : 1 000 000 MXN, plafond 10 %, échéance `MATURITY_IN`.
@@ -675,7 +682,6 @@ fn open_demo(s: &Setup) -> u64 {
 }
 
 #[test]
-#[ignore = "attend Pricing"]
 fn open_locks_rate_and_takes_margin() {
     let s = setup();
     fund_pool(&s);
@@ -686,11 +692,11 @@ fn open_locks_rate_and_takes_margin() {
     assert_eq!(id, 0);
     // Lucía a signé l'ouverture
     assert_eq!(s.env.auths()[0].0, s.lucia);
-    // marge de 5 487 USDC passée de Lucía au contrat, et réservée dans le pool
-    assert_eq!(s.usdc.balance(&s.lucia), LUCIA_START - MARGIN);
-    assert_eq!(s.usdc.balance(&s.pool.address), LP_CAPITAL + MARGIN);
-    assert_eq!(pool_books(&s), (LP_CAPITAL, MARGIN));
-    assert_eq!(s.pool.capacity(), LP_CAPITAL - MARGIN);
+    // marge de 5 527,50 USDC passée de Lucía au contrat, et réservée dans le pool
+    assert_eq!(s.usdc.balance(&s.lucia), LUCIA_START - HEDGE_MARGIN);
+    assert_eq!(s.usdc.balance(&s.pool.address), LP_CAPITAL + HEDGE_MARGIN);
+    assert_eq!(pool_books(&s), (LP_CAPITAL, HEDGE_MARGIN));
+    assert_eq!(s.pool.capacity(), LP_CAPITAL - HEDGE_MARGIN);
 
     let h = s.pool.get_hedge(&id).unwrap();
     assert_eq!(
@@ -701,9 +707,9 @@ fn open_locks_rate_and_takes_margin() {
             currency: Symbol::new(&s.env, "MXN"),
             side: Side::BuyCurrency,
             notional: NOTIONAL,
-            locked_rate: LOCKED,
+            locked_rate: HEDGE_LOCKED,
             cap_bps: 1000,
-            margin: MARGIN,
+            margin: HEDGE_MARGIN,
             maturity: now + MATURITY_IN,
             settled: false,
         }
@@ -711,28 +717,25 @@ fn open_locks_rate_and_takes_margin() {
 }
 
 #[test]
-#[ignore = "attend Pricing"]
 fn open_ids_increment() {
     let s = setup();
     fund_pool(&s);
     assert_eq!(open_demo(&s), 0);
     assert_eq!(open_demo(&s), 1);
-    assert_eq!(pool_books(&s), (LP_CAPITAL, 2 * MARGIN));
+    assert_eq!(pool_books(&s), (LP_CAPITAL, 2 * HEDGE_MARGIN));
 }
 
 #[test]
-#[ignore = "attend Pricing"]
 fn open_margin_follows_cap() {
     let s = setup();
     fund_pool(&s);
-    // plafond 20 % : marge 10 974 USDC
+    // plafond 20 % : marge 11 055 USDC
     let id = s.pool.open_hedge(&s.lucia, &s.supplier, &Symbol::new(&s.env, "MXN"), &Side::BuyCurrency, &NOTIONAL, &MATURITY_IN, &2000);
-    assert_eq!(s.pool.get_hedge(&id).unwrap().margin, 2 * MARGIN);
-    assert_eq!(s.usdc.balance(&s.lucia), LUCIA_START - 2 * MARGIN);
+    assert_eq!(s.pool.get_hedge(&id).unwrap().margin, 2 * HEDGE_MARGIN);
+    assert_eq!(s.usdc.balance(&s.lucia), LUCIA_START - 2 * HEDGE_MARGIN);
 }
 
 #[test]
-#[ignore = "attend Pricing"]
 fn open_refusals() {
     let s = setup();
     let mxn = Symbol::new(&s.env, "MXN");
@@ -766,7 +769,6 @@ fn open_refusals() {
 }
 
 #[test]
-#[ignore = "attend Pricing"]
 fn open_then_settle_full_flow() {
     let s = setup();
     fund_pool(&s);
@@ -774,11 +776,10 @@ fn open_then_settle_full_flow() {
 
     at_maturity(&s, 5_940_000_000_000); // +8 %
     let paid = s.pool.settle(&id);
-    assert_settled(&s, id, paid, 100_170_000_000, -45_300_000_000);
+    assert_settled(&s, id, paid, 96_525_028_394, -41_250_031_549);
 }
 
 #[test]
-#[ignore = "attend Pricing"]
 fn open_emits_event() {
     let s = setup();
     fund_pool(&s);
@@ -792,19 +793,18 @@ fn open_emits_event() {
         currency: Symbol::new(&s.env, "MXN"),
         side: Side::BuyCurrency,
         notional: NOTIONAL,
-        locked_rate: LOCKED,
+        locked_rate: HEDGE_LOCKED,
         cap_bps: 1000,
-        margin: MARGIN,
+        margin: HEDGE_MARGIN,
         maturity: now + MATURITY_IN,
     };
-    assert_eq!(
-        s.env.events().all().filter_by_contract(&s.pool.address),
-        [expected.to_xdr(&s.env, &s.pool.address)]
-    );
+    // le vault émet aussi les siens (position_reserved / position_released) : l'événement
+    // Paiement est le dernier émis par le pool dans la transaction
+    let events = s.env.events().all().filter_by_contract(&s.pool.address);
+    assert_eq!(events.events().last(), Some(&expected.to_xdr(&s.env, &s.pool.address)));
 }
 
 #[test]
-#[ignore = "attend Pricing"]
 fn settle_emits_event() {
     let s = setup();
     let id = open_funded(&s, Side::BuyCurrency);
@@ -815,26 +815,25 @@ fn settle_emits_event() {
         hedge_id: id,
         owner: s.lucia.clone(),
         spot: 5_940_000_000_000,
-        pnl: 45_300_000_000,
-        payout: 100_170_000_000,
+        pnl: 41_250_031_549,
+        payout: 96_525_028_394,
     };
-    assert_eq!(
-        s.env.events().all().filter_by_contract(&s.pool.address),
-        [expected.to_xdr(&s.env, &s.pool.address)]
-    );
+    // le vault émet aussi les siens (position_reserved / position_released) : l'événement
+    // Paiement est le dernier émis par le pool dans la transaction
+    let events = s.env.events().all().filter_by_contract(&s.pool.address);
+    assert_eq!(events.events().last(), Some(&expected.to_xdr(&s.env, &s.pool.address)));
 }
 
 #[test]
-#[ignore = "attend Pricing"]
 fn open_and_settle_track_exposure() {
     let s = setup();
     let mxn = Symbol::new(&s.env, "MXN");
     let id = open_funded(&s, Side::BuyCurrency);
 
-    // ouverture : notionnel 54 870 USDC au taux bloqué et marge côté acheteur
+    // ouverture : notionnel 55 274,99 USDC au taux bloqué et marge côté acheteur
     let e = s.pool.exposure(&mxn);
-    assert_eq!((e.buy_notional, e.buy_margin, e.sell_notional, e.sell_margin), (548_700_000_000, MARGIN, 0, 0));
-    assert_eq!(e.net_notional, 548_700_000_000);
+    assert_eq!((e.buy_notional, e.buy_margin, e.sell_notional, e.sell_margin), (HEDGE_COST, HEDGE_MARGIN, 0, 0));
+    assert_eq!(e.net_notional, HEDGE_COST);
 
     // règlement : l'exposition retombe à zéro
     at_maturity(&s, SPOT_0);
@@ -844,12 +843,11 @@ fn open_and_settle_track_exposure() {
 }
 
 #[test]
-#[ignore = "attend Pricing"]
 fn open_refused_over_currency_limit() {
     let s = setup();
     fund_pool(&s);
     let mxn = Symbol::new(&s.env, "MXN");
-    // limite MXN de l'admin : 5 % du capital = 5 000 USDC de marges, sous la marge de 5 487
+    // limite MXN de l'admin : 5 % du capital = 5 000 USDC de marges, sous la marge de 5 527,50
     s.pool.set_currency_limit(&mxn, &500);
     assert_eq!(
         s.pool.try_open_hedge(&s.lucia, &s.supplier, &mxn, &Side::BuyCurrency, &NOTIONAL, &MATURITY_IN, &1000),

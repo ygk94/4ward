@@ -87,8 +87,8 @@ pub(crate) fn open(
     pricing::check_cap(env, currency, cap_bps);
 
     let locked_rate = pricing::forward_rate(env, currency, side, duration_secs);
-    // marge arrondie vers le haut
-    let margin = (pricing::to_usdc(notional, locked_rate) * cap_bps as i128 + crate::BPS - 1) / crate::BPS;
+    // même calcul que `quote` : la marge déposée est celle affichée (arrondie vers le haut)
+    let margin = pricing::margin_for(pricing::to_usdc(notional, locked_rate), cap_bps);
 
     let usdc: Address = env.storage().instance().get(&DataKey::Usdc).unwrap();
     token::TokenClient::new(env, &usdc).transfer(owner, &env.current_contract_address(), &margin);
