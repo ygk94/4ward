@@ -53,11 +53,14 @@
 
 ## Chiffres de référence (pour la vidéo et le front)
 
-Facture 1 000 000 MXN, spot 0,055, taux USD 4 % / MXN 7 %, spread 0,5 %, plafond 10 % :
+Taux Etherfuse figés dans `scripts/rates.snapshot` (USD 3,60 % USTRY, MXN 5,55 % CETES, 25/10 22h47 UTC). Facture 1 000 000 MXN, spot 0,055, spread 0,5 %, plafond 10 %, 90 jours (mode démo : échéance réelle 5 min). Vérifié sur le testnet le 25/10 au centime.
 
-| | 90 jours | 60 secondes |
-|---|---|---|
-| Prix figé | 0,054873 → **54 873,05 USDC** | 0,055275 → **55 275 USDC** |
-| Marge déposée | 5 487,31 USDC | 5 527,50 USDC |
-| Crash +12 % (spot 0,0616), sans protection | 61 600 (+6 727) | 61 600 (+6 325) |
-| Crash +12 %, avec protection | 56 112,69 (+1 240) | 56 072,50 (+798) |
+| | Montant |
+|---|---|
+| Prix figé | 0,0550128 → **55 012,81 USDC** |
+| Dépôt (marge) | 5 501,28 USDC |
+| Crash +12 % (spot 0,0616), versé à Lucía au règlement | 11 002,56 USDC |
+| Coût total sans protection | 61 600 USDC (+6 587) |
+| **Coût total avec protection** | **56 098,72 USDC** (+1 086) |
+
+Ne pas relancer `scripts/sync-rates.sh --snapshot` avant l'enregistrement : les chiffres changeraient.

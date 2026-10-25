@@ -56,7 +56,7 @@ Légende : ✅ fait · ⬜ à faire · 🔴 bloquant pour les autres ou pour la 
 ## État au 25/10 soir
 
 - ✅ **Contrat complet et mergé dans `main`** : vault (phases 1 à 6), paiement (`open` / `settle` branchés sur le vault, codes 200-204), pricing (spot, taux forward, plafonds, liste blanche des devises). 143 tests verts (0 ignoré), CI verte. Mergés aussi : fixing à l'échéance, mode démo `time_factor`, `crash.sh`, tranches prudente / dynamique (`deposit_senior`, `withdraw_senior`, `senior_balance`, `tranche_values`, codes 111-112).
-- ✅ **Testnet redéployé sur `main`** (IDs dans `.env.testnet`, mode démo 90 j → 5 min) ; scénario exact de la vidéo rejoué : prix figé 54 873,05 USDC, crash +12 % (`crash.sh`), règlement au fixing sans rafraîchir le prix, fournisseur payé 1 000 000 MXN, **coût total de Lucía 56 112,69 USDC au centime**. Tranche prudente testée : dépôt de 100 000 USDC, refus #111 au-delà du ratio.
+- ✅ **Testnet redéployé sur `main`** (IDs dans `.env.testnet`, mode démo 90 j → 5 min) ; scénario exact de la vidéo rejoué : prix figé 55 012,81 USDC (taux Etherfuse figés dans `scripts/rates.snapshot`), crash +12 % (`crash.sh`), règlement au fixing sans rafraîchir le prix, fournisseur payé 1 000 000 MXN, **coût total de Lucía 56 098,72 USDC au centime**. Ne pas relancer `sync-rates.sh --snapshot` avant la vidéo. Tranche prudente testée : dépôt de 100 000 USDC, refus #111 au-delà du ratio.
 - ⬜ 🔴 **Front** : en cours (Hugo).
 - ⬜ 🔴 **Vidéo, deck, nom, soumission.**
 
