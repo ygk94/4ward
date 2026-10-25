@@ -8,20 +8,19 @@ Légende : ✅ fait · ⬜ à faire · 🔴 bloquant pour les autres ou pour la 
 
 ## Qui fait quoi
 
-| | **Vault** — Hugo | **Paiement** — ? | **Pricing** — ? |
+| | **Vault + Front** — Hugo | **Paiement** — ? | **Pricing** — ? |
 |---|---|---|---|
-| Rôle | L'argent du pool **+ tout le transversal** (front commun, déploiement, merge, deck, vidéo, soumission) | Le parcours de Lucía : ouvrir la couverture, la régler, payer le fournisseur | Le prix : oracle, taux forward, spread, plafonds, crash du peso |
+| Rôle | L'argent du pool, **tout le front**, et le transversal (déploiement, merge, deck, vidéo, soumission) | Le parcours de Lucía côté contrat : ouvrir la couverture, la régler, le paiement du fournisseur | Le prix : oracle, taux forward, spread, plafonds, crash du peso |
 | Contrat | `contracts/pool/src/vault.rs` | `contracts/pool/src/hedge.rs` | `contracts/pool/src/pricing.rs` |
-| Front | `front/src/shared/`, `App.tsx`, `front/src/vault/` | `front/src/payment/` | `front/src/pricing/` |
+| Front | **tout `front/`** | — (fournit à Hugo le déroulé des appels) | — (fournit à Hugo les appels et formules) |
 | Scripts | `scripts/setup-testnet.sh` | — | `scripts/crash.sh` |
-| Branche | `feat/vault` | `feat/payment` | `feat/pricing` |
+| Branche | `feat/vault` (contrat + front) | `feat/payment` | `feat/pricing` |
 
-Chaque fichier commence par un tag `[VAULT]`, `[PAIEMENT]` ou `[PRICING]` qui indique son responsable. **On ne modifie pas les fichiers des autres** : on leur demande.
+**On ne modifie pas les fichiers des autres** : on leur demande.
 
 **Dépendances entre vous :**
 - Paiement appelle Vault (`reserve`, `release`, `book_gain`, `book_loss`) et Pricing (`spot`, `forward_rate`, `check_cap`, `to_usdc`). Ces fonctions sont **déjà déclarées** : Paiement code contre elles dès maintenant.
-- Paiement utilise `<QuoteCard />` de Pricing dans son écran.
-- Les trois écrans utilisent `shared/wallet.ts` et `shared/contract.ts` du Vault → 🔴 **le Vault les livre en premier**.
+- Le front s'appuie sur les points d'entrée publics de `lib.rs`, qui sont figés : Hugo peut construire les écrans tout de suite, avec des données factices en attendant le déploiement.
 - `contracts/pool/src/lib.rs` (types partagés et points d'entrée) ne bouge plus, sauf accord à trois. **On ne change pas une signature sans prévenir.**
 
 **Conventions communes :**
@@ -38,24 +37,23 @@ Chaque fichier commence par un tag `[VAULT]`, `[PAIEMENT]` ou `[PRICING]` qui in
 
 1. `git clone https://github.com/ygk94/fistea-hackmeridian && cd fistea-hackmeridian && git checkout feat/<ta-partie>`
 2. `rustup target add wasm32v1-none` · `brew install stellar-cli` (≥ 28) · `stellar contract build && cargo test`
-3. `cd front && pnpm install && pnpm dev`. Demander à Hugo le fichier `front/.env.local` (IDs testnet), ou lancer soi-même `./scripts/setup-testnet.sh`
-4. Extension **Freighter**, réseau **Testnet**, importer les comptes de démo reçus d'Hugo
-5. Lire `README.md` (le produit) et sa section du tableau ci-dessus
+3. Extension **Freighter**, réseau **Testnet**, importer les comptes de démo reçus d'Hugo (utile pour tester ses appels avec `stellar contract invoke`)
+4. Lire `README.md` (le produit) et sa section du tableau ci-dessus
 
 ## Déjà en place
 
 - ✅ Repo public `ygk94/fistea-hackmeridian`, collaborateurs LancelotWA et cda1712, branches `feat/vault` / `feat/payment` / `feat/pricing`, CI GitHub Actions
 - ✅ Contrat `pool` découpé en 3 modules, 10 tests de départ (`#[ignore]`, un bloc par personne)
 - ✅ `mock-oracle` : même interface de lecture que Reflector FX, prix pilotable par l'admin
-- ✅ Front Vite + React + TS découpé par personne (composants vides), `@stellar/stellar-sdk` 17.4, `@creit.tech/stellar-wallets-kit` 2.7.1
-- ✅ Testnet : 4 comptes (`fx-admin`, `fx-lp`, `fx-lucia`, `fx-supplier`), USDC et MXN de test, LP à 1 M USDC, Lucía à 200 k USDC, offre DEX MXN/USDC, **path payment USDC→MXN testé**, mock-oracle et pool déployés. IDs dans `.env.testnet`
+- ✅ Front Vite + React + TS (composants vides par écran), `@stellar/stellar-sdk` 17.4, `@creit.tech/stellar-wallets-kit` 2.7.1
+- ✅ Testnet : 4 comptes (`fx-admin`, `fx-lp`, `fx-lucia`, `fx-supplier`), USDC et MXN de test, offre DEX MXN/USDC, **path payment USDC→MXN testé**, mock-oracle et pool déployés. IDs dans `.env.testnet`
 - ✅ Reflector FX testnet couvre MXN, BRL, ARS, EUR (`CCSSOHTBL3LEWUCBBEB5NJFC2OKFRC74OWEIJIZLRJBGAAU4VMU5NV4W`)
 - ✅ README de spec, council du 25/10 dans `docs/council/`
 - ✅ Checklist des tâches externes d'Hugo (wallet, accès, hackathon, outils) : `docs/setup-externe.html`
 
 ---
 
-## Vault — Hugo
+## Vault + Front — Hugo
 
 ### Contrat (`vault.rs`)
 1. ⬜ `deposit` : `require_auth(lp)`, transfert USDC lp → contrat, `LpBalance += amount`, `TotalDeposits += amount`
@@ -66,11 +64,21 @@ Chaque fichier commence par un tag `[VAULT]`, `[PAIEMENT]` ou `[PRICING]` qui in
 6. ⬜ `extend_ttl` sur l'instance et les soldes LP
 7. ⬜ Tests du bloc Vault dans `test.rs`
 
-### Front commun (transversal)
-1. ⬜ 🔴 `shared/wallet.ts` : connexion Freighter via Stellar Wallets Kit (`connect`, `getAddress`, `signTransaction`)
-2. ⬜ 🔴 `shared/contract.ts` : client du pool. Dès que le contrat est déployé : `stellar contract bindings typescript --network testnet --id $POOL_ID --output-dir front/src/shared/pool-client`
+### Front (tout `front/`)
+1. ⬜ `shared/wallet.ts` : connexion Freighter via Stellar Wallets Kit (`connect`, `getAddress`, `signTransaction`)
+2. ⬜ `shared/contract.ts` : client du pool. Dès que le contrat est déployé : `stellar contract bindings typescript --network testnet --id $POOL_ID --output-dir front/src/shared/pool-client`
 3. ⬜ `App.tsx` : mise en page, navigation, bouton de connexion, style général (sobre, zéro jargon : « protection », « prix figé »)
-4. ⬜ `vault/PoolPanel.tsx` : dépôts totaux, capital réservé, capacité restante, indicateur « solvable », déposer / retirer (compte `fx-lp`)
+4. ⬜ 🔴 `payment/HedgeScreen.tsx` : **l'écran de Lucía, le cœur de la vidéo**
+   - saisie de la facture : montant, devise, échéance (en secondes pour la démo), adresse du fournisseur
+   - devis (`QuoteCard`), choix du plafond, bouton « Bloquer mon taux » → `open_hedge`
+   - à l'échéance : `settle()` puis **path payment strict receive** USDC → MXN vers le fournisseur, pour exactement le notionnel (2 signatures Freighter)
+   - coût total réel de Lucía = prix figé, liens stellar.expert pour les deux transactions
+   - comparaison « sans protection / avec protection » après le crash
+5. ⬜ `pricing/QuoteCard.tsx` : spot réel Reflector, prix figé, marge à déposer (appel `quote`)
+6. ⬜ `pricing/CrashButton.tsx` : `set_price` sur le mock (compte admin), le peso monte de 12 %
+7. ⬜ `vault/PoolPanel.tsx` : dépôts totaux, capital réservé, capacité restante, indicateur « solvable », déposer / retirer (compte `fx-lp`)
+
+Commencer avec des données factices, brancher le contrat après le merge.
 
 ### Infra et intégration
 1. ⬜ Maintenir `scripts/setup-testnet.sh` (y intégrer le `set_rate` / `set_min_cap` fournis par Pricing)
@@ -93,13 +101,9 @@ Chaque fichier commence par un tag `[VAULT]`, `[PAIEMENT]` ou `[PRICING]` qui in
 3. ⬜ Événements `open` / `settle` (pour le front et l'explorateur)
 4. ⬜ Tant que Vault et Pricing ne sont pas prêts : remplacer leurs `panic!("TODO")` par des valeurs en dur en local, **sans les committer**
 
-### Front (`payment/HedgeScreen.tsx`) : le cœur de la vidéo
-1. ⬜ Saisie de la facture : montant, devise, échéance (en secondes pour la démo), adresse du fournisseur
-2. ⬜ Devis via `<QuoteCard />` (Pricing), choix du plafond, bouton « Bloquer mon taux » → `open_hedge`
-3. ⬜ À l'échéance : `settle()` puis **path payment strict receive** USDC → MXN vers le fournisseur, pour exactement le notionnel
-4. ⬜ Afficher le coût total réel de Lucía = prix figé (aux arrondis et au spread du DEX près)
-5. ⬜ Liens stellar.expert (testnet) pour les deux transactions
-6. ⬜ Comparaison « sans protection / avec protection » après le crash
+### Pour le front d'Hugo
+1. ⬜ 🔴 Valider le parcours en ligne de commande avant le merge : `open_hedge` → `settle` → path payment, avec les commandes `stellar contract invoke` / `stellar tx new path-payment-strict-receive` exactes, à donner à Hugo
+2. ⬜ Préciser les montants à afficher (marge rendue, P&L, coût total) et les cas d'erreur à gérer
 
 ### Testnet
 - ⬜ Vérifier la profondeur de l'offre DEX MXN/USDC pour le montant de la démo ; la réaligner sur le prix du mock si Pricing le change
@@ -121,11 +125,10 @@ Un prix faux = arbitrage contre le pool : c'est ce qui rend le produit crédible
 6. ⬜ Tests du bloc Pricing : parité chiffrée (r_MXN 7 %, r_USD 4 %, 90 j → F ≈ 0,05460), sens du spread, plafond minimum
 7. ⬜ Donner à Hugo les appels `set_rate` / `set_min_cap` à ajouter au script de setup
 
-### Front (`pricing/`)
-1. ⬜ `QuoteCard.tsx` : spot réel Reflector, prix figé, marge à déposer (utilisé par l'écran de Paiement)
-2. ⬜ `CrashButton.tsx` : `set_price` sur le mock (compte admin), le peso monte de 12 %
-3. ⬜ `scripts/crash.sh` : même chose en ligne de commande (filet de sécurité pendant la vidéo)
-4. ⬜ Juste avant la vidéo : aligner le prix du mock sur le vrai spot Reflector (et prévenir Paiement pour l'offre DEX)
+### Oracle et scripts
+1. ⬜ `scripts/crash.sh` : `set_price` du MXN +12 % sur le mock en ligne de commande (filet de sécurité pendant la vidéo)
+2. ⬜ Juste avant la vidéo : aligner le prix du mock sur le vrai spot Reflector (et prévenir Paiement pour l'offre DEX)
+3. ⬜ Donner à Hugo la lecture du spot Reflector côté front (contrat, `Asset::Other("MXN")`, conversion des 14 décimales) pour `QuoteCard`
 
 ### Pitch
 1. ⬜ Slide « le produit est un tunnel de change » : collar symétrique centré sur F, valeur ≈ 0 à l'ouverture, donc le spread rémunère le pool
@@ -148,10 +151,10 @@ Blend · parts LP SEP-41 · netting par devise/échéance · skew de prix · fac
 
 ## Planning indicatif
 
-| Créneau | Vault (Hugo) | Paiement | Pricing |
+| Créneau | Vault + Front (Hugo) | Paiement | Pricing |
 |---|---|---|---|
-| Dim. soir | `wallet.ts`, `reserve`/`release`, deposit/withdraw + tests, nom | `settle` + tests, script vidéo | `spot` + `forward_rate` + tests |
-| Nuit / lun. 8h | `App.tsx`, panneau pool, deck | `open`, écran Lucía, path payment | `quote`, plafonds, `QuoteCard`, crash, slides pricing |
-| Lun. 8h | **Merge, redéploiement, bindings TS** | Tests du parcours complet | Alignement des prix |
-| Lun. 8h-10h | Vidéo | Polish de l'écran | Notebook `sim/`, objections |
+| Dim. soir | `reserve`/`release`, deposit/withdraw + tests, `wallet.ts`, nom | `settle` + tests, script vidéo | `spot` + `forward_rate` + tests |
+| Nuit / lun. 8h | Écran Lucía + devis + crash (factice), panneau pool | `open`, parcours validé en CLI | `quote`, plafonds, `crash.sh`, slides pricing |
+| Lun. 8h | **Merge, redéploiement, bindings TS, branchement du front** | Tests du parcours complet | Alignement des prix |
+| Lun. 8h-10h | Vidéo | Aide au polish / deck | Notebook `sim/`, objections |
 | Lun. 10h-12h | README final + **soumission** | Relecture | Relecture |

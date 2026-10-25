@@ -1,4 +1,4 @@
-// [VAULT — partagé] IDs testnet, générés par ../scripts/setup-testnet.sh dans .env.local
+// [FRONT — Hugo] IDs testnet, générés par ../scripts/setup-testnet.sh dans .env.local
 export const config = {
   rpcUrl: import.meta.env.VITE_RPC_URL as string,
   networkPassphrase: import.meta.env.VITE_NETWORK_PASSPHRASE as string,
