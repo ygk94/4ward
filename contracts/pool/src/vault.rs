@@ -29,8 +29,11 @@
 //! 3. règlement par panier (toutes les jambes dans la même transaction) ou comptabilisation
 //!    de ce que doit le vendeur au fixing : sinon, si le perdant du pool est réglé en premier,
 //!    `book_loss` passe avant le gain de la jambe opposée et le capital tombe sous la réserve.
-use crate::{pricing, DataKey, Hedge, Side, BPS, PRICE_DECIMALS};
-use soroban_sdk::{contracterror, contracttype, panic_with_error, token, Address, Env, Symbol};
+use crate::{DataKey, Hedge, Side, BPS, PRICE_DECIMALS};
+use soroban_sdk::{
+    contracterror, contractevent, contracttype, panic_with_error, token, Address, Env, IntoVal, Symbol,
+    TryFromVal, Val,
+};
 
 /// Erreurs du vault. Codes 100+ pour ne pas entrer en collision avec Paiement / Pricing.
 /// Ne jamais réutiliser un numéro : ajouter à la suite.
@@ -58,6 +61,8 @@ pub enum VaultError {
     CurrencyLimitExceeded = 108,
     /// `close_position` d'une couverture qui n'a pas été ouverte par `open_position`.
     UnknownPosition = 109,
+    /// Débordement d'un calcul (montant démesuré).
+    Overflow = 110,
 }
 
 /// Clés de stockage propres au vault.
@@ -88,8 +93,100 @@ pub struct Exposure {
     pub sell_margin: i128,
 }
 
+/// Un LP a déposé des USDC. `shares` = parts émises par ce dépôt.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LpDeposited {
+    #[topic]
+    pub lp: Address,
+    pub amount: i128,
+    pub shares: i128,
+}
+
+/// Un LP a brûlé `shares` parts contre `usdc` (prix de sortie).
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LpWithdrew {
+    #[topic]
+    pub lp: Address,
+    pub shares: i128,
+    pub usdc: i128,
+}
+
+/// Couverture ouverte : marge réservée sur la devise.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PositionReserved {
+    #[topic]
+    pub currency: Symbol,
+    pub side: Side,
+    pub margin: i128,
+}
+
+/// Couverture clôturée : marge libérée sur la devise.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PositionReleased {
+    #[topic]
+    pub currency: Symbol,
+    pub side: Side,
+    pub margin: i128,
+}
+
+/// L'admin a changé la limite d'une devise.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CurrencyLimitSet {
+    #[topic]
+    pub currency: Symbol,
+    pub limit_bps: u32,
+}
+
 /// 1 part = 1 USDC au premier dépôt : prix exprimé en 7 décimales.
 const PRICE_ONE: i128 = 10_000_000;
+
+/// Durée de vie du stockage, en ledgers (~5 s) : prolongée à 120 jours dès qu'elle passe sous
+/// 30 jours (mêmes valeurs que les couvertures dans hedge.rs).
+const DAY_IN_LEDGERS: u32 = 17_280;
+const TTL_THRESHOLD: u32 = 30 * DAY_IN_LEDGERS;
+const TTL_EXTEND_TO: u32 = 120 * DAY_IN_LEDGERS;
+
+/// `a × b / c` arrondi vers le bas, `Overflow` (110) au lieu d'une panique sans code.
+pub(crate) fn mul_div(env: &Env, a: i128, b: i128, c: i128) -> i128 {
+    a.checked_mul(b)
+        .and_then(|x| x.checked_div_euclid(c))
+        .unwrap_or_else(|| panic_with_error!(env, VaultError::Overflow))
+}
+
+fn add(env: &Env, a: i128, b: i128) -> i128 {
+    a.checked_add(b).unwrap_or_else(|| panic_with_error!(env, VaultError::Overflow))
+}
+
+/// Notionnel en USDC au taux bloqué (14 décimales) : comme pricing::to_usdc, mais protégé.
+fn notional_usdc(env: &Env, hedge: &Hedge) -> i128 {
+    mul_div(env, hedge.notional, hedge.locked_rate, 10i128.pow(PRICE_DECIMALS))
+}
+
+// ---- stockage ----
+
+/// Prolonge l'instance (compteurs TotalDeposits, Reserved, TotalShares, et le contrat lui-même).
+fn bump_instance(env: &Env) {
+    env.storage().instance().extend_ttl(TTL_THRESHOLD, TTL_EXTEND_TO);
+}
+
+/// Lecture persistent qui prolonge l'entrée si elle existe (extend_ttl panique sur une clé absente).
+fn read_persistent<V: TryFromVal<Env, Val>>(env: &Env, key: &VaultKey) -> Option<V> {
+    let value = env.storage().persistent().get(key);
+    if value.is_some() {
+        env.storage().persistent().extend_ttl(key, TTL_THRESHOLD, TTL_EXTEND_TO);
+    }
+    value
+}
+
+fn write_persistent<V: IntoVal<Env, Val>>(env: &Env, key: &VaultKey, value: &V) {
+    env.storage().persistent().set(key, value);
+    env.storage().persistent().extend_ttl(key, TTL_THRESHOLD, TTL_EXTEND_TO);
+}
 
 fn total_deposits(env: &Env) -> i128 {
     env.storage().instance().get(&DataKey::TotalDeposits).unwrap_or(0)
@@ -120,17 +217,24 @@ fn set_lp_shares(env: &Env, lp: &Address, value: i128) {
     if value == 0 {
         env.storage().persistent().remove(&key);
     } else {
-        env.storage().persistent().set(&key, &value);
+        write_persistent(env, &key, &value);
     }
+}
+
+/// Capital libre, jamais négatif. Il ne peut l'être que par un mauvais usage
+/// (`book_loss` sans `release`) ; on ne verse ni n'affiche alors rien.
+fn free_capital(env: &Env) -> i128 {
+    capacity(env).max(0)
 }
 
 // ---- appelé par lib.rs (points d'entrée publics) ----
 
 /// Dépose `amount` USDC contre des parts au prix plein, arrondi vers le bas.
 /// Retourne les parts du LP après le dépôt.
-/// Erreurs : `InvalidAmount`, `PoolDepleted`, `DepositTooSmall`.
+/// Erreurs : `InvalidAmount`, `PoolDepleted`, `DepositTooSmall`, `Overflow`.
 pub(crate) fn deposit(env: &Env, lp: &Address, amount: i128) -> i128 {
     lp.require_auth();
+    bump_instance(env);
     if amount <= 0 {
         panic_with_error!(env, VaultError::InvalidAmount);
     }
@@ -142,27 +246,31 @@ pub(crate) fn deposit(env: &Env, lp: &Address, amount: i128) -> i128 {
         if total == 0 {
             panic_with_error!(env, VaultError::PoolDepleted);
         }
-        amount * shares_total / total
+        mul_div(env, amount, shares_total, total)
     };
     if minted == 0 {
         panic_with_error!(env, VaultError::DepositTooSmall);
     }
+    let shares = add(env, lp_shares(env, lp), minted);
+    let new_total_shares = add(env, shares_total, minted);
+    let new_total = add(env, total, amount);
 
     usdc(env).transfer(lp, &env.current_contract_address(), &amount);
 
-    let shares = lp_shares(env, lp) + minted;
     set_lp_shares(env, lp, shares);
-    set_total_shares(env, shares_total + minted);
-    set_total_deposits(env, total + amount);
+    set_total_shares(env, new_total_shares);
+    set_total_deposits(env, new_total);
+    LpDeposited { lp: lp.clone(), amount, shares: minted }.publish(env);
     shares
 }
 
 /// Brûle `shares` parts du LP et lui verse leur valeur au prix de sortie, arrondi vers le bas.
 /// Le capital réservé n'est pas versé : le montant ne dépasse jamais `capacity()`.
 /// Retourne l'USDC versé.
-/// Erreurs : `InvalidAmount`, `InsufficientShares`, `WithdrawTooSmall`.
+/// Erreurs : `InvalidAmount`, `InsufficientShares`, `WithdrawTooSmall`, `Overflow`.
 pub(crate) fn withdraw(env: &Env, lp: &Address, shares: i128) -> i128 {
     lp.require_auth();
+    bump_instance(env);
     if shares <= 0 {
         panic_with_error!(env, VaultError::InvalidAmount);
     }
@@ -170,44 +278,52 @@ pub(crate) fn withdraw(env: &Env, lp: &Address, shares: i128) -> i128 {
     if shares > owned {
         panic_with_error!(env, VaultError::InsufficientShares);
     }
-    let amount = shares * capacity(env) / total_shares(env);
-    if amount == 0 {
+    // shares ≤ owned ≤ TotalShares, donc TotalShares > 0.
+    let shares_total = total_shares(env);
+    let amount = mul_div(env, shares, free_capital(env), shares_total);
+    if amount <= 0 {
         panic_with_error!(env, VaultError::WithdrawTooSmall);
     }
 
     // État mis à jour avant le transfert sortant.
     set_lp_shares(env, lp, owned - shares);
-    set_total_shares(env, total_shares(env) - shares);
+    set_total_shares(env, shares_total - shares);
     set_total_deposits(env, total_deposits(env) - amount);
 
     usdc(env).transfer(&env.current_contract_address(), lp, &amount);
+    LpWithdrew { lp: lp.clone(), shares, usdc: amount }.publish(env);
     amount
 }
 
 /// Valeur en USDC des parts du LP au prix de sortie (ce qu'il recevrait en retirant tout).
 pub(crate) fn balance(env: &Env, lp: &Address) -> i128 {
+    bump_instance(env);
     let shares_total = total_shares(env);
     if shares_total == 0 {
         return 0;
     }
-    lp_shares(env, lp) * capacity(env) / shares_total
+    mul_div(env, lp_shares(env, lp), free_capital(env), shares_total)
 }
 
 pub(crate) fn lp_shares(env: &Env, lp: &Address) -> i128 {
-    env.storage().persistent().get(&VaultKey::Shares(lp.clone())).unwrap_or(0)
+    bump_instance(env);
+    read_persistent(env, &VaultKey::Shares(lp.clone())).unwrap_or(0)
 }
 
 /// Prix plein d'une part : TotalDeposits / TotalShares (7 décimales), 1 USDC si aucune part.
 pub(crate) fn share_price(env: &Env) -> i128 {
+    bump_instance(env);
     price(env, total_deposits(env))
 }
 
-/// Prix de sortie d'une part : (TotalDeposits - Reserved) / TotalShares (7 décimales).
+/// Prix de sortie d'une part : (TotalDeposits - Reserved) / TotalShares (7 décimales), ≥ 0.
 pub(crate) fn exit_price(env: &Env) -> i128 {
-    price(env, capacity(env))
+    bump_instance(env);
+    price(env, free_capital(env))
 }
 
 pub(crate) fn total_assets(env: &Env) -> i128 {
+    bump_instance(env);
     total_deposits(env)
 }
 
@@ -216,7 +332,7 @@ fn price(env: &Env, assets: i128) -> i128 {
     if shares_total == 0 {
         return PRICE_ONE;
     }
-    assets * PRICE_ONE / shares_total
+    mul_div(env, assets, PRICE_ONE, shares_total)
 }
 
 fn usdc(env: &Env) -> token::Client<'_> {
@@ -224,7 +340,9 @@ fn usdc(env: &Env) -> token::Client<'_> {
     token::Client::new(env, &address)
 }
 
+/// TotalDeposits − Reserved. Négatif seulement en cas de mauvais usage (voir `free_capital`).
 pub(crate) fn capacity(env: &Env) -> i128 {
+    bump_instance(env);
     total_deposits(env) - reserved(env)
 }
 
@@ -245,6 +363,7 @@ pub(crate) fn reserve(env: &Env, amount: i128) {
 /// Libère `amount` de capacité réservée (couverture réglée).
 /// Erreurs : `InvalidAmount` si `amount <= 0`, `ReleaseExceedsReserved` si `amount > Reserved`.
 pub(crate) fn release(env: &Env, amount: i128) {
+    bump_instance(env);
     if amount <= 0 {
         panic_with_error!(env, VaultError::InvalidAmount);
     }
@@ -259,13 +378,14 @@ pub(crate) fn release(env: &Env, amount: i128) {
 /// Les USDC sont déjà dans le contrat (ils viennent de la marge).
 /// `amount == 0` est accepté (P&L nul) ; `InvalidAmount` si négatif.
 pub(crate) fn book_gain(env: &Env, amount: i128) {
+    bump_instance(env);
     if amount < 0 {
         panic_with_error!(env, VaultError::InvalidAmount);
     }
     if amount == 0 {
         return;
     }
-    set_total_deposits(env, total_deposits(env) + amount);
+    set_total_deposits(env, add(env, total_deposits(env), amount));
 }
 
 /// Le pool paie une perte (la PME est protégée) : `TotalDeposits -= amount`.
@@ -273,6 +393,7 @@ pub(crate) fn book_gain(env: &Env, amount: i128) {
 /// `amount == 0` est accepté (P&L nul) ; `InvalidAmount` si négatif,
 /// `LossExceedsCapital` si le capital des LPs deviendrait négatif.
 pub(crate) fn book_loss(env: &Env, amount: i128) {
+    bump_instance(env);
     if amount < 0 {
         panic_with_error!(env, VaultError::InvalidAmount);
     }
@@ -288,32 +409,36 @@ pub(crate) fn book_loss(env: &Env, amount: i128) {
 
 /// Ouverture d'une couverture : réserve la marge, contrôle la limite de la devise et ajoute
 /// l'exposition. À appeler par hedge::open une fois la `Hedge` construite.
-/// Erreurs : `InvalidAmount`, `InsufficientCapacity`, `CurrencyLimitExceeded`.
+/// Erreurs : `InvalidAmount`, `InsufficientCapacity`, `CurrencyLimitExceeded`, `Overflow`.
 pub(crate) fn open_position(env: &Env, hedge: &Hedge) {
+    if hedge.notional <= 0 {
+        panic_with_error!(env, VaultError::InvalidAmount);
+    }
     reserve(env, hedge.margin);
 
     let mut e = exposure(env, &hedge.currency);
+    let margins_after = add(env, add(env, e.buy_margin, e.sell_margin), hedge.margin);
     if let Some(limit_bps) = currency_limit(env, &hedge.currency) {
         // Plafond arrondi vers le bas : en faveur du pool.
-        let max_margins = total_deposits(env) * limit_bps as i128 / BPS;
-        if e.buy_margin + e.sell_margin + hedge.margin > max_margins {
+        if margins_after > mul_div(env, total_deposits(env), limit_bps as i128, BPS) {
             panic_with_error!(env, VaultError::CurrencyLimitExceeded);
         }
     }
 
     // Même calcul à l'ouverture et à la clôture : le compteur retombe à zéro pile.
-    let notional_usd = pricing::to_usdc(hedge.notional, hedge.locked_rate);
+    let notional_usd = notional_usdc(env, hedge);
     match hedge.side {
         Side::BuyCurrency => {
-            e.buy_notional += notional_usd;
+            e.buy_notional = add(env, e.buy_notional, notional_usd);
             e.buy_margin += hedge.margin;
         }
         Side::SellCurrency => {
-            e.sell_notional += notional_usd;
+            e.sell_notional = add(env, e.sell_notional, notional_usd);
             e.sell_margin += hedge.margin;
         }
     }
     set_exposure(env, &hedge.currency, e);
+    PositionReserved { currency: hedge.currency.clone(), side: hedge.side, margin: hedge.margin }.publish(env);
 }
 
 /// Clôture d'une couverture : libère la marge et retire l'exposition ajoutée à l'ouverture.
@@ -321,7 +446,7 @@ pub(crate) fn open_position(env: &Env, hedge: &Hedge) {
 /// Erreurs : `UnknownPosition`.
 pub(crate) fn close_position(env: &Env, hedge: &Hedge) {
     let mut e = exposure(env, &hedge.currency);
-    let notional_usd = pricing::to_usdc(hedge.notional, hedge.locked_rate);
+    let notional_usd = notional_usdc(env, hedge);
     let (notional, margin) = match hedge.side {
         Side::BuyCurrency => (&mut e.buy_notional, &mut e.buy_margin),
         Side::SellCurrency => (&mut e.sell_notional, &mut e.sell_margin),
@@ -334,12 +459,12 @@ pub(crate) fn close_position(env: &Env, hedge: &Hedge) {
     set_exposure(env, &hedge.currency, e);
 
     release(env, hedge.margin);
+    PositionReleased { currency: hedge.currency.clone(), side: hedge.side, margin: hedge.margin }.publish(env);
 }
 
 pub(crate) fn exposure(env: &Env, currency: &Symbol) -> Exposure {
-    env.storage()
-        .persistent()
-        .get(&VaultKey::Exposure(currency.clone()))
+    bump_instance(env);
+    read_persistent(env, &VaultKey::Exposure(currency.clone()))
         .unwrap_or(Exposure { buy_notional: 0, sell_notional: 0, net_notional: 0, buy_margin: 0, sell_margin: 0 })
 }
 
@@ -350,19 +475,22 @@ fn set_exposure(env: &Env, currency: &Symbol, mut e: Exposure) {
     if e.buy_notional == 0 && e.sell_notional == 0 && e.buy_margin == 0 && e.sell_margin == 0 {
         env.storage().persistent().remove(&key);
     } else {
-        env.storage().persistent().set(&key, &e);
+        write_persistent(env, &key, &e);
     }
 }
 
 pub(crate) fn currency_limit(env: &Env, currency: &Symbol) -> Option<u32> {
-    env.storage().persistent().get(&VaultKey::CurrencyLimit(currency.clone()))
+    bump_instance(env);
+    read_persistent(env, &VaultKey::CurrencyLimit(currency.clone()))
 }
 
 /// Admin : limite de la devise en bps du capital. 0 bloque les nouvelles couvertures,
 /// 10 000 ou plus revient à ne pas avoir de limite (la capacité du pool borne déjà la réserve).
 pub(crate) fn set_currency_limit(env: &Env, currency: &Symbol, limit_bps: u32) {
     crate::admin(env).require_auth();
-    env.storage().persistent().set(&VaultKey::CurrencyLimit(currency.clone()), &limit_bps);
+    bump_instance(env);
+    write_persistent(env, &VaultKey::CurrencyLimit(currency.clone()), &limit_bps);
+    CurrencyLimitSet { currency: currency.clone(), limit_bps }.publish(env);
 }
 
 // ---- netting : calcul exact, NON branché (voir l'en-tête) ----
@@ -429,9 +557,10 @@ pub(crate) fn basket_max_loss(legs: &[Leg]) -> i128 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Pool, PoolClient};
-    use soroban_sdk::testutils::{Address as _, AuthorizedFunction};
-    use soroban_sdk::{symbol_short, token};
+    use crate::{pricing, Pool, PoolClient};
+    use soroban_sdk::testutils::storage::{Instance as _, Persistent as _};
+    use soroban_sdk::testutils::{Address as _, AuthorizedFunction, Events as _, Ledger as _};
+    use soroban_sdk::{symbol_short, token, Event as _};
 
     /// 1 USDC en 7 décimales.
     const USDC: i128 = 10_000_000;
@@ -1340,5 +1469,196 @@ mod tests {
             let gross: i128 = legs.iter().map(|l| l.margin).sum();
             assert!(basket_max_loss(legs) <= gross + n as i128);
         }
+    }
+
+    // ---- Phase 5 : durée de vie du stockage (TTL) ----
+
+    fn instance_ttl(s: &Setup) -> u32 {
+        s.vault(|env| env.storage().instance().get_ttl())
+    }
+
+    fn persistent_ttl(s: &Setup, key: &VaultKey) -> u32 {
+        s.vault(|env| env.storage().persistent().get_ttl(key))
+    }
+
+    fn advance_days(s: &Setup, days: u32) {
+        s.env.ledger().with_mut(|l| l.sequence_number += days * DAY_IN_LEDGERS);
+    }
+
+    #[test]
+    fn deposit_extends_instance_and_shares_ttl() {
+        let s = setup();
+        let lp = s.new_lp(1_000 * USDC);
+        assert_eq!(instance_ttl(&s), TTL_EXTEND_TO);
+        assert_eq!(persistent_ttl(&s, &VaultKey::Shares(lp)), TTL_EXTEND_TO);
+    }
+
+    #[test]
+    fn reading_shares_after_100_days_extends_ttl_again() {
+        let s = setup();
+        let lp = s.new_lp(1_000 * USDC);
+        advance_days(&s, 100);
+        assert_eq!(persistent_ttl(&s, &VaultKey::Shares(lp.clone())), TTL_EXTEND_TO - 100 * DAY_IN_LEDGERS);
+
+        // Sous le seuil de 30 jours : la lecture prolonge à 120 jours.
+        assert_eq!(s.client().lp_shares(&lp), 1_000 * USDC);
+        assert_eq!(persistent_ttl(&s, &VaultKey::Shares(lp)), TTL_EXTEND_TO);
+        assert_eq!(instance_ttl(&s), TTL_EXTEND_TO);
+    }
+
+    #[test]
+    fn reading_missing_entries_does_not_panic() {
+        // extend_ttl sur une clé absente panique : les lectures doivent l'éviter.
+        let s = setup();
+        let c = s.client();
+        assert_eq!(c.lp_shares(&Address::generate(&s.env)), 0);
+        assert_eq!(c.exposure(&symbol_short!("MXN")), zero_exposure());
+        assert_eq!(c.currency_limit(&symbol_short!("MXN")), None);
+    }
+
+    #[test]
+    fn exposure_and_currency_limit_ttl_extended() {
+        let s = setup();
+        s.new_lp(LP_CAPITAL);
+        s.client().set_currency_limit(&symbol_short!("MXN"), &5000);
+        assert_eq!(persistent_ttl(&s, &VaultKey::CurrencyLimit(symbol_short!("MXN"))), TTL_EXTEND_TO);
+
+        let h = make_hedge(&s, symbol_short!("MXN"), Side::BuyCurrency, MXN_1M, RATE_055, 1000);
+        open_pos(&s, &h);
+        assert_eq!(persistent_ttl(&s, &VaultKey::Exposure(symbol_short!("MXN"))), TTL_EXTEND_TO);
+
+        advance_days(&s, 100);
+        s.client().exposure(&symbol_short!("MXN"));
+        s.client().currency_limit(&symbol_short!("MXN"));
+        assert_eq!(persistent_ttl(&s, &VaultKey::Exposure(symbol_short!("MXN"))), TTL_EXTEND_TO);
+        assert_eq!(persistent_ttl(&s, &VaultKey::CurrencyLimit(symbol_short!("MXN"))), TTL_EXTEND_TO);
+    }
+
+    // ---- Phase 5 : événements ----
+
+    #[test]
+    fn deposit_emits_lp_deposited() {
+        let s = setup();
+        let a = s.new_lp(1_000 * USDC);
+        assert_eq!(
+            s.env.events().all().filter_by_contract(&s.pool),
+            [LpDeposited { lp: a, amount: 1_000 * USDC, shares: 1_000 * USDC }.to_xdr(&s.env, &s.pool)]
+        );
+
+        // Après un gain, l'événement porte les parts émises par ce dépôt (pas le total du LP).
+        settle_pool_gains_margin(&s, 100 * USDC);
+        let b = s.new_lp(1_100 * USDC);
+        assert_eq!(
+            s.env.events().all().filter_by_contract(&s.pool),
+            [LpDeposited { lp: b, amount: 1_100 * USDC, shares: 1_000 * USDC }.to_xdr(&s.env, &s.pool)]
+        );
+    }
+
+    #[test]
+    fn withdraw_emits_lp_withdrew() {
+        let s = setup();
+        let lp = s.new_lp(1_000 * USDC);
+        let sme = Address::generate(&s.env);
+        s.open_margin(&sme, 500 * USDC);
+        s.client().withdraw(&lp, &(400 * USDC));
+        assert_eq!(
+            s.env.events().all().filter_by_contract(&s.pool),
+            [LpWithdrew { lp, shares: 400 * USDC, usdc: 200 * USDC }.to_xdr(&s.env, &s.pool)]
+        );
+    }
+
+    #[test]
+    fn positions_emit_reserved_and_released() {
+        let s = setup();
+        s.new_lp(LP_CAPITAL);
+        let h = make_hedge(&s, symbol_short!("MXN"), Side::SellCurrency, MXN_1M, RATE_055, 1000);
+        open_pos(&s, &h);
+        assert_eq!(
+            s.env.events().all().filter_by_contract(&s.pool),
+            [PositionReserved { currency: symbol_short!("MXN"), side: Side::SellCurrency, margin: MARGIN }
+                .to_xdr(&s.env, &s.pool)]
+        );
+        s.vault(|env| close_position(env, &h));
+        assert_eq!(
+            s.env.events().all().filter_by_contract(&s.pool),
+            [PositionReleased { currency: symbol_short!("MXN"), side: Side::SellCurrency, margin: MARGIN }
+                .to_xdr(&s.env, &s.pool)]
+        );
+    }
+
+    #[test]
+    fn set_currency_limit_emits_event() {
+        let s = setup();
+        s.client().set_currency_limit(&symbol_short!("ARS"), &1000);
+        assert_eq!(
+            s.env.events().all().filter_by_contract(&s.pool),
+            [CurrencyLimitSet { currency: symbol_short!("ARS"), limit_bps: 1000 }.to_xdr(&s.env, &s.pool)]
+        );
+    }
+
+    // ---- Phase 5 : calculs protégés ----
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #110)")]
+    fn huge_deposit_returns_overflow_error() {
+        let s = setup();
+        s.new_lp(1_000 * USDC);
+        // montant × TotalShares dépasse i128 : erreur 110 avant tout transfert.
+        let lp = Address::generate(&s.env);
+        s.client().deposit_lp(&lp, &(i128::MAX / 1_000));
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #110)")]
+    fn huge_notional_returns_overflow_error() {
+        let s = setup();
+        s.new_lp(LP_CAPITAL);
+        let mut h = make_hedge(&s, symbol_short!("MXN"), Side::BuyCurrency, MXN_1M, RATE_055, 1000);
+        h.notional = i128::MAX / 2;
+        open_pos(&s, &h);
+    }
+
+    #[test]
+    fn mul_div_rounds_down() {
+        let s = setup();
+        assert_eq!(s.vault(|env| mul_div(env, 10, 1_000, 1_100)), 9);
+        assert_eq!(s.vault(|env| mul_div(env, 7, 3, 2)), 10);
+    }
+
+    // ---- Phase 5 : corrections d'audit ----
+
+    /// Mauvais usage (book_loss sans release) : capital sous la réserve, capacité négative.
+    fn negative_capacity(s: &Setup) -> Address {
+        let lp = s.new_lp(100 * USDC);
+        s.vault(|env| reserve(env, 100 * USDC));
+        s.vault(|env| book_loss(env, 50 * USDC));
+        assert!(s.client().capacity() < 0);
+        lp
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #107)")]
+    fn withdraw_with_negative_capacity_is_refused() {
+        let s = setup();
+        let lp = negative_capacity(&s);
+        s.client().withdraw(&lp, &(10 * USDC));
+    }
+
+    #[test]
+    fn reads_never_negative_with_negative_capacity() {
+        let s = setup();
+        let lp = negative_capacity(&s);
+        assert_eq!(s.client().lp_balance(&lp), 0);
+        assert_eq!(s.client().exit_price(), 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #100)")]
+    fn open_position_with_zero_notional_panics() {
+        let s = setup();
+        s.new_lp(LP_CAPITAL);
+        let mut h = make_hedge(&s, symbol_short!("MXN"), Side::BuyCurrency, MXN_1M, RATE_055, 1000);
+        h.notional = 0;
+        open_pos(&s, &h);
     }
 }

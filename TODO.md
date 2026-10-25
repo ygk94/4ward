@@ -167,7 +167,7 @@ Un prix faux = arbitrage contre le pool : c'est ce qui rend le produit crédible
 
 ### Oracle et scripts
 1. ⬜ `scripts/crash.sh` : `set_price` du MXN +12 % sur le mock en ligne de commande (filet de sécurité pendant la vidéo). Utiliser les alias (`fx-admin`, `fx-mock-oracle`) : tu le testes sur ton déploiement, Hugo le lance sur le sien
-2. ⬜ ⚠️ `spot` refuse un prix de plus de 300 s : pendant la démo, le prix du mock doit être réécrit juste avant chaque `settle` (le crash le fait ; sinon relancer `set_price`). Juste avant la vidéo : donner à Hugo la commande pour aligner le prix du mock sur le vrai spot Reflector (c'est lui qui la lance, avec `fx-admin`) ; prévenir Paiement pour l'offre DEX
+2. ⬜ ⚠️ `spot` refuse un prix de plus de 900 s (`MAX_PRICE_AGE_SECS`) : pendant la démo, le prix du mock doit être frais avant `open_hedge` (le taux forward lit le spot) ET avant `settle` (le crash le fait ; sinon relancer `set_price`). Juste avant la vidéo : donner à Hugo la commande pour aligner le prix du mock sur le vrai spot Reflector (c'est lui qui la lance, avec `fx-admin`) ; prévenir Paiement pour l'offre DEX
 3. ⬜ Donner à Hugo la lecture du spot Reflector côté front (contrat, `Asset::Other("MXN")`, conversion des 14 décimales) pour `QuoteCard`
 
 ### Rendement du capital libre (Etherfuse, indexé sur les bons du Trésor US)
