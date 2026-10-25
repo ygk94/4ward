@@ -166,15 +166,15 @@ Liens explorateur : `https://stellar.expert/explorer/testnet/tx/<hash>`.
 
 ## Chiffres de référence (1 000 000 MXN, 90 jours, spot 0,055, plafond 10 %, vrai Pricing)
 
-Taux bloqué `F` = 0,0548731 (parité USD 4 % / MXN 7 % sur 90 jours, puis spread 0,5 % contre Lucía) → prix figé **54 873,05 USDC**, marge **5 487,31 USDC**. Sur 60 s (sans mode démo) : 55 275 / 5 527,50.
+Taux Etherfuse figés dans `scripts/rates.snapshot` (USD 3,60 %, MXN 5,55 %). Taux bloqué `F` = 0,0550128 (parité des taux sur 90 jours, puis spread 0,5 % contre Lucía) → prix figé **55 012,81 USDC**, marge **5 501,28 USDC**. Sur 60 s (sans mode démo) : 55 275 / 5 527,50.
 
 | Peso | Spot | P&L | Versé par `settle` | Coût des pesos | Coût total | Sans protection |
 |---|---|---|---|---|---|---|
-| +8 % | 0,0594 | +4 526,95 | 10 014,25 | 59 400 | **54 873,05** | 59 400 |
-| +12 % | 0,0616 | +5 487,31 (plafonné, écart 6 727) | 10 974,61 | 61 600 | **56 112,69** | 61 600 |
-| −8 % | 0,0506 | −4 273,05 | 1 214,25 | 50 600 | **54 873,05** | 50 600 |
+| +8 % | 0,0594 | +4 387,19 | 9 888,47 | 59 400 | **55 012,81** | 59 400 |
+| +12 % | 0,0616 | +5 501,28 (plafonné, écart 6 587) | 11 002,56 | 61 600 | **56 098,72** | 61 600 |
+| −8 % | 0,0506 | −4 412,81 | 1 088,47 | 50 600 | **55 012,81** | 50 600 |
 
-À +12 %, Lucía ne paie que ce qui dépasse son plafond (1 239,64 USDC au lieu de 6 727).
+À +12 %, Lucía ne paie que ce qui dépasse son plafond (1 085,91 USDC au lieu de 6 587).
 Avec un autre spot (mock aligné sur Reflector), recalculer avec `docs/video-script.md` § « Recalculer les chiffres ».
 
 ## Répétition du 25/10 (déploiement de Clément, +8 %)
@@ -231,5 +231,5 @@ Note Windows : `setup-testnet.sh` appelle `python3`, qui sous Windows ouvre le M
 | 6 | path payment 1 000 000 MXN | 61 600 USDC | [1361ff9b…](https://stellar.expert/explorer/testnet/tx/1361ff9b5626703364e53de0b4159ea904165b63d533e3a38a6319b7aefe6938) |
 | 4 | `settle` 10 s après l'échéance | fixing 0,0616, versé 10 974,61 | [bc3f506f…](https://stellar.expert/explorer/testnet/tx/bc3f506f54060c2bf18d897e30ac2a1a87d5908ca713ad956a4f7487388b62ef) |
 
-Coût total de Lucía : **56 112,69 USDC** au centime, le chiffre du script vidéo.
+Coût total de Lucía : **56 112,69 USDC** au centime, le chiffre du script vidéo avec les taux de l'époque (USD 4 % / MXN 7 %). Avec les taux Etherfuse : 56 098,72.
 
