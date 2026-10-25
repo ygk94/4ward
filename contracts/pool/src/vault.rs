@@ -70,25 +70,59 @@ pub(crate) fn capacity(env: &Env) -> i128 {
 // ---- appelé par hedge.rs (interface Paiement → Vault) ----
 
 /// Bloque `amount` USDC de capacité pour une nouvelle couverture. Panique si capacité insuffisante.
-pub(crate) fn reserve(_env: &Env, _amount: i128) {
-    panic!("TODO vault")
+/// Erreurs : `InvalidAmount` si `amount <= 0`, `InsufficientCapacity` si `amount > capacity()`.
+pub(crate) fn reserve(env: &Env, amount: i128) {
+    if amount <= 0 {
+        panic_with_error!(env, VaultError::InvalidAmount);
+    }
+    if amount > capacity(env) {
+        panic_with_error!(env, VaultError::InsufficientCapacity);
+    }
+    set_reserved(env, reserved(env) + amount);
 }
 
 /// Libère `amount` de capacité réservée (couverture réglée).
-pub(crate) fn release(_env: &Env, _amount: i128) {
-    panic!("TODO vault")
+/// Erreurs : `InvalidAmount` si `amount <= 0`, `ReleaseExceedsReserved` si `amount > Reserved`.
+pub(crate) fn release(env: &Env, amount: i128) {
+    if amount <= 0 {
+        panic_with_error!(env, VaultError::InvalidAmount);
+    }
+    let current = reserved(env);
+    if amount > current {
+        panic_with_error!(env, VaultError::ReleaseExceedsReserved);
+    }
+    set_reserved(env, current - amount);
 }
 
 /// Le pool encaisse un gain (la PME a perdu sur sa marge) : `TotalDeposits += amount`.
 /// Les USDC sont déjà dans le contrat (ils viennent de la marge).
-pub(crate) fn book_gain(_env: &Env, _amount: i128) {
-    panic!("TODO vault")
+/// `amount == 0` est accepté (P&L nul) ; `InvalidAmount` si négatif.
+pub(crate) fn book_gain(env: &Env, amount: i128) {
+    if amount < 0 {
+        panic_with_error!(env, VaultError::InvalidAmount);
+    }
+    if amount == 0 {
+        return;
+    }
+    set_total_deposits(env, total_deposits(env) + amount);
 }
 
 /// Le pool paie une perte (la PME est protégée) : `TotalDeposits -= amount`.
 /// Le transfert vers la PME est fait par hedge.rs avec la restitution de la marge.
-pub(crate) fn book_loss(_env: &Env, _amount: i128) {
-    panic!("TODO vault")
+/// `amount == 0` est accepté (P&L nul) ; `InvalidAmount` si négatif,
+/// `LossExceedsCapital` si le capital des LPs deviendrait négatif.
+pub(crate) fn book_loss(env: &Env, amount: i128) {
+    if amount < 0 {
+        panic_with_error!(env, VaultError::InvalidAmount);
+    }
+    if amount == 0 {
+        return;
+    }
+    let total = total_deposits(env);
+    if amount > total {
+        panic_with_error!(env, VaultError::LossExceedsCapital);
+    }
+    set_total_deposits(env, total - amount);
 }
 
 #[cfg(test)]
