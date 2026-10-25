@@ -37,23 +37,23 @@ Doit marcher **à l'identique** sur le mock-oracle et sur Reflector FX.
   Reflector met à jour toutes les 300 s → `MAX_AGE = 900` (3 résolutions) laisse de la marge. Attention : le mock horodate au `set_price`, donc en test il faut avancer le ledger avec `env.ledger().set_timestamp(...)` **avant** `set_price`, ou re-setter le prix.
 - ✅ (option) vérifier `decimals() == 14` une fois, ou documenter l'hypothèse. Reflector FX = 14, mock = 14.
 
-### 1.2 🔴 `forward_rate(env, currency, side, duration_secs) -> i128`
+### 1.2 ✅ `forward_rate(env, currency, side, duration_secs) -> i128`
 ```
 F = S × (1 + r_USD·t) / (1 + r_dev·t)      t = duration_secs / 31_536_000
 ```
-- ⬜ Tout en `i128`, en bps. Avec `SECS_PER_YEAR = 31_536_000` et `BPS = 10_000` :
+- ✅ Tout en `i128`, en bps. Avec `SECS_PER_YEAR = 31_536_000` et `BPS = 10_000` :
   ```
   num = BPS × SECS_PER_YEAR + r_usd_bps × duration
   den = BPS × SECS_PER_YEAR + r_dev_bps × duration
   F   = S × num / den
   ```
   Ordre des opérations : multiplier **avant** de diviser (S ≈ 5,5e12, num ≈ 3,2e11 → 1,8e24, largement sous i128::MAX ≈ 1,7e38 ; vérifier avec un spot BRL/EUR ≈ 1e14 et une durée d'1 an : toujours OK).
-- ⬜ Taux lus dans `DataKey::Rate(currency)` et `DataKey::Rate("USD")` ; absent → panic `"rate not set"` (pas de défaut silencieux : un taux manquant = prix faux = arbitrage).
-- ⬜ Spread **contre l'utilisateur**, lu dans `DataKey::SpreadBps` :
+- ✅ Taux lus dans `DataKey::Rate(currency)` et `DataKey::Rate("USD")` ; absent → panic `"rate not set"` (pas de défaut silencieux : un taux manquant = prix faux = arbitrage).
+- ✅ Spread **contre l'utilisateur**, lu dans `DataKey::SpreadBps` :
   - `BuyCurrency` (Lucía paie la devise) → `F × (BPS + spread) / BPS`
   - `SellCurrency` → `F × (BPS − spread) / BPS`
-- ⬜ Arrondis en faveur du pool : `BuyCurrency` → arrondir **vers le haut** (ceil : `(a + b − 1) / b`), `SellCurrency` → arrondir vers le bas (division entière). Factoriser un helper `mul_div_ceil` / `mul_div_floor`.
-- ⬜ `duration_secs == 0` → F = S (autorisé pour la démo en secondes). Durée > 1 an → panic (hors produit).
+- ✅ Arrondis en faveur du pool : `BuyCurrency` → arrondir **vers le haut** (ceil : `(a + b − 1) / b`), `SellCurrency` → arrondir vers le bas (division entière). Factoriser un helper `mul_div_ceil` / `mul_div_floor`.
+- ✅ `duration_secs == 0` → F = S (autorisé pour la démo en secondes). Durée > 1 an → panic (hors produit).
 
 ### 1.3 `quote(...) -> Quote`
 - ⬜ `spot`, `forward_rate`, `usdc_cost = to_usdc(notional, forward_rate)`, `margin = usdc_cost × cap_bps / BPS` (ceil)
@@ -66,11 +66,11 @@ F = S × (1 + r_USD·t) / (1 + r_dev·t)      t = duration_secs / 31_536_000
 - ⬜ `check_cap` : `cap_bps < MinCap(currency)` → panic `"cap below minimum"` ; devise sans minimum → panic (devise non activée = refusée, c'est la liste blanche des devises) ; `cap_bps > 5000` → panic (plafond absurde)
 - ⬜ Valeurs : MXN 500 (5 %), BRL 700 (7 %), ARS 1500 (15 %), EUR 300 (3 %) — à calibrer avec `sim/` (§4)
 
-### 1.5 `set_rate` / `set_spread`
-- ⬜ `admin(env).require_auth()` dans les deux
-- ⬜ `set_rate(currency, bps)` : `bps ≤ 10_000` (100 %/an, ARS peut être haut), stocker `Rate(currency)`
-- ⬜ `set_spread(bps)` : `bps ≤ 500`
-- ⬜ Valeurs sourcées (noter la source dans un commentaire + dans le deck) :
+### 1.5 ✅ `set_rate` / `set_spread`
+- ✅ `admin(env).require_auth()` dans les deux
+- ✅ `set_rate(currency, bps)` : `bps ≤ 10_000` (100 %/an, ARS peut être haut), stocker `Rate(currency)`
+- ✅ `set_spread(bps)` : `bps ≤ 500`
+- ✅ Valeurs sourcées (noter la source dans un commentaire + dans le deck) :
   | Devise | Taux directeur ~oct. 2026 | bps |
   |---|---|---|
   | USD | Fed funds ≈ 4 % | 400 |

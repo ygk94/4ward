@@ -22,8 +22,8 @@ mod pricing_tests {
     //! Oracle de test minimal, même interface de lecture SEP-40 que Reflector FX et que `contracts/mock-oracle`
     //! (`lastprice(Asset::Other(sym))`, `decimals()` = 14). Réutilise les types `Asset` / `PriceData` du client
     //! déclaré dans `pricing.rs`, ce qui vérifie au passage que l'encodage coïncide.
-    use crate::pricing::{self, Asset, PriceData, MAX_PRICE_AGE_SECS};
-    use crate::{Pool, PRICE_DECIMALS};
+    use crate::pricing::{self, Asset, PriceData, MAX_PRICE_AGE_SECS, SECS_PER_YEAR};
+    use crate::{Pool, PoolClient, Side, PRICE_DECIMALS};
     use soroban_sdk::testutils::{Address as _, Ledger as _};
     use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol};
 
@@ -88,6 +88,39 @@ mod pricing_tests {
         s.env.as_contract(&s.pool, || pricing::spot(&s.env, currency))
     }
 
+    /// Pose les taux USD et devise via les points d'entrée publics (auth mockée par `setup`).
+    fn set_rates(s: &Setup, usd_bps: u32, dev_currency: &Symbol, dev_bps: u32) {
+        let pool = PoolClient::new(&s.env, &s.pool);
+        pool.set_rate(&Symbol::new(&s.env, "USD"), &usd_bps);
+        pool.set_rate(dev_currency, &dev_bps);
+    }
+
+    fn set_spread(s: &Setup, spread_bps: u32) {
+        PoolClient::new(&s.env, &s.pool).set_spread(&spread_bps);
+    }
+
+    /// Même principe que `spot` : `forward_rate` n'a pas encore de point d'entrée public.
+    fn forward(s: &Setup, currency: &Symbol, side: Side, duration: u64) -> i128 {
+        s.env.as_contract(&s.pool, || pricing::forward_rate(&s.env, currency, side, duration))
+    }
+
+    /// 90 jours.
+    const D90: u64 = 7_776_000;
+    /// F = S × 318_470_400_000 / 320_803_200_000 (r_USD 400 bps, r_MXN 700 bps, 90 j), floor.
+    /// Valeurs calculées indépendamment (Python, entiers exacts).
+    const MXN_F90: i128 = 5_460_005_386_479;
+    const MXN_F90_BUY_50: i128 = 5_487_305_413_412;
+    const MXN_F90_SELL_50: i128 = 5_432_705_359_546;
+
+    /// Spot MXN, r_USD 4 %, r_MXN 7 %.
+    fn setup_mxn() -> (Setup, Symbol) {
+        let s = setup();
+        let mxn = mxn(&s.env);
+        set_price(&s, &mxn, MXN_SPOT);
+        set_rates(&s, 400, &mxn, 700);
+        (s, mxn)
+    }
+
     #[test]
     fn pricing_spot_reads_oracle() {
         let s = setup();
@@ -139,15 +172,94 @@ mod pricing_tests {
         s.env.ledger().set_timestamp(T0 - 10);
         assert_eq!(spot(&s, &mxn), MXN_SPOT);
     }
+
+    #[test]
+    fn pricing_forward_parity() {
+        let (s, mxn) = setup_mxn();
+        set_spread(&s, 0);
+        // Sans spread, les deux côtés coïncident.
+        assert_eq!(forward(&s, &mxn, Side::BuyCurrency, D90), MXN_F90);
+        assert_eq!(forward(&s, &mxn, Side::SellCurrency, D90), MXN_F90);
+    }
+
+    #[test]
+    fn pricing_spread_direction() {
+        let (s, mxn) = setup_mxn();
+        set_spread(&s, 50);
+        let buy = forward(&s, &mxn, Side::BuyCurrency, D90);
+        let sell = forward(&s, &mxn, Side::SellCurrency, D90);
+        assert_eq!(buy, MXN_F90_BUY_50); // ceil
+        assert_eq!(sell, MXN_F90_SELL_50); // floor
+        assert!(sell < MXN_F90 && MXN_F90 < buy);
+    }
+
+    #[test]
+    fn pricing_forward_zero_duration() {
+        let (s, mxn) = setup_mxn();
+        set_spread(&s, 0);
+        assert_eq!(forward(&s, &mxn, Side::BuyCurrency, 0), MXN_SPOT);
+        assert_eq!(forward(&s, &mxn, Side::SellCurrency, 0), MXN_SPOT);
+        set_spread(&s, 50);
+        // ceil(S × 10050 / 10000) ; S × 10050 est divisible par 10000 ici.
+        assert_eq!(forward(&s, &mxn, Side::BuyCurrency, 0), 5_527_500_000_000);
+        assert_eq!(forward(&s, &mxn, Side::SellCurrency, 0), 5_472_500_000_000);
+    }
+
+    #[test]
+    fn pricing_forward_lower_rate_currency() {
+        let (s, mxn) = setup_mxn();
+        set_spread(&s, 0);
+        // MXN mieux rémunéré que l'USD : cote moins cher à terme.
+        assert!(forward(&s, &mxn, Side::BuyCurrency, D90) < MXN_SPOT);
+        // EUR moins rémunéré que l'USD : cote plus cher à terme.
+        let eur = Symbol::new(&s.env, "EUR");
+        let eur_spot: i128 = 110_000_000_000_000; // 1,1 USD/EUR
+        set_price(&s, &eur, eur_spot);
+        PoolClient::new(&s.env, &s.pool).set_rate(&eur, &200);
+        let f = forward(&s, &eur, Side::BuyCurrency, D90);
+        assert!(f > eur_spot);
+        assert_eq!(f, 110_539_803_707_742);
+    }
+
+    #[test]
+    #[should_panic(expected = "rate not set")]
+    fn pricing_forward_rate_missing_panics() {
+        let s = setup();
+        let mxn = mxn(&s.env);
+        set_price(&s, &mxn, MXN_SPOT);
+        forward(&s, &mxn, Side::BuyCurrency, D90);
+    }
+
+    #[test]
+    #[should_panic(expected = "duration too long")]
+    fn pricing_forward_duration_too_long_panics() {
+        let (s, mxn) = setup_mxn();
+        forward(&s, &mxn, Side::BuyCurrency, SECS_PER_YEAR + 1);
+    }
+
+    #[test]
+    fn pricing_set_rate_rejects_absurd_values() {
+        let s = setup();
+        let pool = PoolClient::new(&s.env, &s.pool);
+        let mxn = mxn(&s.env);
+        assert!(pool.try_set_rate(&mxn, &10_000).is_ok());
+        assert!(pool.try_set_rate(&mxn, &10_001).is_err());
+        assert!(pool.try_set_spread(&500).is_ok());
+        assert!(pool.try_set_spread(&501).is_err());
+    }
+
+    #[test]
+    fn pricing_set_rate_requires_admin() {
+        // Pas de mock_all_auths : l'admin n'a rien signé.
+        let env = Env::default();
+        let admin = Address::generate(&env);
+        let usdc = Address::generate(&env);
+        let oracle = env.register(TestOracle, ());
+        let pool = PoolClient::new(&env, &env.register(Pool, (&admin, &usdc, &oracle, 50u32)));
+        assert!(pool.try_set_rate(&mxn(&env), &700).is_err());
+        assert!(pool.try_set_spread(&50).is_err());
+    }
 }
-
-#[test]
-#[ignore = "TODO pricing: r_MXN 7 %, r_USD 4 %, 90 j → F ≈ 0.05460 avant spread"]
-fn pricing_forward_parity() {}
-
-#[test]
-#[ignore = "TODO pricing: le spread est contre l'utilisateur dans les deux sens"]
-fn pricing_spread_direction() {}
 
 #[test]
 #[ignore = "TODO pricing: plafond sous le minimum de la devise refusé"]
