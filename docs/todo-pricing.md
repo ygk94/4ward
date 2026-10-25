@@ -77,7 +77,7 @@ F = S × (1 + r_USD·t) / (1 + r_dev·t)      t = duration_secs / 31_536_000
   | USD | Fed funds ≈ 4 % | 400 |
   | MXN | Banxico ≈ 7 % | 700 |
   | BRL | Selic ≈ 10,5 % | 1050 |
-  | ARS | BCRA, à vérifier (≈ 30–40 %) | ~3500 |
+  | ARS | Pas de taux directeur depuis la fin des LEFI (pilotage par agrégats) ; proxy marché : plazo fijo 30 j 16–24 % (Banco Nación 19,25 %, La Nación 21/10/2026), BADLAR ≈ 22 % (ARCA, 20/09/2026) | 2200 |
   | EUR | BCE ≈ 2 % | 200 |
   → vérifier les chiffres réels avant la vidéo, les mettre dans `scripts/setup-testnet.sh` via Hugo (§5).
 
@@ -95,7 +95,7 @@ Ce que `hedge.rs` attend de nous est conforme à ce qu'on a livré : `spot`, `fo
 - ⬜ **Durée nulle** : `open` refuse `duration_secs == 0`, `quote` l'accepte. Dans `QuoteCard`, imposer une durée ≥ 1 s pour ne pas afficher un devis que `open_hedge` refusera.
 - ⬜ **Tests après merge** : Clément ajoute `mock-oracle` en dev-dependency de `contracts/pool/Cargo.toml`. Une fois mergé, on pourra remplacer notre `TestOracle` par le vrai `mock_oracle::MockOracle` dans `pricing_tests` (optionnel, gain de fidélité). Conflit attendu sur `test.rs` : nul si chacun reste dans son bloc, nos imports sont dans le module `pricing_tests`.
 - ⬜ **Après merge**, les tests `open_*` de Clément prendront le vrai `forward_rate` : lui donner les valeurs exactes (spot 0,055, 400/700 bps, 90 j, spread 50 → Buy 5_487_305_413_412 ; marge 10 % sur 1 M MXN = 54_873_054_135).
-- ⬜ **Setup testnet** : sans `set_min_cap`, **aucune devise n'est cotable** (liste blanche). Les appels `set_rate` / `set_min_cap` du §5 deviennent bloquants pour le parcours complet de Clément : les donner à Hugo dès maintenant.
+- ✅ **Setup testnet** : sans `set_min_cap`, **aucune devise n'est cotable** (liste blanche). Bloc shell + message pour Hugo rédigés au §5 (25/10).
 - ⬜ Point de vive voix avec Hugo (relayé par Clément) : ses clés de stockage Vault et l'API d'exposition par devise. Côté Pricing, on n'utilise que `Oracle`, `SpreadBps`, `Rate`, `MinCap` de `DataKey` : pas d'impact tant que `lib.rs` ne bouge pas.
 
 ---
@@ -103,21 +103,22 @@ Ce que `hedge.rs` attend de nous est conforme à ce qu'on a livré : `spot`, `fo
 ## 2. Tests (bloc Pricing de `test.rs`)
 
 Mise en place commune (helper dans le bloc Pricing, ne pas toucher aux autres blocs) :
-- ⬜ `env.mock_all_auths()`, enregistrer le mock-oracle **par son wasm** (`contractimport!(file = "../../target/wasm32v1-none/release/mock_oracle.wasm")`) ou par crate `mock-oracle` en dev-dependency (plus simple : `[dev-dependencies] mock-oracle = { path = "../mock-oracle" }` puis `env.register(mock_oracle::MockOracle, ...)` — demander à Hugo pour le `Cargo.toml` de `pool`, c'est un fichier partagé). Préférer le `contractimport!` car la CI fait `cargo test` sans `stellar contract build`… donc **la dev-dependency est la bonne option** pour la CI.
-- ⬜ `set_price(MXN, 5_500_000_000_000)`, `set_rate(USD, 400)`, `set_rate(MXN, 700)`, `set_spread(50)`, `set_min_cap(MXN, 500)`
+- ✅ (fait avec notre `TestOracle` dans `pricing_tests`, en attendant la dev-dependency `mock-oracle` de Clément, cf. §1bis) `env.mock_all_auths()`, enregistrer le mock-oracle **par son wasm** (`contractimport!(file = "../../target/wasm32v1-none/release/mock_oracle.wasm")`) ou par crate `mock-oracle` en dev-dependency (plus simple : `[dev-dependencies] mock-oracle = { path = "../mock-oracle" }` puis `env.register(mock_oracle::MockOracle, ...)` — demander à Hugo pour le `Cargo.toml` de `pool`, c'est un fichier partagé). Préférer le `contractimport!` car la CI fait `cargo test` sans `stellar contract build`… donc **la dev-dependency est la bonne option** pour la CI.
+- ✅ `set_price(MXN, 5_500_000_000_000)`, `set_rate(USD, 400)`, `set_rate(MXN, 700)`, `set_spread(50)`, `set_min_cap(MXN, 500)`
 
 Tests à retirer de `#[ignore]` :
-- ⬜ `pricing_forward_parity` : spot 0,055, 90 j (7_776_000 s), spread 0 → F = 5_500_000_000_000 × (10_000×31_536_000 + 400×7_776_000) / (10_000×31_536_000 + 700×7_776_000). Calculer la valeur exacte attendue en i128 (≈ 5_459_7xx_xxx_xxx, soit ≈ 0,05460) et l'assert à l'unité près (pas de « ≈ »).
-- ⬜ `pricing_spread_direction` : avec spread 50 bps, `Buy ≥ F_sans_spread`, `Sell ≤ F_sans_spread`, et `Buy − F ≈ F × 0,5 %` ; vérifier aussi que ceil/floor ne se croisent jamais (`Sell < Buy`).
-- ⬜ `pricing_min_cap` : `check_cap(MXN, 400)` panique (`#[should_panic]`), `500` passe, devise inconnue panique.
-- ⬜ Nouveaux tests (ajouter au bloc) :
+- ✅ `pricing_forward_parity` : spot 0,055, 90 j (7_776_000 s), spread 0 → F = 5_500_000_000_000 × (10_000×31_536_000 + 400×7_776_000) / (10_000×31_536_000 + 700×7_776_000). Calculer la valeur exacte attendue en i128 (≈ 5_459_7xx_xxx_xxx, soit ≈ 0,05460) et l'assert à l'unité près (pas de « ≈ »).
+- ✅ `pricing_spread_direction` : avec spread 50 bps, `Buy ≥ F_sans_spread`, `Sell ≤ F_sans_spread`, et `Buy − F ≈ F × 0,5 %` ; vérifier aussi que ceil/floor ne se croisent jamais (`Sell < Buy`).
+- ✅ `pricing_min_cap` : `check_cap(MXN, 400)` panique (`#[should_panic]`), `500` passe, devise inconnue panique.
+- ✅ Nouveaux tests (ajouter au bloc) :
   - `pricing_quote_amounts` : 1 M MXN, cap 10 % → `usdc_cost` ≈ 54 870 USDC avec spread, `margin` = 10 % de ça, cohérent avec le README (« vous paierez 54 870 USDC »). Recalculer le chiffre exact et **mettre à jour le README si ça diffère** (demander à Hugo).
   - `pricing_stale_price_panics` : `set_price`, puis `env.ledger().set_timestamp(now + 901)`, `spot` panique.
   - `pricing_no_price_panics` : devise sans prix → panic.
   - `pricing_rate_missing_panics` : `forward_rate` sans `set_rate` → panic.
   - `pricing_set_rate_requires_admin` : sans `mock_all_auths` → échec d'auth.
   - `pricing_duration_zero_is_spot` : F(0 s) = S ± spread.
-- ⬜ `cargo test -p pool` vert, CI verte sur le push.
+- ✅ `cargo test -p pool` vert (21 tests Pricing)
+- ⬜ CI verte sur le push (rien n'est encore poussé)
 
 ---
 
@@ -170,13 +171,54 @@ Dépend de `shared/wallet.ts` et `shared/contract.ts` (Hugo, 🔴). En attendant
 
 ## 5. Livrables aux autres
 
-- ⬜ 🔴 À Hugo, pour `scripts/setup-testnet.sh` (dès que §1.5 est fixé) :
-  ```sh
-  for r in "USD 400" "MXN 700" "BRL 1050" "ARS 3500"; do set -- $r
-    stellar contract invoke --id $POOL --source-account $ADMIN --network $NET --quiet -- set_rate --currency $1 --rate_bps $2; done
-  for c in "MXN 500" "BRL 700" "ARS 1500"; do set -- $c   # sans set_min_cap la devise n'est PAS cotable (liste blanche)
-    stellar contract invoke --id $POOL --source-account $ADMIN --network $NET --quiet -- set_min_cap --currency $1 --cap_bps $2; done
-  ```
+- ✅ 🔴 À Hugo, pour `scripts/setup-testnet.sh` : bloc rédigé et testé (25/10), message ci-dessous **à envoyer**
+- ⬜ 🔴 Appliqué par Hugo sur le testnet (redéploiement du pool + bloc), puis `quote` vérifié contre les valeurs de référence
+
+**État vérifié le 25/10 vers 19h40 (lecture seule, `--send=no`) :**
+- Le pool déployé (`CBEUIYUG…6CJR`) date du squelette : `set_rate` et `quote` → `UnreachableCodeReached` (`panic!("TODO")`). **Il faut le redéployer** avec le wasm de `feat/pricing` (ou du merge) avant le bloc ci-dessous.
+- `fx-admin` n'existe pas sur la machine de Lancelot : seul Hugo peut redéployer / appeler les fonctions admin.
+- Syntaxe validée : les 9 commandes ci-dessous passent le parseur du CLI contre la spec du pool déployé et arrivent au contrat avec les bons arguments (`data:[USD, 400]` …). ⚠️ Le `set -- $r` suppose bash (le script a `#!/usr/bin/env bash`) ; sous zsh le découpage ne se fait pas.
+- Prix du mock **périmés** (MXN posé il y a ~2 h) : tout `quote` / `settle` sur le mock échoue `stale price` (900 s). Il faut reposer les prix moins de 15 min avant chaque devis/règlement (→ `crash.sh --refresh`, §4.1).
+- Le mock n'a **pas de prix EUR** : ouvrir EUR sans `set_price EUR` → `no price`.
+- Reflector au même instant : MXN 0,05325 · BRL 0,19816 · ARS 0,000654 · EUR 1,1193 (mock : 0,055 · 0,18 · 0,001 · —).
+
+**Message pour Hugo (à copier) :**
+
+> Salut Hugo, c'est Lancelot (Pricing). Pour `scripts/setup-testnet.sh`, deux changements, bloquants pour le parcours de Clément :
+>
+> 1. Dans la boucle `set_price` du mock, ajouter l'EUR (valeur Reflector du 25/10) :
+>    `for p in "MXN 5500000000000" "BRL 18000000000000" "ARS 100000000000" "EUR 111930000000000"; do`
+>
+> 2. Juste après `echo "   pool = $POOL"`, insérer :
+> ```sh
+> say "Paramètres Pricing (taux d'intérêt, plafonds minimum)"
+> # Taux annuels en bps. Sources (oct. 2026) : Fed ≈ 4 %, Banxico ≈ 7 %, Selic ≈ 10,5 %, BCE ≈ 2 %,
+> # ARS : pas de taux directeur BCRA, proxy BADLAR / plazo fijo ≈ 22 %. Détail : docs/todo-pricing.md §1.5
+> for r in "USD 400" "MXN 700" "BRL 1050" "ARS 2200" "EUR 200"; do
+>   set -- $r
+>   stellar contract invoke --id $POOL --source-account $ADMIN --network $NET --quiet -- \
+>     set_rate --currency $1 --rate_bps $2 >/dev/null
+> done
+> # Plafond minimum par devise. LISTE BLANCHE : une devise sans set_min_cap n'est PAS cotable
+> # (quote et open_hedge paniquent « currency not enabled »).
+> for c in "MXN 500" "BRL 700" "ARS 1500" "EUR 300"; do
+>   set -- $c
+>   stellar contract invoke --id $POOL --source-account $ADMIN --network $NET --quiet -- \
+>     set_min_cap --currency $1 --cap_bps $2 >/dev/null
+> done
+> ```
+> Le spread (50 bps) est déjà posé par le constructeur, rien à ajouter.
+>
+> ⚠️ Le pool actuellement déployé contient encore les `panic!("TODO")` : `set_rate` y échoue (`UnreachableCodeReached`). Il faut redéployer avec le wasm de `feat/pricing` (ou après le merge de lundi 8h) avant que ce bloc passe.
+>
+> Pour vérifier après coup (prix MXN du mock reposé depuis moins de 15 min, sinon `stale price`) :
+> ```sh
+> stellar contract invoke --id $POOL --source-account fx-admin --network testnet --send=no -- \
+>   quote --currency MXN --side BuyCurrency --notional 10000000000000 --duration_secs 7776000 --cap_bps 1000
+> ```
+> Attendu : `spot` 5500000000000, `forward_rate` 5487305413412, `usdc_cost` 548730541341, `margin` 54873054135.
+> Au passage, le README dit « 54 870 USDC » : le chiffre exact est **54 873 USDC** (54 873,05), à corriger.
+
 - ⬜ À Hugo : dev-dependency `mock-oracle` dans `contracts/pool/Cargo.toml` (ou accord pour que je l'ajoute)
 - ⬜ À Paiement : props de `<QuoteCard />` figées + `onQuote` ; signaler tout changement du prix mock (offre DEX)
 - ⬜ À Hugo : chiffre exact de `usdc_cost` pour le README (54 870 ?) et les 2 slides pricing
