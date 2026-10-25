@@ -136,7 +136,7 @@ export async function readStats(currency = 'MXN'): Promise<PoolStats> {
 export async function readHedges(owner: string, max = 60): Promise<{ id: bigint; hedge: Hedge }[]> {
   const p = await pool()
   const out: { id: bigint; hedge: Hedge }[] = []
-  for (let start = 1n; start <= BigInt(max); start += 6n) {
+  for (let start = 0n; start < BigInt(max); start += 6n) { // le contrat numérote à partir de 0 (NextId = 0)
     const ids = Array.from({ length: 6 }, (_, i) => start + BigInt(i))
     const batch = await Promise.all(ids.map((id) => read(p.get_hedge({ hedge_id: id }))))
     let done = false

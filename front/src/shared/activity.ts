@@ -27,7 +27,7 @@ export function hedgeUsdc(h: Hedge): bigint {
 export async function readAllHedges(max = 200): Promise<{ id: bigint; hedge: Hedge }[]> {
   const p = await pool()
   const out: { id: bigint; hedge: Hedge }[] = []
-  for (let start = 1n; start <= BigInt(max); start += 8n) {
+  for (let start = 0n; start < BigInt(max); start += 8n) { // le contrat numérote à partir de 0 (NextId = 0)
     const ids = Array.from({ length: 8 }, (_, i) => start + BigInt(i))
     const batch = await Promise.all(ids.map((id) => read(p.get_hedge({ hedge_id: id })).catch(() => undefined)))
     let done = false
