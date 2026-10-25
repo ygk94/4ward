@@ -268,16 +268,25 @@ TODO.md                # setup et chantiers
 
 ## Roadmap
 
-- **Netting** par devise et par échéance (PME qui paient en devise / PME qui en reçoivent)
-- **Couverture automatique** de l'exposition nette : détention de la devise placée en obligations d'État tokenisées (CETES), EURC sur Blend ; une position par devise avec seuil de rééquilibrage
-- **Tranches senior / junior** pour les LPs
-- **Gestion de trésorerie** : USDC 5 %, Blend ≤ 20 %, bons du Trésor tokenisés pour le reste
-- **Livraison directe en devise** au fournisseur depuis la couverture
-- **Parts LP** en token SEP-41
-- **Facture couverte transférable** : vendre une créance déjà couverte à un financeur (affacturage)
-- **SDK « Bloquer le taux »** pour wallets et anchors
-- Taux d'intérêt lus onchain, fixing sur TWAP et cotations SEP-38 des anchors
-- Audit
+**Juste après le hackathon**
+- Paiement atomique : régler la couverture et payer le fournisseur dans une seule transaction (swap via un DEX Soroban)
+- Marge productive : la marge de la PME placée sur Blend pendant la couverture
+- Fixing robuste : TWAP, bornes de cohérence, plusieurs oracles
+
+**Pool et risque**
+- Netting par devise et par échéance (PME qui paient en devise / PME qui en reçoivent)
+- Couverture automatique de l'exposition nette : détention de la devise placée en obligations d'État tokenisées (CETES), EURC sur Blend ; une position par devise avec seuil de rééquilibrage
+- Tranches senior / junior pour les LPs, parts LP en token SEP-41
+- Gestion de trésorerie : USDC 5 %, Blend ≤ 20 %, bons du Trésor tokenisés pour le reste
+- Limites par devise, skew de prix, spread dynamique
+- Taux d'intérêt lus onchain, fixing sur les cotations SEP-38 des anchors
+
+**Produit et distribution**
+- Livraison directe en devise au fournisseur depuis la couverture
+- Facture couverte transférable : vendre une créance déjà couverte à un financeur (affacturage)
+- SDK « Bloquer le taux » pour wallets et anchors
+- KYC via les anchors (SEP-12) pour le cadre réglementaire
+- Audit, puis mainnet
 
 ## Risques connus
 
