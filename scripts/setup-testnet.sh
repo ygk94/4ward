@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# Monte tout l'environnement de démo sur le testnet Stellar.
+# Relançable : les étapes déjà faites sont sautées ou échouent sans bloquer.
+#   ./scripts/setup-testnet.sh
+# Résultat : IDs de contrats et d'actifs dans .env.testnet et front/.env.local
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+NET=testnet
+ADMIN=fx-admin      # émetteur des actifs de test + admin des contrats
+LP=fx-lp            # fournisseur de liquidité (l'équipe amorce le pool)
+USER=fx-lucia       # la PME (persona de la démo)
+SUPPLIER=fx-supplier # le fournisseur mexicain, reçoit des MXN
+
+# Actifs classiques de test émis par ADMIN. On n'utilise pas l'USDC Circle :
+# le faucet donne 20 USDC / 2 h, trop peu pour une facture de 1 000 000 MXN.
+SPREAD_BPS=50
+
+say() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
+tx() { stellar tx new "$@" --network $NET --quiet >/dev/null 2>&1 || echo "   (déjà fait ou échec non bloquant : $1)"; }
+
+say "Comptes (générés et financés par friendbot)"
+for k in $ADMIN $LP $USER $SUPPLIER; do
+  stellar keys address $k >/dev/null 2>&1 || stellar keys generate $k --network $NET --fund --quiet
+  echo "   $k = $(stellar keys address $k)"
+done
+ISSUER=$(stellar keys address $ADMIN)
+USDC="USDC:$ISSUER"
+MXN="MXN:$ISSUER"
+
+say "Trustlines"
+tx change-trust --source-account $LP --line "$USDC"
+tx change-trust --source-account $USER --line "$USDC"
+tx change-trust --source-account $SUPPLIER --line "$MXN"
+
+say "Distribution d'USDC de test"
+tx payment --source-account $ADMIN --destination $LP --asset "$USDC" --amount 10000000000000      # 1 000 000 USDC
+tx payment --source-account $ADMIN --destination $USER --asset "$USDC" --amount 2000000000000     # 200 000 USDC
+
+say "Offre DEX MXN/USDC pour le path payment (1 MXN = 0.055 USDC)"
+tx manage-sell-offer --source-account $ADMIN --selling "$MXN" --buying "$USDC" \
+  --amount 1000000000000000 --price "11:200"                                                        # 100 000 000 MXN
+
+say "Contrats d'actifs (SAC)"
+stellar contract asset deploy --asset "$USDC" --source-account $ADMIN --network $NET --quiet >/dev/null 2>&1 || true
+stellar contract asset deploy --asset "$MXN" --source-account $ADMIN --network $NET --quiet >/dev/null 2>&1 || true
+USDC_SAC=$(stellar contract id asset --asset "$USDC" --network $NET)
+MXN_SAC=$(stellar contract id asset --asset "$MXN" --network $NET)
+echo "   USDC SAC = $USDC_SAC"
+echo "   MXN SAC  = $MXN_SAC"
+
+say "Build des contrats"
+stellar contract build --quiet
+
+say "Déploiement mock-oracle"
+ORACLE=$(stellar contract deploy --wasm target/wasm32v1-none/release/mock_oracle.wasm \
+  --source-account $ADMIN --network $NET --alias fx-mock-oracle --quiet -- --admin $ADMIN)
+echo "   mock-oracle = $ORACLE"
+# Prix en USD par unité, 14 décimales (même format que Reflector FX)
+for p in "MXN 5500000000000" "BRL 18000000000000" "ARS 100000000000"; do
+  set -- $p
+  stellar contract invoke --id $ORACLE --source-account $ADMIN --network $NET --quiet -- \
+    set_price --asset "{\"Other\":\"$1\"}" --price $2 >/dev/null
+done
+
+say "Déploiement pool"
+POOL=$(stellar contract deploy --wasm target/wasm32v1-none/release/pool.wasm \
+  --source-account $ADMIN --network $NET --alias fx-pool --quiet -- \
+  --admin $ADMIN --usdc $USDC_SAC --oracle $ORACLE --spread_bps $SPREAD_BPS)
+echo "   pool = $POOL"
+
+REFLECTOR_FX=CCSSOHTBL3LEWUCBBEB5NJFC2OKFRC74OWEIJIZLRJBGAAU4VMU5NV4W
+cat > .env.testnet <<ENV
+NETWORK=testnet
+RPC_URL=https://soroban-testnet.stellar.org
+NETWORK_PASSPHRASE="Test SDF Network ; September 2015"
+ISSUER=$ISSUER
+USDC_SAC=$USDC_SAC
+MXN_SAC=$MXN_SAC
+POOL_ID=$POOL
+MOCK_ORACLE_ID=$ORACLE
+REFLECTOR_FX_ID=$REFLECTOR_FX
+LP=$(stellar keys address $LP)
+USER=$(stellar keys address $USER)
+SUPPLIER=$(stellar keys address $SUPPLIER)
+ENV
+sed -e 's/^/VITE_/' .env.testnet > front/.env.local
+say "OK, IDs écrits dans .env.testnet et front/.env.local"

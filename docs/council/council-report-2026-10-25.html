@@ -1,0 +1,116 @@
+<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Council HackMeridian</title>
+<style>:root{--bg:#fff;--fg:#1d2330;--mut:#5b6474;--bd:#e3e6ec;--acc:#2c6e9b;--soft:#f5f7fa}
+@media (prefers-color-scheme:dark){:root{--bg:#14171c;--fg:#e6e9ef;--mut:#9aa3b2;--bd:#2a2f38;--acc:#6aa9d6;--soft:#1b1f26}}
+body{background:var(--bg);color:var(--fg);font:15px/1.6 -apple-system,system-ui,sans-serif;max-width:920px;margin:0 auto;padding:24px 16px}
+h1{font-size:26px;margin:0 0 4px}h2{font-size:19px;margin-top:28px;border-bottom:1px solid var(--bd);padding-bottom:4px}h3{font-size:16px}
+.q{background:var(--soft);border:1px solid var(--bd);border-radius:8px;padding:12px 16px;color:var(--mut)}
+.verdict{border:1px solid var(--bd);border-left:4px solid var(--acc);border-radius:8px;padding:4px 20px 12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px}.card{border:1px solid var(--bd);border-radius:8px;padding:10px;background:var(--soft)}
+.card ul{padding-left:16px;margin:6px 0 0;font-size:13px}.tag{display:block;font-size:12px;font-weight:600}
+details{border:1px solid var(--bd);border-radius:8px;padding:8px 14px;margin:8px 0}summary{cursor:pointer;font-weight:600}
+code{background:var(--soft);padding:1px 4px;border-radius:4px}footer{color:var(--mut);font-size:12px;margin-top:32px}</style></head><body>
+<h1>Council — couverture de change sur Stellar</h1><p style="color:var(--mut)">HackMeridian Lisbonne · 25/10/2026 · 5 conseillers, 5 revues croisées, 1 chairman</p>
+<div class="q"><b>Question :</b> NDF plafonné sur Stellar (pool USDC, Reflector, Blend) : faiblesses, angle de pitch, périmètre MVP réaliste, différenciation, priorités techniques. Deadline de soumission : lundi 26/10 à 12h00.</div>
+<h2>Positions des conseillers</h2><div class="grid"><div class="card" style="border-top:4px solid #c0392b"><b>Contrarian</b><span class="tag" style="color:#c0392b">attaque l'économie</span><ul><li>Couper Blend</li><li>Plafond = faille</li><li>Netting illusoire</li></ul></div><div class="card" style="border-top:4px solid #2c6e9b"><b>First Principles</b><span class="tag" style="color:#2c6e9b">recadre le produit</span><ul><li>Payer le fournisseur</li><li>1 corridor</li><li>Couper Blend</li></ul></div><div class="card" style="border-top:4px solid #8e44ad"><b>Expansionist</b><span class="tag" style="color:#8e44ad">élargit</span><ul><li>Facture couverte</li><li>Affacturage</li><li>Crash button</li></ul></div><div class="card" style="border-top:4px solid #16a085"><b>Outsider</b><span class="tag" style="color:#16a085">clarifie le pitch</span><ul><li>1 persona</li><li>Assurance, pas NDF</li><li>Payer le fournisseur</li></ul></div><div class="card" style="border-top:4px solid #d68910"><b>Executor</b><span class="tag" style="color:#d68910">coupe le périmètre</span><ul><li>Couper Blend + SEP-41</li><li>Oracle mock</li><li>settle() d'abord</li></ul></div></div>
+<div class="verdict"><h3>Où le council est d&#x27;accord</h3>
+<ul>
+<li><strong>Le périmètre est trop gros pour ~18 h de build et un dev qui débute sur Soroban.</strong> Les cinq coupent Blend ; quatre sur cinq coupent aussi le netting multi-échéances et la 3e devise.</li>
+<li><strong>Un forward à 90 jours ne se voit pas en démo.</strong> Il faut un moment fort : faire chuter l&#x27;oracle en direct, montrer le règlement et l&#x27;USDC qui arrive.</li>
+<li><strong>Une seule persona PME, un seul corridor (USD→MXN), aucun jargon à l&#x27;écran.</strong> Les LPs ne sont pas un personnage de la démo.</li>
+<li><strong>Le plafond est la bonne idée, mais mal vendu</strong> : c&#x27;est une protection dont on connaît d&#x27;avance le coût maximum, pas un « NDF plafonné ».</li>
+</ul>
+<h3>Où le council se divise</h3>
+<ul>
+<li><strong>Le produit.</strong> L&#x27;Executor construit le NDF tel quel, réduit. First Principles et Outsider veulent qu&#x27;il paie le fournisseur : un NDF réglé en USDC laisse de côté ce que Stellar fait le mieux, livrer la devise. L&#x27;Expansionist veut « la facture qui porte sa propre couverture ».</li>
+<li><strong>L&#x27;économie.</strong> Le Contrarian juge la proposition de valeur cassée : protéger 15 % oblige à immobiliser 15 % en USDC, le netting ne trouvera pas de flux inverses, le LP porte un pari nu sur le peso. Les autres jugent ces problèmes réels mais solubles par le pitch et le paramétrage.</li>
+<li><strong>L&#x27;ambition.</strong> L&#x27;Expansionist veut affacturage, carte mondiale des expositions et SDK pour anchors ; les autres coupent tout.</li>
+</ul>
+<h3>Angles morts repérés en revue croisée</h3>
+<ul>
+<li>Un forward plafonné symétrique est un <strong>collar</strong> : centré sur F, sa valeur est proche de zéro, donc seul le spread rémunère le pool. Des taux d&#x27;intérêt en dur créent un risque d&#x27;arbitrage, à présenter comme limite connue.</li>
+<li><strong>Anti-sélection</strong> : une PME se couvre surtout quand elle s&#x27;attend à un mouvement.</li>
+<li><strong>Amorçage de la liquidité</strong> : en démo, l&#x27;équipe alimente le pool.</li>
+<li><strong>Soroban</strong> : TTL des positions à prolonger (<code>extend_ttl</code>) ; échéance sur <code>ledger.timestamp</code>, donc échéance courte en démo.</li>
+<li><strong>Le jury note sur vidéo, deck, repo et README</strong>, sans démo live. Critères : clarté du problème, MVP, intégration Stellar, potentiel de suite. Deux tracks cumulables : Unlocked (path payments) et Composed (Reflector + Freighter suffisent).</li>
+<li><strong>Hedgehog</strong> = swap avec livraison physique pour traders, pas une couverture pour PME.</li>
+</ul>
+<h3>La recommandation</h3>
+<p><strong>Produit recadré :</strong> une facture fournisseur à taux figé. La PME bloque aujourd&#x27;hui le coût en USDC d&#x27;un paiement en pesos à 90 jours ; à l&#x27;échéance, la couverture se règle toute seule et le fournisseur reçoit ses pesos par path payment.</p>
+<p><strong>Pitch 20 s :</strong> « Lucía importe de la tequila à Lisbonne. Elle doit 1 000 000 de pesos à son fournisseur dans 90 jours. Si le peso monte de 10 %, elle perd toute sa marge. Sa banque ne lui fera jamais de couverture de change. Avec [Nom], elle fige son prix en 30 secondes depuis son wallet, et le jour J son fournisseur est payé en pesos, au taux promis. »</p>
+<p><strong>MVP IN :</strong> un contrat (<code>deposit_lp</code>, <code>open_hedge</code>, <code>settle</code> permissionless, <code>withdraw</code>) ; USDC Circle testnet ; spot réel Reflector + oracle mock SEP-40 admin pour le bouton crash ; échéance en secondes ; une règle de capacité Σ(montant × plafond) ≤ dépôts ; front + Freighter, deux écrans ; path payment USDC→MXN de test vers le fournisseur ; README soigné.</p>
+<p><strong>MVP OUT :</strong> Blend, parts LP SEP-41, netting par devise/échéance, skew, affacturage, SDK anchors → slide « suite ».</p>
+<p><strong>Décisions :</strong> Blend non. Parts LP = mapping. Netting pitché, pas codé (la contrepartie naturelle de l&#x27;importateur est l&#x27;exportateur mexicain, le pool sert de filet). Contrat générique sur les actifs Reflector, démo sur MXN, UI liste MXN/BRL/ARS. Path payment vers le fournisseur : oui (actif MXN de test + offre DEX) ; une tx Soroban ne contient pas d&#x27;opération classique, donc le front enchaîne <code>settle()</code> puis le path payment, sans atomicité stricte : le dire honnêtement.</p>
+<p><strong>Objection « plafond 5 % vs mouvements 5–15 % » :</strong> le plafond est choisi par la PME (10 % de marge = ±10 %), minimum plus élevé sur devises instables. C&#x27;est un tunnel de change à perte max connue. Face à la banque : la PME n&#x27;a pas de ligne de crédit, l&#x27;alternative réelle est « aucune couverture » ; la marge immobilisée est le prix d&#x27;une couverture sans banque.</p>
+<p><strong>Pourquoi Stellar :</strong> « Sur Stellar, la couverture et le paiement en devise du fournisseur passent par le même rail : USDC natif, oracle FX Reflector et path payment jusqu&#x27;au peso. Pas de banque, pas de ligne de crédit, un règlement que n&#x27;importe qui peut déclencher. »</p>
+<p><strong>Démo en 5 temps (vidéo 3 min) :</strong></p>
+<ol>
+<li>Lucía et sa facture de 1 000 000 MXN à 90 jours, spot réel lu sur Reflector.</li>
+<li>Plafond 10 %, taux figé, dépôt de marge, signature Freighter.</li>
+<li>Bouton « Crash du peso » (+12 %) : sans [Nom] −120 000 $, avec −20 000 $.</li>
+<li>Échéance : <code>settle()</code> crédite l&#x27;USDC, le path payment livre 1 000 000 MXN au fournisseur, visible sur l&#x27;explorateur.</li>
+<li>Panneau pool solvable, capacité respectée ; slide « suite » : netting, affacturage, SDK anchors.</li>
+</ol>
+<p><strong>Noms :</strong> Pinned, Locktide, Fixa.</p>
+<h3>La première chose à faire</h3>
+<p>Écrire <code>settle()</code> avec ses trois tests (hausse, baisse, au-delà du plafond) contre un oracle mock SEP-40, avant de toucher au front. En parallèle, un coéquipier crée l&#x27;actif MXN de test et l&#x27;offre sur le DEX testnet.</p>
+<h3>Positions des conseillers</h3>
+<ul>
+<li><strong>Contrarian</strong> — le plafond contredit l&#x27;argument de vente, netting illusoire, LP sur pari nu. <em>attaque l&#x27;économie</em></li>
+<li><strong>First Principles</strong> — Stellar sait livrer la devise : la couverture doit payer le fournisseur. <em>recadre le produit</em></li>
+<li><strong>Expansionist</strong> — facture qui porte sa couverture, transférable, distribuée par les anchors. <em>élargit</em></li>
+<li><strong>Outsider</strong> — une persona, zéro jargon, le plafond vendu comme une assurance. <em>clarifie le pitch</em></li>
+<li><strong>Executor</strong> — un contrat, oracle mock, sans Blend ni SEP-41, <code>settle</code> d&#x27;abord. <em>coupe le périmètre</em></li>
+</ul></div>
+<h2>Réponses complètes des conseillers</h2><details><summary>Executor</summary><p>Verdict : faisable, mais le MVP actuel est trop gros pour un dev débutant en Soroban. Il faut couper la moitié.</p>
+<p>À virer tout de suite : Blend (intégration cross-contract lourde, auth délicate, invisible en démo → slide roadmap). Le netting par échéance et le skew de prix : on garde une seule règle de capacité globale Σ(notionnel × plafond) ≤ dépôts. Les parts LP SEP-41 : un simple mapping deposits[addr]. La 3e devise : EUR et MXN seulement.</p>
+<p>Ce qui reste, un seul contrat : deposit_lp, open_forward(devise, notionnel, échéance), settle(id), withdraw. Taux forward calculé dans le contrat avec taux en dur, en arithmétique entière i128.</p>
+<p>Point bloquant pour la démo : le temps. Oracle mock admin-settable derrière une interface compatible SEP-40, échéance en secondes pour la démo (90 « jours » = 90 secondes). Reflector branché en lecture pour afficher le spot réel.</p>
+<p>Première heure : stellar contract init, Freighter testnet, USDC testnet ou token SAC créé soi-même ; vérifier les paires FX Reflector testnet (si pas MXN → mock sans débat) ; front en parallèle (Next.js + stellar-sdk + Freighter API) avec données factices.</p>
+<p>Démo (3 min) : « Tacos Lisboa » doit 1 M MXN, bloque son taux, dépose 5 %. Le peso chute de 8 % via le mock, settle : l&#x27;USDC arrive dans le wallet, plafond visible. Un écran, une jauge avant/après.</p>
+<p>Tests : écrire settle en premier, 3 tests (hausse, baisse, au-delà du plafond).</p></details><details><summary>Contrarian</summary><p>La faille centrale : le plafond annule l&#x27;argument de vente. Vous dites que la devise peut bouger de 5 à 15 %, puis vous protégez à ±5 %. Pour couvrir 15 %, la PME doit immobiliser 15 % du nominal en USDC pendant 90 jours ; une banque fait un forward sur ligne de crédit sans bloquer un centime. Le produit coûte plus cher en trésorerie que celui qu&#x27;il remplace.</p>
+<p>Le netting suppose des flux dans les deux sens, et ils ne viendront pas : les PME sont des importateurs qui paient en MXN, toutes dans le même sens. Le pool porte un pari directionnel nu sur le peso. Qui est le LP rationnel ?</p>
+<p>Prix et règlement fragiles : taux en dur = prix forward inventé ; Reflector ne couvre probablement pas le MXN ; un NDF réglé sur un seul relevé d&#x27;oracle est manipulable ; un NDF vendu à des PME est un dérivé réglementé (EMIR, MiFID).</p>
+<p>La démo répète l&#x27;erreur XRPL : un forward à 90 jours ne se voit pas ; le « mouvement de change simulé » est un curseur. Avec Hedgehog FX Swap déjà présent : pitch « encore un protocole DeFi ».</p>
+<p>Périmètre irréaliste pour un débutant Soroban : coupez Blend et le netting multi-échéances.</p>
+<p>Question évitée : pourquoi une PME passerait de l&#x27;euro à l&#x27;USDC puis au MXN via un anchor pour couvrir un risque qu&#x27;elle aurait pu facturer en euros ?</p></details><details><summary>Expansionist</summary><p>Le vrai produit n&#x27;est pas « un NDF sur Stellar ». C&#x27;est la facture qui porte sa propre couverture.</p>
+<ol>
+<li>Couverture attachée à la facture : le fournisseur émet une facture on-chain, la couverture y est collée dès l&#x27;émission ; montant USD figé pendant que le peso s&#x27;effondre en live ; histoire incarnée (Lucía, importatrice de tequila) ; la couverture se règle toute seule au règlement de la facture.</li>
+<li>Position transférable = financement de créances : si la position est un token SEP-41, la PME peut vendre sa facture couverte à un financeur (affacturage), slide roadmap.</li>
+<li>Le pool comme carnet de couverture de tout Stellar : carte du monde où les expositions opposées s&#x27;annulent.</li>
+<li>Anchors et MoneyGram comme canal de distribution : SDK « Bloquer le taux » pour n&#x27;importe quel wallet.</li>
+<li>Démo « crash button » : le jury choisit la devise et fait plonger l&#x27;oracle de 12 %, règlement en direct, pool solvable.</li>
+</ol>
+<p>Noms : Pinned, Locktide. Hedgehog : eux swap pour traders, vous facture pour PME.</p></details><details><summary>Outsider</summary><p>Trop de jargon (NDF, netting, skew, SEP-41, Blend…) : un juré non trader décroche. Le pitch en une phrase : « María importe des pièces du Mexique, doit 1 M de pesos dans 3 mois ; si le peso monte, sa facture coûte 50 000 $ de plus et sa marge disparaît. » La formule n&#x27;a rien à faire sur une slide.</p>
+<p>Le forward plafonné est la meilleure idée mais présenté à l&#x27;envers : c&#x27;est une assurance taux de change, prime connue d&#x27;avance, remboursement plafonné.</p>
+<p>« Le paiement réel passe hors protocole » = vous ne payez pas la facture ; alors pourquoi Stellar ? Le produit doit faire le paiement.</p>
+<p>Les LPs sont un second public invisible : un seul personnage, une seule histoire en démo.</p>
+<p>Démo : curseur « le peso bouge de +8 % » et deux comptes côte à côte, sans protection −40 000 $, avec −5 000 $ remboursés automatiquement.</p>
+<p>Test : expliquer en 20 s à quelqu&#x27;un hors finance ; chaque mot qui suscite une question sort du pitch.</p></details><details><summary>First Principles</summary><p>Vous ne construisez pas le bon produit. Le NDF existe parce que les banques ne peuvent pas livrer certaines devises ; sur Stellar, livrer est natif (path payments, anchors). Un NDF réglé en USDC jette ce que Stellar sait faire.</p>
+<p>Ce que la PME veut : que sa facture coûte X USDC aujourd&#x27;hui et que le fournisseur reçoive exactement 1 000 000 MXN dans 90 jours. Le vrai produit : une facture à taux figé, un escrow programmable qui, à l&#x27;échéance, déclenche lui-même le path payment vers le fournisseur. Couverture et paiement dans la même transaction.</p>
+<p>Le pool de LPs : la contrepartie naturelle de l&#x27;importateur US est l&#x27;exportateur mexicain ; deux PME qui se couvrent l&#x27;une l&#x27;autre, le pool comme filet. C&#x27;est le netting en une phrase.</p>
+<p>Le plafond de 5 % : avec des mouvements de 5 à 15 %, la PME reste exposée au-delà ; assumer un tunnel de change (range forward) avec un prix clair.</p>
+<p>Périmètre : un seul corridor USD→MXN, une seule facture, un moment fort : le peso chute de 12 %, le fournisseur reçoit quand même ses 1 000 000 MXN pile. Couper Blend, la 3e devise, les échéances multiples.</p></details>
+<h2>Revues croisées et faits vérifiés</h2><details><summary>Afficher</summary><p>MAPPING : A=Executor, B=Contrarian, C=Expansionist, D=Outsider, E=First Principles.</p>
+<p>PEER REVIEWS (résumé) :</p>
+<ul>
+<li>Les 5 relecteurs désignent B (Contrarian) comme réponse la plus forte, E (First Principles) juste derrière.</li>
+<li>Angles morts : A (Executor) ne questionne ni le produit ni la différenciation ; C (Expansionist) empile des features sans périmètre ni faisabilité.</li>
+<li>Manqués par tous :</li>
+<li>Un forward plafonné symétrique est en fait un collar / combinaison d&#x27;options (call spread long + put spread short) ; il faut le dire et justifier le pricing (symétrique autour de F ⇒ valeur ≈ 0 hors skew, donc spread acceptable) ; taux MXN en dur = risque d&#x27;arbitrage.</li>
+<li>Anti-sélection : les PME se couvrent quand elles anticipent un mouvement.</li>
+<li>Qui est le LP / amorçage de liquidité ; en démo l&#x27;équipe dépose elle-même.</li>
+<li>Soroban : TTL/rent des entrées de stockage pour des positions de 90 jours ; échéance basée sur ledger.timestamp vs démo accélérée.</li>
+<li>Critères du jury / tracks / temps de build restant.</li>
+<li>Variante sans NDF : swap anticipé sur le DEX Stellar.</li>
+<li>Le « pourquoi une blockchain » doit être tranché en une phrase : atomicité couverture + paiement, ouverture sans banque.</li>
+</ul>
+<p>FAITS VÉRIFIÉS (agent de recherche) :</p>
+<ul>
+<li>HackMeridian : hack du dim 25/10 09h00 au LUNDI 26/10 12h00, pas de soumission tardive. Finalistes pitchent mercredi 28/10 à Meridian. Jugement asynchrone sur vidéo démo + deck + repo GitHub + README clair obligatoire. Critères Genesis : clarté du problème, qualité du MVP, intégration Stellar, potentiel de continuation. Tracks Genesis : « Stellar Unlocked » (fonctions du protocole de base, ex. path payments) et « Stellar Composed » (≥2 outils de l&#x27;écosystème : Reflector, Blend, Freighter…), cumulables. Prix 30 k$ (6 gagnants, en XLM).</li>
+<li>Reflector FX testnet CCSSOHTBL3LEWUCBBEB5NJFC2OKFRC74OWEIJIZLRJBGAAU4VMU5NV4W : assets EUR, GBP, CHF, CAD, MXN, ARS, BRL, THB, XAU ; base USD, 14 décimales, résolution 300 s. Crate sep-40-oracle 1.4.0 (client + mock).</li>
+<li>Blend testnet pool TestnetV2 CCEBVDYM… utilise son propre USDC (CAQCFVLO…), pas l&#x27;USDC Circle ; interface submit(from, spender, to, Vec&lt;Request&gt;) avec Supply=0 / Withdraw=1 ; crate blend-contract-sdk.</li>
+<li>USDC Circle testnet SAC CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA, faucet Circle 20 USDC / 2 h / adresse.</li>
+<li>Concurrence : FX Swap by Hedgehog (SCF #21, 42,5 k$) = swap prêt/emprunt USDC/EURC/AUDD avec livraison physique, pour traders ; pas un NDF. Aucun forward/NDF pour PME trouvé.</li>
+<li>Toolchain : stellar CLI 28.1, soroban-sdk 28 (workspace), @stellar/stellar-sdk 17.4, @creit.tech/stellar-wallets-kit 2.7.1, @stellar/freighter-api 6.0.1.</li>
+</ul></details>
+<footer>Généré le 25/10/2026 · Council sur le projet HackMeridian (fistea-hackmeridian)</footer></body></html>
