@@ -148,16 +148,18 @@ Liens explorateur : `https://stellar.expert/explorer/testnet/tx/<hash>`.
 
 ---
 
-## Chiffres de référence (1 000 000 MXN, prix figé 0,05487, plafond 10 %)
+## Chiffres de référence (1 000 000 MXN, spot 0,055, plafond 10 %, vrai Pricing)
+
+Taux bloqué `F` = 0,0552750 (parité USD 4 % / MXN 7 % sur 60 s, puis spread 0,5 % contre Lucía) → prix figé **55 275 USDC**, marge **5 527,50 USDC**.
 
 | Peso | Spot | P&L | Versé par `settle` | Coût des pesos | Coût total | Sans protection |
 |---|---|---|---|---|---|---|
-| +8 % | 0,0594 | +4 530 | 10 017 | 59 400 | **54 870** | 59 400 |
-| +12 % | 0,0616 | +5 487 (plafonné, écart 6 730) | 10 974 | 61 600 | **56 113** | 61 600 |
-| −8 % | 0,0506 | −4 270 | 1 217 | 50 600 | **54 870** | 50 600 |
+| +8 % | 0,0594 | +4 125,00 | 9 652,50 | 59 400 | **55 275** | 59 400 |
+| +12 % | 0,0616 | +5 527,50 (plafonné, écart 6 325) | 11 055,00 | 61 600 | **56 072,50** | 61 600 |
+| −8 % | 0,0506 | −4 675,00 | 852,50 | 50 600 | **55 275** | 50 600 |
 
-Marge déposée : 5 487 USDC. À +12 %, Lucía ne paie que ce qui dépasse son plafond (1 243 USDC au lieu de 6 730).
-Le prix figé de 0,05487 est la valeur du stub de Pricing ; avec le vrai `forward_rate`, les chiffres bougent légèrement.
+À +12 %, Lucía ne paie que ce qui dépasse son plafond (797,50 USDC au lieu de 6 325).
+Avec un autre spot (mock aligné sur Reflector), recalculer avec `docs/video-script.md` § « Recalculer les chiffres ».
 
 ## Répétition du 25/10 (déploiement de Clément, +8 %)
 
@@ -170,4 +172,4 @@ Le prix figé de 0,05487 est la valeur du stub de Pricing ; avec le vrai `forwar
 | 5 | Offre DEX réalignée à 0,0594 | [1b8ed23b…](https://stellar.expert/explorer/testnet/tx/1b8ed23bfbfb3ec0361346dcaf5e29654148e29565b15330975f03fb5e14d900) |
 | 6 | Path payment : 1 000 000 MXN au fournisseur pour 59 400 USDC | [7a1913d8…](https://stellar.expert/explorer/testnet/tx/7a1913d8cff6b26bb9435e728859564b8866d9f9b8c2bc527cf4a64e72f3c488) |
 
-Bilan Lucía : 200 000 → 145 130 USDC, soit **54 870 = le prix figé**. Fait avant le branchement du vrai Vault (stubs) : à rejouer après le merge de Pricing.
+Bilan Lucía : 200 000 → 145 130 USDC, soit **54 870 = le prix figé** (taux du stub de Pricing, 0,05487). Fait avant le branchement du vrai Vault et du vrai Pricing ; depuis, les tests Paiement passent sur le code fusionné.

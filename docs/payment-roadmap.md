@@ -93,7 +93,12 @@ Règles de calcul : tout en `i128`, **arrondis en faveur du pool** (P&L payé pa
 
 ## 9. Après le merge
 
-- ⬜ Rejouer tout le parcours sur le pool redéployé par Hugo
+- ✅ `main` (Vault phases 5-6, Pricing de Lancelot) fusionné dans `feat/payment`, stubs supprimés
+- ✅ `#[ignore]` retirés : 111/111 tests sur le vrai Vault et le vrai Pricing (fixture : `set_rate` USD 4 % / MXN 7 %, `set_min_cap` MXN 5 %)
+- ✅ Tests `open_*` / `settle_*` recalés sur le vrai taux bloqué (0,0552750 à 60 s) ; tests d'événements adaptés aux événements du vault
+- ✅ `open` utilise `pricing::margin_for` (marge identique à celle de `quote`, demandé par Pricing)
+- ✅ Chiffres du script vidéo et de `payment-cli.md` recalculés avec le vrai Pricing (spot 0,055)
+- ⬜ Rejouer le parcours sur le déploiement d'Hugo (commandes `docs/payment-cli.md`)
 - ⬜ Vérifier les chiffres affichés par le front contre ceux de la CLI
 
 ---
