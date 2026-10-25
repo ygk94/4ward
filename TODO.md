@@ -122,6 +122,8 @@ Le vault expose `capacity()` et `total_assets()` ; si Lancelot ajoute le placeme
    - à l'échéance : `settle()` puis **path payment strict receive** USDC → MXN vers le fournisseur, pour exactement le notionnel (2 signatures Freighter)
    - coût total réel de Lucía = prix figé, liens stellar.expert pour les deux transactions
    - comparaison « sans protection / avec protection » après le crash
+   - compte à rebours jusqu'à `maturity` ; bouton « Régler » activé seulement après (sinon erreur #202 NotMatured)
+   - traduire les codes d'erreur : vault 100-110, paiement 200-204, pricing 300-311 (tables dans `docs/payment-cli.md` et `docs/todo-pricing.md`)
 5. ⬜ `pricing/QuoteCard.tsx` : spot réel Reflector, prix figé, marge à déposer (appel `quote`)
 6. ⬜ `pricing/CrashButton.tsx` : `set_price` sur le mock (compte admin), le peso monte de 12 %
 7. ⬜ `vault/PoolPanel.tsx` : capital total, réservé, libre, prix de la part, position du LP, **exposition nette par devise** (graphique), indicateur « solvable », déposer / retirer (compte `fx-lp`)
@@ -151,13 +153,14 @@ Commencer avec des données factices, brancher le contrat après le merge.
 3. ✅ Événements `open` / `settle` (pour le front et l'explorateur)
 5. ✅ Branché sur le vault (`open_position` / `close_position`), codes `HedgeError` 200-204
 6. ✅ Retirer les `#[ignore]` des 13 tests d'intégration : ajouter `set_rate` / `set_min_cap` dans leur préparation (liste blanche du Pricing)
-7. ⬜ 🔴 Régler au **cours de fixing à l'échéance** (`pricing::fixing(currency, maturity)` de Lancelot) au lieu du spot au moment de l'appel : sinon option gratuite pour qui choisit quand régler
+7. ⬜ 🔴 (en cours, avec Lancelot) Régler au **cours de fixing à l'échéance** (`pricing::fixing(currency, maturity)` de Lancelot) au lieu du spot au moment de l'appel : sinon option gratuite pour qui choisit quand régler
 4. ✅ (obsolète) Tant que Vault et Pricing ne sont pas prêts : remplacer leurs `panic!("TODO")` par des valeurs en dur en local, **sans les committer**
 
 ### Pour le front d'Hugo
 1. ✅ (`docs/payment-cli.md`) Valider le parcours en ligne de commande avant le merge : `open_hedge` → `settle` → path payment, sur **ton propre déploiement** (cf. Démarrage), avec les commandes `stellar contract invoke` / `stellar tx new path-payment-strict-receive` exactes, à donner à Hugo. Écrire les commandes avec les alias (`--id fx-pool`, `--source-account fx-lucia`) et non des adresses en dur : Hugo les rejoue telles quelles sur le déploiement officiel
 2. ✅ (`docs/payment-cli.md`) Préciser les montants à afficher (marge rendue, P&L, coût total) et les cas d'erreur à gérer
-3. ⬜ Mettre à jour les chiffres de `payment-cli.md` et `video-script.md` avec le vrai Pricing (90 j : prix figé 0,054873, 54 873,05 USDC ; crash +12 % : sans protection +6 727, avec +1 240)
+3. ✅ Chiffres de `payment-cli.md` et `video-script.md` mis à jour avec le vrai Pricing (60 s : 55 275 / 56 072,50 ; répétition testnet au centime)
+4. ⬜ 🔴 Facteur d'accélération pour la démo (point 2, option b) : prix calculé sur 90 j, échéance réelle courte ; puis repasser la vidéo aux chiffres de 90 j
 
 ### Testnet
 - ✅ Vérifier la profondeur de l'offre DEX MXN/USDC pour le montant de la démo ; si elle doit être réalignée sur le prix du mock, donner la commande à Hugo (l'offre est faite par `fx-admin`)
@@ -179,7 +182,7 @@ Un prix faux = arbitrage contre le pool : c'est ce qui rend le produit crédible
 6. ✅ Tests du bloc Pricing : parité chiffrée (r_MXN 7 %, r_USD 4 %, 90 j → F ≈ 0,05460), sens du spread, plafond minimum
 7. ✅ Donner à Hugo les appels `set_rate` / `set_min_cap` à ajouter au script de setup
 8. ✅ Remplacer les `panic!("...")` (`currency not enabled`, `stale price`, `rate not set`…) par `#[contracterror] enum PricingError` (codes 300-399) : les textes sont effacés dans le WASM, le front ne peut pas les distinguer
-9. ⬜ 🔴 `fixing(currency, maturity)` pour `settle` : lecture `price(asset, timestamp)` de Reflector ; historique des prix dans le mock-oracle (`price(asset, ts)`)
+9. ⬜ 🔴 (en cours, avec Clément) `fixing(currency, maturity)` pour `settle` : lecture `price(asset, timestamp)` de Reflector ; historique des prix dans le mock-oracle (`price(asset, ts)`)
 
 ### Oracle et scripts
 1. ⬜ `scripts/crash.sh` : `set_price` du MXN +12 % sur le mock en ligne de commande (filet de sécurité pendant la vidéo). Utiliser les alias (`fx-admin`, `fx-mock-oracle`) : tu le testes sur ton déploiement, Hugo le lance sur le sien

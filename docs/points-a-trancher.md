@@ -1,12 +1,12 @@
 # Points à trancher
 
-État au 25/10 soir. Le contrat est complet dans `main` et le testnet est vérifié. Points 1 et 2 ouverts, point 3 réglé.
+État au 25/10 soir. Le contrat est complet dans `main` et le testnet est vérifié. Points 1 et 2 pris en charge par Clément (avec Lancelot pour le fixing), point 3 réglé.
 
 ---
 
-## 1. 🔴 Cours de règlement : fixing à l'échéance
+## 1. 🔴 Cours de règlement : fixing à l'échéance — EN COURS
 
-**Qui :** Clément (Paiement) + Lancelot (Pricing)
+**Qui :** Clément (côté `settle`) + Lancelot (`fixing(currency, maturity)` et historique du mock-oracle). Pris en charge le 25/10 soir.
 
 **Le problème.** `settle` lit le cours de l'oracle **au moment où on l'appelle**, pas à l'échéance. Comme n'importe qui peut appeler `settle` une fois l'échéance passée, celui qui règle choisit son moment : la PME attend que le peso aille dans son sens, ou le pool l'inverse. C'est une option gratuite, que le pool n'a pas facturée.
 
@@ -36,6 +36,8 @@
 | c. Deux couvertures | Une à 90 j pour montrer le prix, une à 60 s pour montrer le règlement | Rien à coder | Plus long et plus confus à l'écran |
 
 **Recommandation :** b si Clément a 30 min, sinon a.
+
+**Décision (25/10 soir) : option b, prise en charge par Clément.** Conséquence : les chiffres de la vidéo repasseront à ceux de 90 jours (prix figé 54 873,05, avec protection 56 112,69). Le script actuel (`docs/video-script.md`) utilise ceux de 60 s, à mettre à jour une fois le facteur en place.
 
 ---
 

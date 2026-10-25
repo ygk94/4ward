@@ -16,6 +16,13 @@ SUPPLIER=fx-supplier # le fournisseur mexicain, reçoit des MXN
 # le faucet donne 20 USDC / 2 h, trop peu pour une facture de 1 000 000 MXN.
 SPREAD_BPS=50
 
+# Python : python3, sinon python (sous Windows, « python3 » peut être un raccourci vers le Microsoft Store qui ne fait rien)
+PY=""
+for cand in python3 python; do
+  if "$cand" -c "import sys; sys.exit(0 if sys.version_info[0] == 3 else 1)" >/dev/null 2>&1; then PY=$cand; break; fi
+done
+[ -n "$PY" ] || { echo "Python 3 introuvable (essayé : python3, python). Installe-le puis relance." >&2; exit 1; }
+
 say() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 tx() { stellar tx new "$@" --network $NET --quiet >/dev/null 2>&1 || echo "   (déjà fait ou échec non bloquant : $1)"; }
 
@@ -40,7 +47,7 @@ tx payment --source-account $ADMIN --destination $USER --asset "$USDC" --amount 
 say "Offre DEX MXN/USDC pour le path payment (1 MXN = 0.055 USDC)"
 # Une seule offre : on met à jour l'existante (sinon chaque lancement en empile une nouvelle à 0.055,
 # et le path payment prend toujours la moins chère, même après un réalignement du prix).
-OFFERS=$(curl -s "https://horizon-testnet.stellar.org/accounts/$ISSUER/offers?limit=200" | python3 -c "
+OFFERS=$(curl -s "https://horizon-testnet.stellar.org/accounts/$ISSUER/offers?limit=200" | "$PY" -c "
 import json, sys
 recs = json.load(sys.stdin).get('_embedded', {}).get('records', [])
 print(' '.join(o['id'] for o in recs if o['selling'].get('asset_code') == 'MXN' and o['buying'].get('asset_code') == 'USDC'))")
