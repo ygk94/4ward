@@ -46,9 +46,9 @@ Règles de calcul : tout en `i128`, **arrondis en faveur du pool** (P&L payé pa
 
 ## 3. Script vidéo (3 min, 5 temps) 🔴
 
-- ⬜ Rédiger les 5 temps du § Démo du TODO : texte dit, écran montré, action, durée
-- ⬜ Chiffres exacts de la démo (facture, prix figé, marge, crash +12 %, coût avec et sans protection)
-- ⬜ Phrase honnête sur les 2 signatures (`settle` puis path payment, atomicité en roadmap)
+- ✅ (`docs/video-script.md`) Rédiger les 5 temps du § Démo du TODO : texte dit, écran montré, action, durée
+- ✅ Chiffres exacts de la démo (facture, prix figé, marge, crash +12 %, coût avec et sans protection)
+- ✅ Phrase honnête sur les 2 signatures (`settle` puis path payment, atomicité en roadmap)
 - ⬜ Livrer à Hugo
 
 ## 4. `open`
