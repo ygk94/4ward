@@ -12,9 +12,7 @@ fn vault_deposit_withdraw() {}
 #[ignore = "TODO vault: retrait refusé au-delà du capital non réservé"]
 fn vault_withdraw_limited_to_capacity() {}
 
-#[test]
-#[ignore = "TODO vault: reserve refusé si capacité insuffisante"]
-fn vault_reserve_over_capacity_panics() {}
+// reserve / release / book_gain / book_loss : tests dans vault.rs (mod tests).
 
 // ---- Pricing ----
 
