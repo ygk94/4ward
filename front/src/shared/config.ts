@@ -10,3 +10,8 @@ export const config = {
   reflectorFxId: import.meta.env.VITE_REFLECTOR_FX_ID as string,
   supplier: import.meta.env.VITE_SUPPLIER as string,
 }
+
+/** Objectif de collecte du vault (USDC) : la jauge de la page d'accueil se remplit en proportion. */
+export const VAULT_TARGET_USDC = Number(import.meta.env.VITE_VAULT_TARGET_USDC ?? 2_000_000)
+/** Nom du projet : à remplacer quand il sera choisi (cf. TODO, Pitch). */
+export const BRAND = '‹NOM›'
