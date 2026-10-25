@@ -91,15 +91,43 @@ La conversion USDC → MXN pour payer le fournisseur n'est pas comptée : elle e
 
 Environ **4 fois moins cher qu'une option**, parce que la protection est plafonnée dans les deux sens ; au prix d'un forward, mais sans banque. Contrepartie assumée : au-delà du plafond, la PME n'est plus protégée. *(Banques et fintechs : ordres de grandeur du marché, non vérifiés devise par devise.)*
 
-### Le pool et sa règle de capacité
+### Le pool (vault)
 
-Les LPs déposent des USDC. La perte maximale du pool est connue à l'avance :
+**Que des dollars.** Le pool ne détient que des USDC. Chaque couverture est une jambe « devise contre dollar » : le pool n'a jamais besoin de stocker des pesos.
+
+**Des parts, comme un fonds.** Un LP qui dépose des USDC reçoit des **parts**. Le premier dépôt se fait à 1 part = 1 USDC. Quand le pool gagne (le spread, ou une couverture qui tourne en sa faveur), chaque part vaut plus. Quand il perd, chaque part vaut moins. Personne n'a besoin de répartir les gains compte par compte.
+
+**Deux prix pour une part :**
+
+| Prix | Calcul | Sert à |
+|---|---|---|
+| prix plein | capital du pool ÷ nombre de parts | entrer (dépôt) |
+| prix de sortie | (capital − capital réservé) ÷ nombre de parts | sortir (retrait) |
+
+Le capital réservé est la perte maximale des couvertures en cours. Il n'est pas versé à celui qui sort. Personne ne peut donc partir en laissant ses pertes possibles aux autres. Les retraits sont équitables par construction : chaque LP ne peut retirer que sa part du capital libre. Si la couverture se termine bien, la décote laissée par celui qui est parti profite aux LPs restants.
+
+**Règle de capacité : le pool ne peut pas faire faillite.** La perte maximale de chaque couverture (sa marge) est connue dès l'ouverture :
 
 ```
-perte max = Σ (notionnel en USDC × plafond)   ≤   dépôts du pool
+capital réservé = Σ marges des couvertures ouvertes   ≤   capital du pool
 ```
 
-Le contrat **refuse toute couverture** qui ferait dépasser cette limite : le pool ne peut pas faire faillite par construction. Seul le capital non réservé est retirable.
+Le contrat **refuse toute couverture** qui ferait dépasser cette limite. Les marges des PME sont déposées dans le contrat mais n'appartiennent pas aux LPs. Les tests vérifient à chaque opération que `solde USDC du contrat = capital des LPs + marges des couvertures ouvertes`.
+
+**Exposition et limite par devise.** Le pool suit, pour chaque devise, le volume des acheteurs et celui des vendeurs (en USDC au taux bloqué), ainsi que leurs marges. L'admin peut plafonner une devise, par exemple « les marges en ARS ne dépassent pas 10 % du capital ». Une limite à 0 suspend les nouvelles couvertures sur cette devise.
+
+**Robustesse.** Les entrées de stockage sont prolongées automatiquement (120 jours). Les dépôts, retraits, ouvertures, clôtures et changements de limite émettent des événements lisibles sur l'explorateur. Tous les calculs sont protégés contre les débordements et arrondis en faveur du pool.
+
+### Netting (calcul prêt, branchement en roadmap)
+
+Lucía craint que le peso **monte**. Sa contrepartie naturelle craint qu'il **baisse** : un importateur mexicain qui paie ses fournisseurs en dollars, ou une entreprise payée en pesos. Quand l'une gagne, l'autre perd : en théorie, seule l'exposition nette devrait consommer du capital.
+
+Le contrat contient déjà le **calcul exact** de la perte maximale d'un panier de couvertures, sur tous les cours possibles, même avec des plafonds et des taux bloqués différents. Il est prouvé par des tests de propriété (variations de −30 % à +30 %, 50 paniers aléatoires, contre-exemples). Un « net des marges » naïf serait faux : avec des plafonds différents, ou des taux bloqués à des dates différentes, il sous-estime la perte.
+
+Le MVP garde la règle brute, plus prudente. Le netting sera branché quand trois conditions seront réunies :
+1. un fixing commun à l'échéance ;
+2. des échéances arrondies à des dates de fixing ;
+3. un règlement par panier, ou la comptabilisation de ce que doit la jambe opposée.
 
 ### Les LPs : tranche senior et tranche junior (roadmap)
 
@@ -216,11 +244,18 @@ Une transaction Soroban ne peut pas contenir d'opération classique : le front e
 ### Interface du contrat
 
 ```rust
-// Vault
-fn deposit_lp(lp: Address, amount: i128) -> i128;
-fn withdraw(lp: Address, amount: i128) -> i128;          // limité au capital non réservé
-fn capacity() -> i128;
-fn lp_balance(lp: Address) -> i128;
+// Vault (montants et parts en 7 décimales)
+fn deposit_lp(lp: Address, amount: i128) -> i128;        // USDC déposés → parts du LP
+fn withdraw(lp: Address, amount: i128) -> i128;          // parts brûlées → USDC versés (prix de sortie)
+fn lp_balance(lp: Address) -> i128;                      // valeur des parts au prix de sortie
+fn lp_shares(lp: Address) -> i128;
+fn share_price() -> i128;                                // prix plein, USDC par part
+fn exit_price() -> i128;                                 // prix de sortie, USDC par part
+fn total_assets() -> i128;                               // capital des LPs
+fn capacity() -> i128;                                   // capital non réservé
+fn exposure(currency: Symbol) -> Exposure;               // acheteurs / vendeurs / net, marges
+fn currency_limit(currency: Symbol) -> Option<u32>;
+fn set_currency_limit(currency: Symbol, limit_bps: u32); // admin
 // Pricing
 fn quote(currency: Symbol, side: Side, notional: i128, duration_secs: u64, cap_bps: u32) -> Quote;
 fn set_rate(currency: Symbol, rate_bps: u32);            // admin
@@ -239,15 +274,15 @@ fn get_hedge(hedge_id: u64) -> Option<Hedge>;
 
 | Élément | ID |
 |---|---|
-| Contrat pool | `CBEUIYUGVJFHRZORP4XCMPMLCISVLAAMK4OCDLILHP3HKGX2M3UB6CJR` |
-| mock-oracle (SEP-40) | `CAJB3DAOV7HMIZL4L3DFDAH4LGLC7JOM64G24KSEBAJRPKS465PLE6T2` |
+| Contrat pool | `CDE42BXTEZMK245ZC4S4VVLKPWURBEADB5SURCQON54CSTOQOUAPKYK4` |
+| mock-oracle (SEP-40) | `CBQI4F3SUIUULGH3OWQNKTCXS6VLG7A55S3RTTNMCPIVX3RQYOITWUMS` |
 | Reflector FX (testnet) | `CCSSOHTBL3LEWUCBBEB5NJFC2OKFRC74OWEIJIZLRJBGAAU4VMU5NV4W` |
 | USDC de test (SAC) | `CCLMFOUKC7ZQ5OPFE67F5XUGCOWTVCOOVTKTEPQGEYKWWRRKJGNVR2OC` |
 | MXN de test (SAC) | `CAFK4PTVDK6Y33HWTSUPH57JV3G4YZFS6PL77FNGWOOMHBJJESYBMVMS` |
 
 Reflector FX testnet couvre : EUR, GBP, CHF, CAD, **MXN, ARS, BRL**, THB, XAU (base USD, 14 décimales, résolution 300 s).
 
-Le pool est redéployé à chaque `./scripts/setup-testnet.sh` : les IDs à jour sont dans `.env.testnet`.
+Le pool est redéployé à chaque `./scripts/setup-testnet.sh`, qui fait aussi le dépôt du LP (1 000 000 USDC via `deposit_lp`). Les IDs à jour sont dans `.env.testnet`.
 
 ## Lancer le projet
 
@@ -266,7 +301,7 @@ cd front && pnpm install && pnpm dev
 ## Structure
 
 ```
-contracts/pool         # vault.rs · pricing.rs · hedge.rs (interface figée ; pricing implémenté, vault et hedge en cours)
+contracts/pool         # vault.rs (capital, parts LP, exposition) · pricing.rs (spot, taux forward, plafonds) · hedge.rs (couvertures)
 contracts/mock-oracle  # oracle SEP-40 pilotable par l'admin (démo)
 front/                 # Vite + React + TS, stellar-sdk, Stellar Wallets Kit
 scripts/               # setup testnet

@@ -53,6 +53,15 @@ Légende : ✅ fait · ⬜ à faire · 🔴 bloquant pour les autres ou pour la 
 - ✅ README de spec, council du 25/10 dans `docs/council/`
 - ✅ Checklist des tâches externes d'Hugo (wallet, accès, hackathon, outils) : `docs/setup-externe.html`
 
+## État au 25/10 soir
+
+- ✅ **Contrat complet et mergé dans `main`** : vault (phases 1 à 6), paiement (`open` / `settle` branchés sur le vault, codes 200-204), pricing (spot, taux forward, plafonds, liste blanche des devises). 96 tests verts, CI verte.
+- ✅ **Testnet redéployé sur `main`** (IDs dans `.env.testnet`) ; parcours complet rejoué : devis 54 873,05 USDC sur 90 j, ouverture, crash +12 %, règlement plafonné (Lucía reçoit 11 055), paiement du fournisseur 1 000 000 MXN.
+- ⬜ 🔴 **Front** : en cours (Hugo).
+- ⬜ 🔴 **Vidéo, deck, nom, soumission.**
+
+**Points ouverts à trancher :** voir `docs/points-a-trancher.md` (fixing à l'échéance, durée de la démo vs prix affiché, codes d'erreur du Pricing).
+
 ---
 
 ## Vault + Front — Hugo
@@ -66,42 +75,42 @@ Checklist cochable : https://claude.ai/artifact/9hWHDQW8siGsCBVb3TZHmY
 **Invariant à tenir partout :** `USDC du contrat (+ valeur placée, si Pricing ajoute le rendement) = capital des LPs + Σ marges des couvertures ouvertes`
 
 #### Phase 0 — Préparation
-1. ⬜ Ne pas toucher `lib.rs` pour le stockage : définir ses propres clés (`enum VaultKey`) et ses erreurs (`#[contracterror] enum VaultError`, codes 100+) dans `vault.rs`
-2. ⬜ Aide de test qui vérifie l'invariant après chaque opération
+1. ✅ Ne pas toucher `lib.rs` pour le stockage : définir ses propres clés (`enum VaultKey`) et ses erreurs (`#[contracterror] enum VaultError`, codes 100+) dans `vault.rs`
+2. ✅ Aide de test qui vérifie l'invariant après chaque opération
 
 #### Phase 1 — Cœur comptable 🔴 (Paiement en dépend)
-4. ⬜ `reserve(m)` : erreur `InsufficientCapacity` si `m > capacity()`, sinon `Reserved += m`
-5. ⬜ `release(m)` : `Reserved -= m`
-6. ⬜ `book_gain(x)` / `book_loss(x)` : capital des LPs ± x (aucun transfert, c'est Paiement qui transfère)
-7. ⬜ Tests : invariant de solde sur les deux cas types (peso +12 % plafonné, peso −8 %)
+4. ✅ `reserve(m)` : erreur `InsufficientCapacity` si `m > capacity()`, sinon `Reserved += m`
+5. ✅ `release(m)` : `Reserved -= m`
+6. ✅ `book_gain(x)` / `book_loss(x)` : capital des LPs ± x (aucun transfert, c'est Paiement qui transfère)
+7. ✅ Tests : invariant de solde sur les deux cas types (peso +12 % plafonné, peso −8 %)
 
 #### Phase 2 — Parts LP
-8. ⬜ Stockage `Shares(Address)` et `TotalShares` ; parts à 7 décimales
-9. ⬜ `deposit` : `require_auth`, transfert USDC, parts émises = `montant × TotalShares / capital` (1:1 au premier dépôt), arrondi vers le bas
-10. ⬜ `withdraw` : en parts ou en USDC, avec un **prix de part conservateur** = `(capital − Reserved) / TotalShares` (personne ne sort en laissant ses pertes aux autres), limité à la capacité
-11. ⬜ Équité des retraits : limite par LP au prorata du capital libre, ou file d'attente (à choisir)
-12. ⬜ Nouveaux points d'entrée à ajouter dans `lib.rs` (ajout seulement, sans casser l'existant, prévenir l'équipe) : `share_price`, `lp_shares`, `total_assets`
-13. ⬜ Tests : un gain du pool fait monter le prix de la part ; dépôt après un gain = moins de parts ; retrait limité
+8. ✅ Stockage `Shares(Address)` et `TotalShares` ; parts à 7 décimales
+9. ✅ `deposit` : `require_auth`, transfert USDC, parts émises = `montant × TotalShares / capital` (1:1 au premier dépôt), arrondi vers le bas
+10. ✅ `withdraw` : en parts ou en USDC, avec un **prix de part conservateur** = `(capital − Reserved) / TotalShares` (personne ne sort en laissant ses pertes aux autres), limité à la capacité
+11. ✅ Équité des retraits : limite par LP au prorata du capital libre, ou file d'attente (à choisir)
+12. ✅ Nouveaux points d'entrée à ajouter dans `lib.rs` (ajout seulement, sans casser l'existant, prévenir l'équipe) : `share_price`, `lp_shares`, `total_assets`
+13. ✅ Tests : un gain du pool fait monter le prix de la part ; dépôt après un gain = moins de parts ; retrait limité
 
 #### Phase 3 — Exposition par devise (une devise par couverture pour l'instant)
-14. ⬜ Suivre l'exposition **nette** par devise contre l'USD : `Exposure(Symbol)` = volume acheteur − volume vendeur, en USD
-15. ⬜ API pour Paiement : `add_exposure(devise, montant_usd, sens)` / `remove_exposure(...)`, une fois par jambe
-16. ⬜ Règle de capacité avec netting : `Reserved = Σ |exposition nette par devise| × plafond`, à la place de la somme brute des marges (deux couvertures opposées ne consomment plus de capital)
-17. ⬜ Limite par devise : exposition nette ≤ x % du capital (ex. MXN 30 %, ARS 10 %), paramétrable par l'admin
-18. ⬜ Tests : un acheteur et un vendeur de MXN se compensent ; limite par devise refusée
+14. ✅ Suivre l'exposition **nette** par devise contre l'USD : `Exposure(Symbol)` = volume acheteur − volume vendeur, en USD
+15. ✅ API pour Paiement : `add_exposure(devise, montant_usd, sens)` / `remove_exposure(...)`, une fois par jambe
+16. ✅ Règle de capacité avec netting : `Reserved = Σ |exposition nette par devise| × plafond`, à la place de la somme brute des marges (deux couvertures opposées ne consomment plus de capital)
+17. ✅ Limite par devise : exposition nette ≤ x % du capital (ex. MXN 30 %, ARS 10 %), paramétrable par l'admin
+18. ✅ Tests : un acheteur et un vendeur de MXN se compensent ; limite par devise refusée
 
 #### Phase 4 — Rendement du capital libre → confié à Pricing (Lancelot)
 Le vault expose `capacity()` et `total_assets()` ; si Lancelot ajoute le placement, se mettre d'accord sur l'interface `invest` / `divest` / `value` dans `vault.rs`.
 
 #### Phase 5 — Robustesse Soroban
-27. ⬜ `extend_ttl` sur l'instance, les parts et les expositions
-28. ⬜ Événements : `deposit`, `withdraw`
-29. ⬜ Multiplications en `checked_mul` (montants × prix en i128), arrondis toujours en faveur du pool
-30. ⬜ Fonctions admin : `set_currency_limit` (avec `require_auth`)
+27. ✅ `extend_ttl` sur l'instance, les parts et les expositions
+28. ✅ Événements : `deposit`, `withdraw`
+29. ✅ Multiplications en `checked_mul` (montants × prix en i128), arrondis toujours en faveur du pool
+30. ✅ Fonctions admin : `set_currency_limit` (avec `require_auth`)
 
 #### Phase 6 — Intégration
-31. ⬜ `setup-testnet.sh` : faire le dépôt du LP via `deposit_lp` (et plus seulement un envoi d'USDC)
-32. ⬜ Mettre à jour le README : vault 100 % USDC, parts LP, règle de capacité
+31. ✅ `setup-testnet.sh` : faire le dépôt du LP via `deposit_lp` (et plus seulement un envoi d'USDC)
+32. ✅ Mettre à jour le README : vault 100 % USDC, parts LP, règle de capacité
 
 ### Front (tout `front/`)
 1. ⬜ `shared/wallet.ts` : connexion Freighter via Stellar Wallets Kit (`connect`, `getAddress`, `signTransaction`)
@@ -120,9 +129,10 @@ Le vault expose `capacity()` et `total_assets()` ; si Lancelot ajoute le placeme
 Commencer avec des données factices, brancher le contrat après le merge.
 
 ### Infra et intégration
-1. ⬜ Maintenir `scripts/setup-testnet.sh` (y intégrer le `set_rate` / `set_min_cap` fournis par Pricing). Il doit rester utilisable tel quel par Paiement et Pricing sur leur machine (leurs propres comptes)
+1. ✅ `scripts/setup-testnet.sh` : dépôt LP, paramètres Pricing (taux, plafonds, EUR), une seule offre DEX (bug des offres empilées corrigé le 25/10). Il doit rester utilisable tel quel par Paiement et Pricing sur leur machine (leurs propres comptes)
 2. ⬜ **Garder les clés de démo** (`fx-admin`, `fx-lp`, `fx-lucia`, `fx-supplier`) : pas de partage pour l'instant. La démo et la vidéo se font depuis la machine d'Hugo ; tout ce qui demande `fx-admin` sur le déploiement officiel (crash, prix du mock, offre DEX, `set_rate`) passe par Hugo. Partage éventuel plus tard (pitch live du 28/10), en privé, jamais dans le repo
-3. ⬜ 🔴 **Lundi 8h : merge des 3 branches**, redéploiement, régénération des bindings, vérification du parcours complet
+3. ✅ Merge des 3 branches dans `main`, redéploiement et parcours complet vérifié sur testnet (25/10 soir, en avance)
+3bis. ⬜ Régénérer les bindings TS pour le front après chaque redéploiement (`stellar contract bindings typescript`), et refaire un merge final lundi matin si Paiement ou Pricing poussent encore
 4. ⬜ (option) Déployer le front (Vercel / Netlify) pour mettre un lien dans le README
 
 ### Pitch et soumission
@@ -136,38 +146,44 @@ Commencer avec des données factices, brancher le contrat après le merge.
 ## Paiement — Clément
 
 ### Contrat (`hedge.rs`) : marche à suivre détaillée en tête du fichier
-1. ⬜ `settle` en premier, piloté par les tests : hausse (le pool paie), baisse (Lucía paie sur sa marge), au-delà du plafond (borné), garde-fous (pas avant l'échéance, pas deux fois)
-2. ⬜ `open` : `require_auth(owner)`, `pricing::check_cap`, `locked_rate = pricing::forward_rate`, marge = `to_usdc(notional, locked_rate) × cap_bps / BPS`, transfert de la marge, `vault::reserve(marge)`, stockage + `extend_ttl`
-3. ⬜ Événements `open` / `settle` (pour le front et l'explorateur)
-4. ⬜ Tant que Vault et Pricing ne sont pas prêts : remplacer leurs `panic!("TODO")` par des valeurs en dur en local, **sans les committer**
+1. ✅ `settle` en premier, piloté par les tests : hausse (le pool paie), baisse (Lucía paie sur sa marge), au-delà du plafond (borné), garde-fous (pas avant l'échéance, pas deux fois)
+2. ✅ `open` : `require_auth(owner)`, `pricing::check_cap`, `locked_rate = pricing::forward_rate`, marge = `to_usdc(notional, locked_rate) × cap_bps / BPS`, transfert de la marge, `vault::reserve(marge)`, stockage + `extend_ttl`
+3. ✅ Événements `open` / `settle` (pour le front et l'explorateur)
+5. ✅ Branché sur le vault (`open_position` / `close_position`), codes `HedgeError` 200-204
+6. ⬜ 🔴 Retirer les `#[ignore]` des 13 tests d'intégration : ajouter `set_rate` / `set_min_cap` dans leur préparation (liste blanche du Pricing)
+7. ⬜ 🔴 Régler au **cours de fixing à l'échéance** (`pricing::fixing(currency, maturity)` de Lancelot) au lieu du spot au moment de l'appel : sinon option gratuite pour qui choisit quand régler
+4. ✅ (obsolète) Tant que Vault et Pricing ne sont pas prêts : remplacer leurs `panic!("TODO")` par des valeurs en dur en local, **sans les committer**
 
 ### Pour le front d'Hugo
-1. ⬜ 🔴 Valider le parcours en ligne de commande avant le merge : `open_hedge` → `settle` → path payment, sur **ton propre déploiement** (cf. Démarrage), avec les commandes `stellar contract invoke` / `stellar tx new path-payment-strict-receive` exactes, à donner à Hugo. Écrire les commandes avec les alias (`--id fx-pool`, `--source-account fx-lucia`) et non des adresses en dur : Hugo les rejoue telles quelles sur le déploiement officiel
-2. ⬜ Préciser les montants à afficher (marge rendue, P&L, coût total) et les cas d'erreur à gérer
+1. ✅ (`docs/payment-cli.md`) Valider le parcours en ligne de commande avant le merge : `open_hedge` → `settle` → path payment, sur **ton propre déploiement** (cf. Démarrage), avec les commandes `stellar contract invoke` / `stellar tx new path-payment-strict-receive` exactes, à donner à Hugo. Écrire les commandes avec les alias (`--id fx-pool`, `--source-account fx-lucia`) et non des adresses en dur : Hugo les rejoue telles quelles sur le déploiement officiel
+2. ✅ (`docs/payment-cli.md`) Préciser les montants à afficher (marge rendue, P&L, coût total) et les cas d'erreur à gérer
+3. ⬜ Mettre à jour les chiffres de `payment-cli.md` et `video-script.md` avec le vrai Pricing (90 j : prix figé 0,054873, 54 873,05 USDC ; crash +12 % : sans protection +6 727, avec +1 240)
 
 ### Testnet
-- ⬜ Vérifier la profondeur de l'offre DEX MXN/USDC pour le montant de la démo ; si elle doit être réalignée sur le prix du mock, donner la commande à Hugo (l'offre est faite par `fx-admin`)
+- ✅ Vérifier la profondeur de l'offre DEX MXN/USDC pour le montant de la démo ; si elle doit être réalignée sur le prix du mock, donner la commande à Hugo (l'offre est faite par `fx-admin`)
 
 ### Pitch
-- ⬜ 🔴 Script de la vidéo en 5 temps (voir § Démo), à livrer à Hugo dimanche soir
-- ⬜ Expliquer honnêtement les 2 signatures (`settle` puis path payment) : une transaction Soroban ne peut pas contenir d'opération classique ; version atomique en roadmap
+- ✅ Script de la vidéo en 5 temps : `docs/video-script.md` (sur `feat/payment`, à merger dans `main`)
+- ✅ Expliquer honnêtement les 2 signatures (`settle` puis path payment) : une transaction Soroban ne peut pas contenir d'opération classique ; version atomique en roadmap
 
 ## Pricing — Lancelot ⭐ prioritaire
 
 Un prix faux = arbitrage contre le pool : c'est ce qui rend le produit crédible face à un jury finance.
 
 ### Contrat (`pricing.rs`)
-1. ⬜ 🔴 `spot` : client SEP-40 sur l'adresse `Oracle`, `lastprice(Asset::Other(currency))`. Refuser si pas de prix ou prix trop ancien (Reflector : mise à jour toutes les 300 s). Le même code doit marcher sur Reflector **et** sur le mock
-2. ⬜ 🔴 `forward_rate` : `F = S × (1 + r_USD·t) / (1 + r_dev·t)` en i128 (t = durée / 31 536 000 s), puis le spread **contre l'utilisateur** (BuyCurrency → F × (1 + spread), SellCurrency → F × (1 − spread))
-3. ⬜ `quote` : `spot`, `forward_rate`, `usdc_cost = to_usdc(notional, F)`, `margin = usdc_cost × cap_bps / BPS`
-4. ⬜ `check_cap` et `set_min_cap` : plafond minimum par devise (ex. MXN 5 %, BRL 7 %, ARS 15 %)
-5. ⬜ `set_rate`, `set_spread` (admin, `require_auth`) avec des valeurs réalistes et sourcées : USD 4 %, MXN 7 %, BRL 10,5 %, ARS
-6. ⬜ Tests du bloc Pricing : parité chiffrée (r_MXN 7 %, r_USD 4 %, 90 j → F ≈ 0,05460), sens du spread, plafond minimum
-7. ⬜ Donner à Hugo les appels `set_rate` / `set_min_cap` à ajouter au script de setup
+1. ✅ 🔴 `spot` : client SEP-40 sur l'adresse `Oracle`, `lastprice(Asset::Other(currency))`. Refuser si pas de prix ou prix trop ancien (Reflector : mise à jour toutes les 300 s). Le même code doit marcher sur Reflector **et** sur le mock
+2. ✅ 🔴 `forward_rate` : `F = S × (1 + r_USD·t) / (1 + r_dev·t)` en i128 (t = durée / 31 536 000 s), puis le spread **contre l'utilisateur** (BuyCurrency → F × (1 + spread), SellCurrency → F × (1 − spread))
+3. ✅ `quote` : `spot`, `forward_rate`, `usdc_cost = to_usdc(notional, F)`, `margin = usdc_cost × cap_bps / BPS`
+4. ✅ `check_cap` et `set_min_cap` : plafond minimum par devise (ex. MXN 5 %, BRL 7 %, ARS 15 %)
+5. ✅ `set_rate`, `set_spread` (admin, `require_auth`) avec des valeurs réalistes et sourcées : USD 4 %, MXN 7 %, BRL 10,5 %, ARS
+6. ✅ Tests du bloc Pricing : parité chiffrée (r_MXN 7 %, r_USD 4 %, 90 j → F ≈ 0,05460), sens du spread, plafond minimum
+7. ✅ Donner à Hugo les appels `set_rate` / `set_min_cap` à ajouter au script de setup
+8. ⬜ 🔴 Remplacer les `panic!("...")` (`currency not enabled`, `stale price`, `rate not set`…) par `#[contracterror] enum PricingError` (codes 300-399) : les textes sont effacés dans le WASM, le front ne peut pas les distinguer
+9. ⬜ 🔴 `fixing(currency, maturity)` pour `settle` : lecture `price(asset, timestamp)` de Reflector ; historique des prix dans le mock-oracle (`price(asset, ts)`)
 
 ### Oracle et scripts
 1. ⬜ `scripts/crash.sh` : `set_price` du MXN +12 % sur le mock en ligne de commande (filet de sécurité pendant la vidéo). Utiliser les alias (`fx-admin`, `fx-mock-oracle`) : tu le testes sur ton déploiement, Hugo le lance sur le sien
-2. ⬜ ⚠️ `spot` refuse un prix de plus de 300 s : pendant la démo, le prix du mock doit être réécrit juste avant chaque `settle` (le crash le fait ; sinon relancer `set_price`). Juste avant la vidéo : donner à Hugo la commande pour aligner le prix du mock sur le vrai spot Reflector (c'est lui qui la lance, avec `fx-admin`) ; prévenir Paiement pour l'offre DEX
+2. ⬜ ⚠️ `spot` refuse un prix de plus de 900 s (`MAX_PRICE_AGE_SECS`) : pendant la démo, le prix du mock doit être frais avant `open_hedge` (le taux forward lit le spot) ET avant `settle` (le crash le fait ; sinon relancer `set_price`). Juste avant la vidéo : donner à Hugo la commande pour aligner le prix du mock sur le vrai spot Reflector (c'est lui qui la lance, avec `fx-admin`) ; prévenir Paiement pour l'offre DEX
 3. ⬜ Donner à Hugo la lecture du spot Reflector côté front (contrat, `Asset::Other("MXN")`, conversion des 14 décimales) pour `QuoteCard`
 
 ### Rendement du capital libre (Etherfuse, indexé sur les bons du Trésor US)
