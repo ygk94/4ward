@@ -22,6 +22,13 @@ pub const SECS_PER_YEAR: u64 = 31_536_000;
 const MAX_RATE_BPS: u32 = 10_000;
 /// Spread maximum accepté par `set_spread` : 5 %.
 const MAX_SPREAD_BPS: u32 = 500;
+/// Plafond maximum, pour `set_min_cap` comme pour une cotation : 50 %. Au-delà, ce n'est plus une couverture.
+pub const MAX_CAP_BPS: u32 = 5_000;
+
+/// TTL du storage instance (Rate, MinCap, SpreadBps, Admin, Oracle…), en ledgers (~5 s chacun).
+/// Prolongé à chaque `quote` quand il reste moins d'≈ 1 jour, jusqu'à ≈ 30 jours.
+const INSTANCE_TTL_THRESHOLD: u32 = 17_280;
+const INSTANCE_TTL_EXTEND_TO: u32 = 518_400;
 
 /// Même forme que l'`Asset` SEP-40 de Reflector et du mock-oracle : les devises fiat sont `Other(symbole)`.
 /// Les noms de type et de variante doivent rester identiques pour que l'encodage XDR coïncide.
@@ -51,15 +58,26 @@ pub trait Sep40Oracle {
 
 // ---- appelé par lib.rs ----
 
+/// Devis complet. `check_cap` passe avant tout appel à l'oracle : une devise non ouverte ou un plafond
+/// hors bornes est refusé sans dépendre de l'état de l'oracle.
 pub(crate) fn quote(
-    _env: &Env,
-    _currency: &Symbol,
-    _side: Side,
-    _notional: i128,
-    _duration_secs: u64,
-    _cap_bps: u32,
+    env: &Env,
+    currency: &Symbol,
+    side: Side,
+    notional: i128,
+    duration_secs: u64,
+    cap_bps: u32,
 ) -> Quote {
-    panic!("TODO pricing")
+    if notional <= 0 {
+        panic!("invalid notional");
+    }
+    check_cap(env, currency, cap_bps);
+    env.storage().instance().extend_ttl(INSTANCE_TTL_THRESHOLD, INSTANCE_TTL_EXTEND_TO);
+    let spot = spot(env, currency);
+    let forward_rate = forward_rate(env, currency, side, duration_secs);
+    let usdc_cost = to_usdc(notional, forward_rate);
+    let margin = margin_for(usdc_cost, cap_bps);
+    Quote { spot, forward_rate, usdc_cost, margin }
 }
 
 /// Pose le taux annuel d'une devise, en bps. Le taux USD se pose aussi ici, avec le symbole `USD`.
@@ -71,8 +89,13 @@ pub(crate) fn set_rate(env: &Env, currency: &Symbol, rate_bps: u32) {
     env.storage().instance().set(&DataKey::Rate(currency.clone()), &rate_bps);
 }
 
-pub(crate) fn set_min_cap(_env: &Env, _currency: &Symbol, _cap_bps: u32) {
-    panic!("TODO pricing")
+/// Ouvre une devise avec son plafond minimum, en bps (liste blanche : sans minimum, pas de cotation).
+pub(crate) fn set_min_cap(env: &Env, currency: &Symbol, cap_bps: u32) {
+    crate::admin(env).require_auth();
+    if cap_bps == 0 || cap_bps > MAX_CAP_BPS {
+        panic!("cap out of range");
+    }
+    env.storage().instance().set(&DataKey::MinCap(currency.clone()), &cap_bps);
 }
 
 pub(crate) fn set_spread(env: &Env, spread_bps: u32) {
@@ -160,9 +183,26 @@ fn mul_div_ceil(a: i128, b: i128, c: i128) -> i128 {
     (a * b + c - 1) / c
 }
 
-/// Panique si `cap_bps` est sous le plafond minimum de la devise.
-pub(crate) fn check_cap(_env: &Env, _currency: &Symbol, _cap_bps: u32) {
-    panic!("TODO pricing")
+/// Panique si la devise n'est pas ouverte (pas de plafond minimum = hors liste blanche), si `cap_bps`
+/// est sous le minimum de la devise ou au-dessus de `MAX_CAP_BPS`.
+pub(crate) fn check_cap(env: &Env, currency: &Symbol, cap_bps: u32) {
+    let min: u32 = env
+        .storage()
+        .instance()
+        .get(&DataKey::MinCap(currency.clone()))
+        .unwrap_or_else(|| panic!("currency not enabled"));
+    if cap_bps < min {
+        panic!("cap below minimum");
+    }
+    if cap_bps > MAX_CAP_BPS {
+        panic!("cap too high");
+    }
+}
+
+/// Marge USDC (7 décimales) pour un plafond : usdc_cost × cap_bps / BPS, arrondi vers le haut (côté pool).
+/// `hedge::open` doit appeler cette fonction : la marge déposée est alors identique à celle affichée par `quote`.
+pub(crate) fn margin_for(usdc_cost: i128, cap_bps: u32) -> i128 {
+    mul_div_ceil(usdc_cost, cap_bps as i128, crate::BPS)
 }
 
 /// Conversion devise → USDC : notional (7 déc.) × rate (14 déc.) → USDC (7 déc.).

@@ -55,16 +55,16 @@ F = S × (1 + r_USD·t) / (1 + r_dev·t)      t = duration_secs / 31_536_000
 - ✅ Arrondis en faveur du pool : `BuyCurrency` → arrondir **vers le haut** (ceil : `(a + b − 1) / b`), `SellCurrency` → arrondir vers le bas (division entière). Factoriser un helper `mul_div_ceil` / `mul_div_floor`.
 - ✅ `duration_secs == 0` → F = S (autorisé pour la démo en secondes). Durée > 1 an → panic (hors produit).
 
-### 1.3 `quote(...) -> Quote`
-- ⬜ `spot`, `forward_rate`, `usdc_cost = to_usdc(notional, forward_rate)`, `margin = usdc_cost × cap_bps / BPS` (ceil)
-- ⬜ Appeler `check_cap` dedans pour que le front ait l'erreur avant `open_hedge`
-- ⬜ `notional <= 0` → panic
-- ⬜ Vérifier que `to_usdc` est cohérent : 10_000_000_000_000 (1 M MXN, 7 déc.) × 5_500_000_000_000 (0,055, 14 déc.) / 1e14 = 550_000_000_000 = 55 000 USDC ✓. Proposer à Hugo de passer `to_usdc` en ceil (c'est son fichier ? non, il est dans `pricing.rs` : à nous).
+### 1.3 ✅ `quote(...) -> Quote`
+- ✅ `spot`, `forward_rate`, `usdc_cost = to_usdc(notional, forward_rate)`, `margin = usdc_cost × cap_bps / BPS` (ceil)
+- ✅ Appeler `check_cap` dedans pour que le front ait l'erreur avant `open_hedge`
+- ✅ `notional <= 0` → panic
+- ✅ Vérifier que `to_usdc` est cohérent : 10_000_000_000_000 (1 M MXN, 7 déc.) × 5_500_000_000_000 (0,055, 14 déc.) / 1e14 = 550_000_000_000 = 55 000 USDC ✓. Proposer à Hugo de passer `to_usdc` en ceil (c'est son fichier ? non, il est dans `pricing.rs` : à nous).
 
-### 1.4 `check_cap` / `set_min_cap`
-- ⬜ `set_min_cap` : `admin(env).require_auth()`, `cap_bps ≤ BPS`, stocker `DataKey::MinCap(currency)` en instance
-- ⬜ `check_cap` : `cap_bps < MinCap(currency)` → panic `"cap below minimum"` ; devise sans minimum → panic (devise non activée = refusée, c'est la liste blanche des devises) ; `cap_bps > 5000` → panic (plafond absurde)
-- ⬜ Valeurs : MXN 500 (5 %), BRL 700 (7 %), ARS 1500 (15 %), EUR 300 (3 %) — à calibrer avec `sim/` (§4)
+### 1.4 ✅ `check_cap` / `set_min_cap`
+- ✅ `set_min_cap` : `admin(env).require_auth()`, `cap_bps ≤ BPS`, stocker `DataKey::MinCap(currency)` en instance
+- ✅ `check_cap` : `cap_bps < MinCap(currency)` → panic `"cap below minimum"` ; devise sans minimum → panic (devise non activée = refusée, c'est la liste blanche des devises) ; `cap_bps > 5000` → panic (plafond absurde)
+- ✅ Valeurs : MXN 500 (5 %), BRL 700 (7 %), ARS 1500 (15 %), EUR 300 (3 %) — à calibrer avec `sim/` (§4)
 
 ### 1.5 ✅ `set_rate` / `set_spread`
 - ✅ `admin(env).require_auth()` dans les deux
@@ -80,8 +80,8 @@ F = S × (1 + r_USD·t) / (1 + r_dev·t)      t = duration_secs / 31_536_000
   | EUR | BCE ≈ 2 % | 200 |
   → vérifier les chiffres réels avant la vidéo, les mettre dans `scripts/setup-testnet.sh` via Hugo (§5).
 
-### 1.6 `extend_ttl`
-- ⬜ Tout est en storage `instance` (Rate, MinCap, Spread) : `env.storage().instance().extend_ttl(...)` dans `quote` suffit (ou laisser à Vault qui le fait sur l'instance). À demander à Hugo pour éviter le doublon.
+### 1.6 ✅ `extend_ttl`
+- ✅ Tout est en storage `instance` (Rate, MinCap, Spread) : `env.storage().instance().extend_ttl(...)` dans `quote` suffit (ou laisser à Vault qui le fait sur l'instance). À demander à Hugo pour éviter le doublon.
 
 ---
 

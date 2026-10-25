@@ -22,8 +22,8 @@ mod pricing_tests {
     //! Oracle de test minimal, même interface de lecture SEP-40 que Reflector FX et que `contracts/mock-oracle`
     //! (`lastprice(Asset::Other(sym))`, `decimals()` = 14). Réutilise les types `Asset` / `PriceData` du client
     //! déclaré dans `pricing.rs`, ce qui vérifie au passage que l'encodage coïncide.
-    use crate::pricing::{self, Asset, PriceData, MAX_PRICE_AGE_SECS, SECS_PER_YEAR};
-    use crate::{Pool, PoolClient, Side, PRICE_DECIMALS};
+    use crate::pricing::{self, Asset, PriceData, MAX_CAP_BPS, MAX_PRICE_AGE_SECS, SECS_PER_YEAR};
+    use crate::{Pool, PoolClient, Quote, Side, BPS, PRICE_DECIMALS};
     use soroban_sdk::testutils::{Address as _, Ledger as _};
     use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol};
 
@@ -120,6 +120,21 @@ mod pricing_tests {
         set_rates(&s, 400, &mxn, 700);
         (s, mxn)
     }
+
+    fn set_min_cap(s: &Setup, currency: &Symbol, cap_bps: u32) {
+        PoolClient::new(&s.env, &s.pool).set_min_cap(currency, &cap_bps);
+    }
+
+    /// `setup_mxn` + spread 50 bps + MXN ouvert avec un plafond minimum de 5 %.
+    fn setup_mxn_full() -> (Setup, Symbol) {
+        let (s, mxn) = setup_mxn();
+        set_spread(&s, 50);
+        set_min_cap(&s, &mxn, 500);
+        (s, mxn)
+    }
+
+    /// 1 000 000 MXN, 7 décimales.
+    const NOTIONAL_1M: i128 = 10_000_000_000_000;
 
     #[test]
     fn pricing_spot_reads_oracle() {
@@ -259,11 +274,106 @@ mod pricing_tests {
         assert!(pool.try_set_rate(&mxn(&env), &700).is_err());
         assert!(pool.try_set_spread(&50).is_err());
     }
-}
 
-#[test]
-#[ignore = "TODO pricing: plafond sous le minimum de la devise refusé"]
-fn pricing_min_cap() {}
+    #[test]
+    fn pricing_quote_amounts() {
+        let (s, mxn) = setup_mxn_full();
+        let pool = PoolClient::new(&s.env, &s.pool);
+        assert_eq!(
+            pool.quote(&mxn, &Side::BuyCurrency, &NOTIONAL_1M, &D90, &1000),
+            Quote {
+                spot: MXN_SPOT,
+                forward_rate: MXN_F90_BUY_50,
+                usdc_cost: 548_730_541_341, // 54 873,05 USDC
+                margin: 54_873_054_135,     // ceil(54_873_054_134,1)
+            }
+        );
+        assert_eq!(pool.quote(&mxn, &Side::BuyCurrency, &NOTIONAL_1M, &D90, &500).margin, 27_436_527_068);
+        assert_eq!(
+            pool.quote(&mxn, &Side::SellCurrency, &NOTIONAL_1M, &D90, &1000),
+            Quote {
+                spot: MXN_SPOT,
+                forward_rate: MXN_F90_SELL_50,
+                usdc_cost: 543_270_535_954,
+                margin: 54_327_053_596,
+            }
+        );
+    }
+
+    #[test]
+    fn pricing_quote_margin_rounds_up() {
+        let (s, mxn) = setup_mxn_full();
+        let q = PoolClient::new(&s.env, &s.pool).quote(&mxn, &Side::BuyCurrency, &NOTIONAL_1M, &D90, &1000);
+        assert!(q.margin * BPS >= q.usdc_cost * 1000);
+        // 548_730_541_341 × 1000 / 10_000 ne tombe pas juste : marge = floor + 1.
+        assert_ne!(q.usdc_cost * 1000 % BPS, 0);
+        assert_eq!(q.margin, q.usdc_cost * 1000 / BPS + 1);
+    }
+
+    #[test]
+    fn pricing_min_cap() {
+        let (s, mxn) = setup_mxn_full();
+        let pool = PoolClient::new(&s.env, &s.pool);
+        assert!(pool.try_quote(&mxn, &Side::BuyCurrency, &NOTIONAL_1M, &D90, &400).is_err());
+        assert!(pool.try_quote(&mxn, &Side::BuyCurrency, &NOTIONAL_1M, &D90, &500).is_ok());
+        assert!(pool.try_quote(&mxn, &Side::BuyCurrency, &NOTIONAL_1M, &D90, &1000).is_ok());
+    }
+
+    #[test]
+    fn pricing_quote_unknown_currency_rejected() {
+        let (s, _) = setup_mxn_full();
+        let pool = PoolClient::new(&s.env, &s.pool);
+        let brl = Symbol::new(&s.env, "BRL");
+        set_price(&s, &brl, 18_000_000_000_000);
+        pool.set_rate(&brl, &1050);
+        // Prix et taux présents, mais pas de plafond minimum : devise non ouverte.
+        assert!(pool.try_quote(&brl, &Side::BuyCurrency, &NOTIONAL_1M, &D90, &1000).is_err());
+    }
+
+    #[test]
+    fn pricing_quote_cap_too_high_rejected() {
+        let (s, mxn) = setup_mxn_full();
+        let pool = PoolClient::new(&s.env, &s.pool);
+        assert!(pool.try_quote(&mxn, &Side::BuyCurrency, &NOTIONAL_1M, &D90, &MAX_CAP_BPS).is_ok());
+        assert!(pool.try_quote(&mxn, &Side::BuyCurrency, &NOTIONAL_1M, &D90, &(MAX_CAP_BPS + 1)).is_err());
+    }
+
+    #[test]
+    fn pricing_quote_invalid_notional_rejected() {
+        let (s, mxn) = setup_mxn_full();
+        let pool = PoolClient::new(&s.env, &s.pool);
+        assert!(pool.try_quote(&mxn, &Side::BuyCurrency, &0, &D90, &1000).is_err());
+        assert!(pool.try_quote(&mxn, &Side::BuyCurrency, &-1, &D90, &1000).is_err());
+    }
+
+    #[test]
+    fn pricing_set_min_cap_bounds() {
+        let s = setup();
+        let pool = PoolClient::new(&s.env, &s.pool);
+        let cur = mxn(&s.env);
+        assert!(pool.try_set_min_cap(&cur, &0).is_err());
+        assert!(pool.try_set_min_cap(&cur, &MAX_CAP_BPS).is_ok());
+        assert!(pool.try_set_min_cap(&cur, &(MAX_CAP_BPS + 1)).is_err());
+
+        // Sans mock_all_auths : l'admin n'a rien signé.
+        let env = Env::default();
+        let admin = Address::generate(&env);
+        let usdc = Address::generate(&env);
+        let oracle = env.register(TestOracle, ());
+        let pool = PoolClient::new(&env, &env.register(Pool, (&admin, &usdc, &oracle, 50u32)));
+        assert!(pool.try_set_min_cap(&mxn(&env), &500).is_err());
+    }
+
+    /// MXN ouvert mais sans prix sur l'oracle : le refus doit venir de `check_cap`, pas de `spot`.
+    #[test]
+    #[should_panic(expected = "cap below minimum")]
+    fn pricing_quote_rejects_before_oracle_call() {
+        let s = setup();
+        let mxn = mxn(&s.env);
+        set_min_cap(&s, &mxn, 500);
+        s.env.as_contract(&s.pool, || pricing::quote(&s.env, &mxn, Side::BuyCurrency, NOTIONAL_1M, D90, 400));
+    }
+}
 
 // ---- Paiement ----
 
