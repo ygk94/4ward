@@ -10,7 +10,7 @@
 - ✅ **Contrat Pricing complet et dans `main`** (codes d'erreur 300-311 compris, mergés par Hugo : `ea323b2`). 112 tests verts sur toute la suite, 0 ignoré ; les tests de Clément tournent sur le vrai Pricing.
 - ✅ **Testnet redéployé sur `main`** (`f3d65cd`), `set_rate` / `set_min_cap` / EUR dans le setup. `quote` sur le nouveau pool (`CAQY7OYO…`) vérifié : forward `5487305413412`, coût `548730541341`, marge `54873054135` = valeurs de référence exactes.
 - ✅ **Fixing à l'échéance** côté Pricing + historique du mock (§8.1) ; Clément branche `settle` dessus.
-- ⬜ 🔴 **Reste côté Pricing, par priorité** : `crash.sh` (§4.1) · mémo front pour Hugo (§3) · `sim/` (§4.2) · slides et objections (§6, §7).
+- ⬜ 🔴 **Reste côté Pricing, par priorité** : ~~`crash.sh` (§4.1)~~ ✅ · mémo front pour Hugo (§3) · `sim/` (§4.2) · slides et objections (§6, §7).
 
 Légende : ⬜ à faire · 🔴 bloque quelqu'un d'autre · ✅ fait
 
@@ -118,7 +118,7 @@ Tests : chaque refus est vérifié avec son code exact (`Err(Ok(err(PricingError
 
 Ce que `hedge.rs` attend de nous est conforme à ce qu'on a livré : `spot`, `forward_rate` (formule du README, pas celle inversée du transcript du council), `check_cap`, `to_usdc` inchangée. Points d'action :
 
-- ✅ 🔴 **Fraîcheur du prix pendant la démo** : `settle` appelle `spot`, qui refuse un prix de plus de `MAX_PRICE_AGE_SECS` = 900 s (Clément pense 300 s : lui préciser). Le mock horodate au `set_price`. Conséquence pour la vidéo : le crash (ou un simple « rafraîchir le cours ») doit avoir lieu **moins de 15 min avant `settle`**. À prévoir dans `CrashButton` (bouton « Rafraîchir le cours ») et dans `scripts/crash.sh` (`--refresh` : repose le même prix pour mettre à jour l'horodatage). Le dire à Clément pour son script vidéo. → **Fait côté Clément** (`docs/payment-cli.md`, `docs/video-script.md` : rafraîchir le mock avant `open_hedge` et avant `settle`) et `TODO.md` corrigé à 900 s. Reste notre `crash.sh --refresh` (§4.1).
+- ✅ 🔴 **Fraîcheur du prix pendant la démo** : `settle` appelle `spot`, qui refuse un prix de plus de `MAX_PRICE_AGE_SECS` = 900 s (Clément pense 300 s : lui préciser). Le mock horodate au `set_price`. Conséquence pour la vidéo : le crash (ou un simple « rafraîchir le cours ») doit avoir lieu **moins de 15 min avant `settle`**. À prévoir dans `CrashButton` (bouton « Rafraîchir le cours ») et dans `scripts/crash.sh` (`--refresh` : repose le même prix pour mettre à jour l'horodatage). Le dire à Clément pour son script vidéo. → **Fait côté Clément** (`docs/payment-cli.md`, `docs/video-script.md` : rafraîchir le mock avant `open_hedge` et avant `settle`) et `TODO.md` corrigé à 900 s. `crash.sh --refresh` fait (§4.1).
 - ✅ **Marge** : Clément arrondit déjà vers le haut (`to_usdc × cap_bps / BPS`, ceil), donc marge prélevée = marge affichée par `quote`. Lui proposer quand même d'appeler `pricing::margin_for(usdc_cost, cap_bps)` pour n'avoir qu'une seule formule. → **Fait** : Clément utilise `margin_for` (`24534f3`).
 - ⬜ **Durée nulle** : `open` refuse `duration_secs == 0`, `quote` l'accepte. Dans `QuoteCard`, imposer une durée ≥ 1 s pour ne pas afficher un devis que `open_hedge` refusera. → Le front est à Hugo : à mettre dans le mémo front (§3).
 - ✅ **Tests après merge** : Clément ajoute `mock-oracle` en dev-dependency de `contracts/pool/Cargo.toml`. Une fois mergé, on pourra remplacer notre `TestOracle` par le vrai `mock_oracle::MockOracle` dans `pricing_tests` (optionnel, gain de fidélité). Conflit attendu sur `test.rs` : nul si chacun reste dans son bloc, nos imports sont dans le module `pricing_tests`. → Dev-dependency `mock-oracle` ajoutée (`Cargo.toml`). Bascule de notre `TestOracle` vers le vrai mock : optionnelle, non faite.
@@ -185,14 +185,12 @@ Dépend de `shared/wallet.ts` et `shared/contract.ts` (Hugo, 🔴). En attendant
 ## 4. `scripts/crash.sh` + `sim/`
 
 ### 4.1 `scripts/crash.sh` (filet de sécurité vidéo)
-- ⬜ `source .env.testnet`, argument `PCT` (défaut 12), devise (défaut MXN) :
-  ```sh
-  CUR=$(stellar contract invoke --id $MOCK_ORACLE_ID --network testnet --source-account fx-admin -- lastprice --asset '{"Other":"MXN"}' | jq -r .price)
-  NEW=$(( CUR * (100 + PCT) / 100 ))
-  stellar contract invoke --id $MOCK_ORACLE_ID --network testnet --source-account fx-admin -- set_price --asset '{"Other":"MXN"}' --price $NEW
-  ```
-- ⬜ Option `--reset` : lit Reflector (`lastprice` sur `$REFLECTOR_FX_ID`) et le pousse dans le mock.
-- ⬜ `chmod +x`, tester une fois sur testnet.
+- ✅ `./scripts/crash.sh [PCT] [DEVISE]` : PCT défaut 12 (accepte −8, 12.5, 12,5), DEVISE défaut MXN. `lastprice` du mock lu en simulation, `NEW = CUR × (10000 + bps) / 10000` en entiers, `set_price` signé par l'admin du mock, relecture et affichage « Peso : 0,0550 $ → 0,0616 $ (+12 %) » + âge du prix + lien stellar.expert.
+- ✅ `--refresh` : repose le même prix (nouvel horodatage, < 900 s avant `open_hedge`).
+- ✅ `--reset` : lit `lastprice` sur Reflector (`$REFLECTOR_FX_ID`) et le pousse dans le mock ; affiche l'écart avec l'offre DEX à 0,055 et les chiffres vidéo recalculés au prorata.
+- ✅ `--dry-run` : tout calculer sans envoyer. Alias surchargeables `ORACLE` / `ADMIN` / `NET` (repli sur `$MOCK_ORACLE_ID` si l'alias `fx-mock-oracle` n'existe pas sur la machine).
+- ✅ `chmod +x`, `--help`. Testé sur le déploiement officiel en lecture et `--dry-run` (12, −8, 12.5, `--refresh`, `--reset`) : fx-admin n'est pas sur la machine de Lancelot. shellcheck non installé : `bash -n` seulement.
+- ⬜ écriture réelle testée sur le déploiement officiel par Hugo : `./scripts/crash.sh --refresh` (même prix, sans effet sur la démo)
 
 ### 4.2 `sim/` (chiffres pour le deck)
 - ⬜ `sim/pnl.py` (ou notebook) : P&L de Lucía pour un mouvement du peso de −20 % à +20 %, **sans** protection, **avec** protection 5 / 10 / 20 %. Courbe « coût total en USDC » : plate entre ±cap, pente 1 au-delà. Export PNG pour le deck.
