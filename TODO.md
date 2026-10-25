@@ -55,12 +55,12 @@ Légende : ✅ fait · ⬜ à faire · 🔴 bloquant pour les autres ou pour la 
 
 ## État au 25/10 soir
 
-- ✅ **Contrat complet et mergé dans `main`** : vault (phases 1 à 6), paiement (`open` / `settle` branchés sur le vault, codes 200-204), pricing (spot, taux forward, plafonds, liste blanche des devises). 112 tests verts (0 ignoré), CI verte.
-- ✅ **Testnet redéployé sur `main`** (IDs dans `.env.testnet`) ; parcours complet rejoué : devis 54 873,05 USDC sur 90 j, ouverture, crash +12 %, règlement plafonné (Lucía reçoit 11 055), paiement du fournisseur 1 000 000 MXN.
+- ✅ **Contrat complet et mergé dans `main`** : vault (phases 1 à 6), paiement (`open` / `settle` branchés sur le vault, codes 200-204), pricing (spot, taux forward, plafonds, liste blanche des devises). 143 tests verts (0 ignoré), CI verte. Mergés aussi : fixing à l'échéance, mode démo `time_factor`, `crash.sh`, tranches prudente / dynamique (`deposit_senior`, `withdraw_senior`, `senior_balance`, `tranche_values`, codes 111-112).
+- ✅ **Testnet redéployé sur `main`** (IDs dans `.env.testnet`, mode démo 90 j → 5 min) ; scénario exact de la vidéo rejoué : prix figé 54 873,05 USDC, crash +12 % (`crash.sh`), règlement au fixing sans rafraîchir le prix, fournisseur payé 1 000 000 MXN, **coût total de Lucía 56 112,69 USDC au centime**. Tranche prudente testée : dépôt de 100 000 USDC, refus #111 au-delà du ratio.
 - ⬜ 🔴 **Front** : en cours (Hugo).
 - ⬜ 🔴 **Vidéo, deck, nom, soumission.**
 
-**Points ouverts à trancher :** voir `docs/points-a-trancher.md` (fixing à l'échéance, durée de la démo vs prix affiché ; codes d'erreur du Pricing réglés).
+**Points ouverts à trancher :** voir `docs/points-a-trancher.md` (les trois sont réglés).
 
 ---
 
@@ -153,14 +153,14 @@ Commencer avec des données factices, brancher le contrat après le merge.
 3. ✅ Événements `open` / `settle` (pour le front et l'explorateur)
 5. ✅ Branché sur le vault (`open_position` / `close_position`), codes `HedgeError` 200-204
 6. ✅ Retirer les `#[ignore]` des 13 tests d'intégration : ajouter `set_rate` / `set_min_cap` dans leur préparation (liste blanche du Pricing)
-7. ⬜ 🔴 (en cours, avec Lancelot) Régler au **cours de fixing à l'échéance** (`pricing::fixing(currency, maturity)` de Lancelot) au lieu du spot au moment de l'appel : sinon option gratuite pour qui choisit quand régler
+7. ✅ Régler au **cours de fixing à l'échéance** (`pricing::fixing(currency, maturity)` de Lancelot) au lieu du spot au moment de l'appel : sinon option gratuite pour qui choisit quand régler
 4. ✅ (obsolète) Tant que Vault et Pricing ne sont pas prêts : remplacer leurs `panic!("TODO")` par des valeurs en dur en local, **sans les committer**
 
 ### Pour le front d'Hugo
 1. ✅ (`docs/payment-cli.md`) Valider le parcours en ligne de commande avant le merge : `open_hedge` → `settle` → path payment, sur **ton propre déploiement** (cf. Démarrage), avec les commandes `stellar contract invoke` / `stellar tx new path-payment-strict-receive` exactes, à donner à Hugo. Écrire les commandes avec les alias (`--id fx-pool`, `--source-account fx-lucia`) et non des adresses en dur : Hugo les rejoue telles quelles sur le déploiement officiel
 2. ✅ (`docs/payment-cli.md`) Préciser les montants à afficher (marge rendue, P&L, coût total) et les cas d'erreur à gérer
 3. ✅ Chiffres de `payment-cli.md` et `video-script.md` mis à jour avec le vrai Pricing (60 s : 55 275 / 56 072,50 ; répétition testnet au centime)
-4. ⬜ 🔴 Facteur d'accélération pour la démo (point 2, option b) : prix calculé sur 90 j, échéance réelle courte ; puis repasser la vidéo aux chiffres de 90 j
+4. ✅ Facteur d'accélération pour la démo (point 2, option b) : prix calculé sur 90 j, échéance réelle courte ; puis repasser la vidéo aux chiffres de 90 j
 
 ### Testnet
 - ✅ Vérifier la profondeur de l'offre DEX MXN/USDC pour le montant de la démo ; si elle doit être réalignée sur le prix du mock, donner la commande à Hugo (l'offre est faite par `fx-admin`)
@@ -182,10 +182,10 @@ Un prix faux = arbitrage contre le pool : c'est ce qui rend le produit crédible
 6. ✅ Tests du bloc Pricing : parité chiffrée (r_MXN 7 %, r_USD 4 %, 90 j → F ≈ 0,05460), sens du spread, plafond minimum
 7. ✅ Donner à Hugo les appels `set_rate` / `set_min_cap` à ajouter au script de setup
 8. ✅ Remplacer les `panic!("...")` (`currency not enabled`, `stale price`, `rate not set`…) par `#[contracterror] enum PricingError` (codes 300-399) : les textes sont effacés dans le WASM, le front ne peut pas les distinguer
-9. ⬜ 🔴 (en cours, avec Clément) `fixing(currency, maturity)` pour `settle` : lecture `price(asset, timestamp)` de Reflector ; historique des prix dans le mock-oracle (`price(asset, ts)`)
+9. ✅ `fixing(currency, maturity)` pour `settle` : lecture `price(asset, timestamp)` de Reflector ; historique des prix dans le mock-oracle (`price(asset, ts)`)
 
 ### Oracle et scripts
-1. ⬜ `scripts/crash.sh` : `set_price` du MXN +12 % sur le mock en ligne de commande (filet de sécurité pendant la vidéo). Utiliser les alias (`fx-admin`, `fx-mock-oracle`) : tu le testes sur ton déploiement, Hugo le lance sur le sien
+1. ✅ `scripts/crash.sh` (`--refresh`, `--reset`, `--dry-run`) : `set_price` du MXN +12 % sur le mock en ligne de commande (filet de sécurité pendant la vidéo). Utiliser les alias (`fx-admin`, `fx-mock-oracle`) : tu le testes sur ton déploiement, Hugo le lance sur le sien
 2. ⬜ ⚠️ `spot` refuse un prix de plus de 900 s (`MAX_PRICE_AGE_SECS`) : pendant la démo, le prix du mock doit être frais avant `open_hedge` (le taux forward lit le spot) ET avant `settle` (le crash le fait ; sinon relancer `set_price`). Juste avant la vidéo : donner à Hugo la commande pour aligner le prix du mock sur le vrai spot Reflector (c'est lui qui la lance, avec `fx-admin`) ; prévenir Paiement pour l'offre DEX
 3. ⬜ Donner à Hugo la lecture du spot Reflector côté front (contrat, `Asset::Other("MXN")`, conversion des 14 décimales) pour `QuoteCard`
 

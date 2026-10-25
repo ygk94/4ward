@@ -1,10 +1,10 @@
 # Points à trancher
 
-État au 25/10 soir. Le contrat est complet dans `main` et le testnet est vérifié. Points 1 et 2 pris en charge par Clément (avec Lancelot pour le fixing), point 3 réglé.
+État au 25/10 soir. Le contrat est complet dans `main` et le testnet est vérifié. **Les trois points sont réglés** (mergés dans `main` et validés sur le testnet le 25/10 soir).
 
 ---
 
-## 1. 🔴 Cours de règlement : fixing à l'échéance — EN COURS
+## 1. ✅ Cours de règlement : fixing à l'échéance (réglé : `settle` règle au cours en vigueur à l'échéance, erreur 312 si absent ; historique dans le mock-oracle)
 
 **Qui :** Clément (côté `settle`) + Lancelot (`fixing(currency, maturity)` et historique du mock-oracle). Pris en charge le 25/10 soir.
 
@@ -21,7 +21,7 @@
 
 ---
 
-## 2. 🔴 Durée de la démo vs prix affiché
+## 2. ✅ Durée de la démo vs prix affiché (réglé : `set_time_factor 25920`, posé par le script de setup ; prix à 90 jours, échéance réelle 5 min ; scénario de la vidéo validé à 56 112,69 USDC au centime)
 
 **Qui :** Hugo (vidéo, front) + Clément + Lancelot
 
