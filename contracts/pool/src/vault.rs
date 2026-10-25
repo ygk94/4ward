@@ -289,27 +289,80 @@ pub(crate) fn book_loss(env: &Env, amount: i128) {
 /// Ouverture d'une couverture : réserve la marge, contrôle la limite de la devise et ajoute
 /// l'exposition. À appeler par hedge::open une fois la `Hedge` construite.
 /// Erreurs : `InvalidAmount`, `InsufficientCapacity`, `CurrencyLimitExceeded`.
-pub(crate) fn open_position(_env: &Env, _hedge: &Hedge) {
-    panic!("TODO vault")
+pub(crate) fn open_position(env: &Env, hedge: &Hedge) {
+    reserve(env, hedge.margin);
+
+    let mut e = exposure(env, &hedge.currency);
+    if let Some(limit_bps) = currency_limit(env, &hedge.currency) {
+        // Plafond arrondi vers le bas : en faveur du pool.
+        let max_margins = total_deposits(env) * limit_bps as i128 / BPS;
+        if e.buy_margin + e.sell_margin + hedge.margin > max_margins {
+            panic_with_error!(env, VaultError::CurrencyLimitExceeded);
+        }
+    }
+
+    // Même calcul à l'ouverture et à la clôture : le compteur retombe à zéro pile.
+    let notional_usd = pricing::to_usdc(hedge.notional, hedge.locked_rate);
+    match hedge.side {
+        Side::BuyCurrency => {
+            e.buy_notional += notional_usd;
+            e.buy_margin += hedge.margin;
+        }
+        Side::SellCurrency => {
+            e.sell_notional += notional_usd;
+            e.sell_margin += hedge.margin;
+        }
+    }
+    set_exposure(env, &hedge.currency, e);
 }
 
 /// Clôture d'une couverture : libère la marge et retire l'exposition ajoutée à l'ouverture.
 /// À appeler par hedge::settle à la place de `release`, avant `book_gain` / `book_loss`.
 /// Erreurs : `UnknownPosition`.
-pub(crate) fn close_position(_env: &Env, _hedge: &Hedge) {
-    panic!("TODO vault")
+pub(crate) fn close_position(env: &Env, hedge: &Hedge) {
+    let mut e = exposure(env, &hedge.currency);
+    let notional_usd = pricing::to_usdc(hedge.notional, hedge.locked_rate);
+    let (notional, margin) = match hedge.side {
+        Side::BuyCurrency => (&mut e.buy_notional, &mut e.buy_margin),
+        Side::SellCurrency => (&mut e.sell_notional, &mut e.sell_margin),
+    };
+    if *notional < notional_usd || *margin < hedge.margin {
+        panic_with_error!(env, VaultError::UnknownPosition);
+    }
+    *notional -= notional_usd;
+    *margin -= hedge.margin;
+    set_exposure(env, &hedge.currency, e);
+
+    release(env, hedge.margin);
 }
 
-pub(crate) fn exposure(_env: &Env, _currency: &Symbol) -> Exposure {
-    panic!("TODO vault")
+pub(crate) fn exposure(env: &Env, currency: &Symbol) -> Exposure {
+    env.storage()
+        .persistent()
+        .get(&VaultKey::Exposure(currency.clone()))
+        .unwrap_or(Exposure { buy_notional: 0, sell_notional: 0, net_notional: 0, buy_margin: 0, sell_margin: 0 })
 }
 
-pub(crate) fn currency_limit(_env: &Env, _currency: &Symbol) -> Option<u32> {
-    panic!("TODO vault")
+/// Recalcule le net et supprime la clé quand la devise n'a plus de couverture ouverte.
+fn set_exposure(env: &Env, currency: &Symbol, mut e: Exposure) {
+    e.net_notional = e.buy_notional - e.sell_notional;
+    let key = VaultKey::Exposure(currency.clone());
+    if e.buy_notional == 0 && e.sell_notional == 0 && e.buy_margin == 0 && e.sell_margin == 0 {
+        env.storage().persistent().remove(&key);
+    } else {
+        env.storage().persistent().set(&key, &e);
+    }
 }
 
-pub(crate) fn set_currency_limit(_env: &Env, _currency: &Symbol, _limit_bps: u32) {
-    panic!("TODO vault")
+pub(crate) fn currency_limit(env: &Env, currency: &Symbol) -> Option<u32> {
+    env.storage().persistent().get(&VaultKey::CurrencyLimit(currency.clone()))
+}
+
+/// Admin : limite de la devise en bps du capital. 0 bloque les nouvelles couvertures,
+/// 10 000 ou plus revient à ne pas avoir de limite (la capacité du pool borne déjà la réserve).
+pub(crate) fn set_currency_limit(env: &Env, currency: &Symbol, limit_bps: u32) {
+    crate::admin(env).require_auth();
+    env.storage().persistent().set(&VaultKey::CurrencyLimit(currency.clone()), &limit_bps);
 }
 
 // ---- netting : calcul exact, NON branché (voir l'en-tête) ----
@@ -339,9 +392,38 @@ pub(crate) fn leg_pnl(leg: &Leg, spot: i128) -> i128 {
 }
 
 /// Perte maximale du pool sur un panier, pour tous les cours de fixing possibles (≥ 0).
+///
+/// Chaque P&L est linéaire par morceaux en fonction du cours, avec deux cassures où il atteint
+/// ±marge : `locked_rate ± marge / notional`. La somme est donc linéaire entre deux cassures
+/// et son maximum est à une cassure, ou aux extrêmes (cours nul, ou au-delà de toutes les
+/// cassures où tout est plafonné). On évalue la somme exacte à chaque cassure (±1 pour
+/// l'arrondi) et au cours nul. Les arrondis vers le bas de chaque P&L peuvent faire dévier la
+/// somme d'un stroop par jambe entre deux cassures : on ajoute ce stroop, en faveur du pool.
+/// Valable quels que soient les taux bloqués et les plafonds de chaque jambe.
 #[allow(dead_code)]
-pub(crate) fn basket_max_loss(_legs: &[Leg]) -> i128 {
-    panic!("TODO vault")
+pub(crate) fn basket_max_loss(legs: &[Leg]) -> i128 {
+    if legs.is_empty() {
+        return 0;
+    }
+    let scale = 10i128.pow(PRICE_DECIMALS);
+    let sum_at = |spot: i128| -> i128 { legs.iter().map(|l| leg_pnl(l, spot)).sum() };
+
+    let mut worst = sum_at(0);
+    for l in legs {
+        if l.notional <= 0 {
+            continue;
+        }
+        // Écart de cours qui épuise la marge.
+        let width = l.margin * scale / l.notional;
+        for breakpoint in [l.locked_rate - width, l.locked_rate + width] {
+            for spot in [breakpoint - 1, breakpoint, breakpoint + 1] {
+                if spot >= 0 {
+                    worst = worst.max(sum_at(spot));
+                }
+            }
+        }
+    }
+    worst.max(0) + legs.len() as i128
 }
 
 #[cfg(test)]
