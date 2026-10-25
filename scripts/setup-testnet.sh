@@ -38,8 +38,20 @@ tx payment --source-account $ADMIN --destination $LP --asset "$USDC" --amount 10
 tx payment --source-account $ADMIN --destination $USER --asset "$USDC" --amount 2000000000000     # 200 000 USDC
 
 say "Offre DEX MXN/USDC pour le path payment (1 MXN = 0.055 USDC)"
+# Une seule offre : on met à jour l'existante (sinon chaque lancement en empile une nouvelle à 0.055,
+# et le path payment prend toujours la moins chère, même après un réalignement du prix).
+OFFERS=$(curl -s "https://horizon-testnet.stellar.org/accounts/$ISSUER/offers?limit=200" | python3 -c "
+import json, sys
+recs = json.load(sys.stdin).get('_embedded', {}).get('records', [])
+print(' '.join(o['id'] for o in recs if o['selling'].get('asset_code') == 'MXN' and o['buying'].get('asset_code') == 'USDC'))")
+set -- $OFFERS
+OFFER_ID=${1:-0}
 tx manage-sell-offer --source-account $ADMIN --selling "$MXN" --buying "$USDC" \
-  --amount 1000000000000000 --price "11:200"                                                        # 100 000 000 MXN
+  --amount 1000000000000000 --price "11:200" --offer-id $OFFER_ID                                   # 100 000 000 MXN
+shift 2>/dev/null || true
+for extra in "$@"; do   # doublons laissés par d'anciennes versions du script
+  tx manage-sell-offer --source-account $ADMIN --selling "$MXN" --buying "$USDC" --amount 0 --price "11:200" --offer-id $extra
+done
 
 say "Contrats d'actifs (SAC)"
 stellar contract asset deploy --asset "$USDC" --source-account $ADMIN --network $NET --quiet >/dev/null 2>&1 || true
@@ -57,7 +69,7 @@ ORACLE=$(stellar contract deploy --wasm target/wasm32v1-none/release/mock_oracle
   --source-account $ADMIN --network $NET --alias fx-mock-oracle --quiet -- --admin $ADMIN)
 echo "   mock-oracle = $ORACLE"
 # Prix en USD par unité, 14 décimales (même format que Reflector FX)
-for p in "MXN 5500000000000" "BRL 18000000000000" "ARS 100000000000"; do
+for p in "MXN 5500000000000" "BRL 18000000000000" "ARS 100000000000" "EUR 111930000000000"; do
   set -- $p
   stellar contract invoke --id $ORACLE --source-account $ADMIN --network $NET --quiet -- \
     set_price --asset "{\"Other\":\"$1\"}" --price $2 >/dev/null
@@ -68,6 +80,22 @@ POOL=$(stellar contract deploy --wasm target/wasm32v1-none/release/pool.wasm \
   --source-account $ADMIN --network $NET --alias fx-pool --quiet -- \
   --admin $ADMIN --usdc $USDC_SAC --oracle $ORACLE --spread_bps $SPREAD_BPS)
 echo "   pool = $POOL"
+
+say "Paramètres Pricing (taux d'intérêt, plafonds minimum)"
+# Taux annuels en bps. Sources (oct. 2026) : Fed ≈ 4 %, Banxico ≈ 7 %, Selic ≈ 10,5 %, BCE ≈ 2 %,
+# ARS : pas de taux directeur BCRA, proxy BADLAR / plazo fijo ≈ 22 %. Détail : docs/todo-pricing.md §1.5
+for r in "USD 400" "MXN 700" "BRL 1050" "ARS 2200" "EUR 200"; do
+  set -- $r
+  stellar contract invoke --id $POOL --source-account $ADMIN --network $NET --quiet -- \
+    set_rate --currency $1 --rate_bps $2 >/dev/null
+done
+# Plafond minimum par devise. LISTE BLANCHE : une devise sans set_min_cap n'est PAS cotable
+# (quote et open_hedge refusent la devise).
+for c in "MXN 500" "BRL 700" "ARS 1500" "EUR 300"; do
+  set -- $c
+  stellar contract invoke --id $POOL --source-account $ADMIN --network $NET --quiet -- \
+    set_min_cap --currency $1 --cap_bps $2 >/dev/null
+done
 
 say "Dépôt du LP dans le pool (1 000 000 USDC contre des parts)"
 LP_DEPOSIT=10000000000000   # 1 000 000 USDC, 7 décimales
