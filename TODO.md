@@ -60,10 +60,7 @@ Légende : ✅ fait · ⬜ à faire · 🔴 bloquant pour les autres ou pour la 
 - ⬜ 🔴 **Front** : en cours (Hugo).
 - ⬜ 🔴 **Vidéo, deck, nom, soumission.**
 
-**Points ouverts à trancher :**
-1. 🔴 **Fixing à l'échéance** (Paiement + Pricing) : `settle` lit le cours au moment de l'appel. Correctif : cours à l'échéance via `price(asset, timestamp)`. Condition aussi du netting.
-2. 🔴 **Durée de la démo vs prix affiché** : la vidéo raconte une facture à 90 jours (prix figé 54 873 USDC), mais pour régler en direct on ouvre avec une échéance de 60 s, et le prix figé devient ≈ spot + spread (55 275 USDC pour 60 s). Options : (a) assumer « échéance de démo » à l'écran, (b) ajouter côté Paiement un facteur d'accélération admin (prix calculé sur 90 j, échéance réelle de 60 s), testnet seulement. À décider avec Clément et Lancelot.
-3. Codes d'erreur du Pricing (300-399) pour que le front traduise les refus.
+**Points ouverts à trancher :** voir `docs/points-a-trancher.md` (fixing à l'échéance, durée de la démo vs prix affiché, codes d'erreur du Pricing).
 
 ---
 
