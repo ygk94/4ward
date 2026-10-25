@@ -64,6 +64,19 @@ stellar contract invoke --id fx-pool --source-account fx-supplier --network test
 Retour : l'USDC versé à Lucía (marge ± P&L, entre 0 et 2 × marge). Effets : transfert USDC pool → Lucía, événement `hedge_settled` (spot de fixing, P&L, versement).
 Le cours utilisé est celui **en vigueur à l'échéance**, quel que soit le moment de l'appel : un prix posé après l'échéance ne compte pas. Régler peu après l'échéance : l'historique de Reflector ne remonte qu'à ~12 h, celui du mock à 64 prix (au-delà : #312).
 
+### Règlement automatique : le keeper
+
+Au lieu d'appeler `settle` à la main, `scripts/keeper.sh` surveille les couvertures et règle chacune dès son échéance (n'importe quel compte peut payer les frais, `fx-admin` par défaut) :
+
+```sh
+./scripts/keeper.sh                 # boucle, un passage toutes les 10 s (Ctrl+C pour arrêter)
+./scripts/keeper.sh --once          # un seul passage
+./scripts/keeper.sh --dry-run       # affiche ce qu'il réglerait, sans rien envoyer
+POOL=fx-pool SOURCE=fx-admin ./scripts/keeper.sh --interval 5
+```
+Il parcourt les couvertures depuis l'id 0, compare leur échéance à l'heure du dernier ledger et affiche la raison d'un refus (#202 réseau en retard d'un ledger, #302, #312). Le lancer avant l'échéance règle aussi la limite d'historique de Reflector (~12 h) : le règlement part dans les secondes qui suivent l'échéance.
+Testé sur testnet : couverture de 45 s réelles réglée par le keeper en boucle 10 s après l'échéance, sans intervention ([tx](https://stellar.expert/explorer/testnet/tx/656d79533ce6d192d21f3a5824722fc4ebc66a2bd202dcadcfb8f9993e490773)).
+
 ## 5. Réaligner l'offre DEX sur le nouveau prix (fx-admin)
 
 Sans ça, le path payment se fait à l'ancien prix et le coût total de Lucía ne retombe plus sur le prix figé.

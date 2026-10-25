@@ -109,6 +109,11 @@ Règles de calcul : tout en `i128`, **arrondis en faveur du pool** (P&L payé pa
 - ✅ Point 1, fixing à l'échéance : `settle` appelle `pricing::fixing(env, &hedge.currency, hedge.maturity)` (feat/pricing de Lancelot fusionné dans feat/payment) ; tests : crash avant l'échéance compté et prix posé après ignoré, #302 si oracle muet à l'échéance, #312 si l'historique ne remonte plus ; `#[allow(dead_code)]` de `fixing` retiré
 - ✅ Validés sur testnet : fixing (prix posé après l'échéance ignoré) et scénario complet de la vidéo en mode démo (90 jours en 5 min, coût total 56 112,69 au centime)
 
+
+## 11. Améliorations
+
+- ✅ Keeper `scripts/keeper.sh` : règle chaque couverture dès son échéance (boucle, `--once`, `--dry-run`, raison des refus) ; testé sur testnet, réglage automatique 10 s après l'échéance
+
 ---
 
 ## À caler avec les autres
