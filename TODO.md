@@ -158,3 +158,35 @@ Blend · parts LP SEP-41 · netting par devise/échéance · skew de prix · fac
 | Lun. 8h | **Merge, redéploiement, bindings TS, branchement du front** | Tests du parcours complet | Alignement des prix |
 | Lun. 8h-10h | Vidéo | Aide au polish / deck | Notebook `sim/`, objections |
 | Lun. 10h-12h | README final + **soumission** | Relecture | Relecture |
+
+---
+
+## Améliorations issues du council (après le MVP)
+
+Points soulevés par le council que le MVP ne traite pas. À reprendre une fois la soumission faite, ou plus tôt s'il reste du temps. Chaque point peut aussi servir de réponse au jury (« on l'a vu, voici la parade »).
+
+**Produit**
+- ⬜ **Paiement atomique couverture + fournisseur.** Aujourd'hui, `settle` et le path payment font 2 transactions. Piste : faire le swap USDC → devise depuis le contrat via un DEX Soroban (Soroswap, par exemple) pour régler et payer dans une seule transaction
+- ⬜ **Rendre la marge productive.** La marge immobilisée est l'objection n° 1 face à la banque : la placer sur Blend pendant la durée de la couverture, avec un rendement reversé à la PME
+- ⬜ **Persona exportateur** (`SellCurrency`) dans la démo, pour montrer que des flux opposés se compensent (le netting raconté par une histoire)
+- ⬜ **Facture couverte transférable** (token SEP-41) : vendre une créance déjà couverte à un financeur (affacturage)
+
+**Risque et pricing**
+- ⬜ **Anti-sélection** : limites d'exposition par devise, skew de prix (le côté majoritaire paie plus cher), spread dynamique autour des événements connus (banques centrales)
+- ⬜ **Netting réel** par devise et par échéance dans la règle de capacité (aujourd'hui, règle brute plus prudente)
+- ⬜ **Fixing robuste** : TWAP sur une fenêtre au lieu du dernier prix, bornes de cohérence, plusieurs oracles
+- ⬜ **Taux d'intérêt onchain** au lieu des taux codés en dur
+- ⬜ **Plafonds asymétriques** : les pricer comme des options (volatilité), et plus seulement avec un spread
+- ⬜ **Écart oracle / cours réel** : fixing sur les cotations SEP-38 des anchors
+
+**Pool**
+- ⬜ **Parts LP** (SEP-41) avec répartition du P&L
+- ⬜ **Blend** sur le capital non réservé du pool
+- ⬜ **Amorçage de la liquidité** : incitations pour les premiers LPs, rendement affiché
+
+**Pitch et marché**
+- ⬜ **Test des 20 secondes** : expliquer le projet à quelqu'un hors finance ; chaque mot qui suscite une question sort du pitch
+- ⬜ **Chiffrer face à la banque** : coût de la couverture (spread + coût de la marge) comparé à un forward bancaire et à « aucune couverture »
+- ⬜ **Réglementation** : un NDF vendu à des PME est un dérivé réglementé (EMIR, MiFID) → KYC via les anchors (SEP-12), passage par une entité régulée
+- ⬜ **Distribution** : SDK « Bloquer le taux » pour wallets et anchors
+- ⬜ **Couverture Reflector mainnet** : vérifier la liste des devises (seul le testnet a été vérifié)

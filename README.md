@@ -162,13 +162,22 @@ TODO.md                # setup et chantiers
 
 ## Roadmap
 
-- **Netting** importateurs / exportateurs par devise et par échéance
-- **Blend** : placer le capital non réservé du pool
-- **Parts LP** en token SEP-41
-- **Facture couverte transférable** : vendre une créance déjà couverte à un financeur (affacturage)
-- **SDK « Bloquer le taux »** pour wallets et anchors
-- Taux d'intérêt lus onchain, fixing sur TWAP et cotations SEP-38 des anchors
-- Audit
+**Juste après le hackathon**
+- Paiement atomique : régler la couverture et payer le fournisseur dans une seule transaction (swap via un DEX Soroban)
+- Marge productive : la marge de la PME placée sur Blend pendant la couverture
+- Fixing robuste : TWAP, bornes de cohérence, plusieurs oracles
+
+**Pool et risque**
+- Netting importateurs / exportateurs par devise et par échéance
+- Parts LP en token SEP-41, Blend sur le capital non réservé du pool
+- Limites par devise, skew de prix, spread dynamique
+- Taux d'intérêt lus onchain, fixing sur les cotations SEP-38 des anchors
+
+**Produit et distribution**
+- Facture couverte transférable : vendre une créance déjà couverte à un financeur (affacturage)
+- SDK « Bloquer le taux » pour wallets et anchors
+- KYC via les anchors (SEP-12) pour le cadre réglementaire
+- Audit, puis mainnet
 
 ## Risques connus
 
