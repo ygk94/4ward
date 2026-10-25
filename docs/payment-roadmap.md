@@ -77,10 +77,10 @@ Règles de calcul : tout en `i128`, **arrondis en faveur du pool** (P&L payé pa
 
 ## 7. Parcours CLI testnet 🔴 pour le front d'Hugo
 
-- ⬜ Montrer à Clément comment suivre chaque transaction : hash dans la CLI, page stellar.expert (opérations, événements, appels de contrat), soldes des comptes avant / après
+- ✅ Montrer à Clément comment suivre chaque transaction : hash dans la CLI, page stellar.expert (opérations, événements, appels de contrat), soldes des comptes avant / après
 - ✅ Répétition sur un pool à moi : les 6 transactions validées (dépôt LP, `open_hedge`, crash +8 %, `settle` signé par le fournisseur, réalignement DEX, path payment de 1 000 000 MXN) ; coût total de Lucía = 54 870 USDC (déployé depuis ma branche avec stubs) si le merge tarde
-- ⬜ Commandes exactes, dans l'ordre : `deposit_lp` (fx-lp) → `quote` → `open_hedge` (fx-lucia, échéance ~60 s) → crash du mock → `settle` → `stellar tx new path-payment-strict-receive` USDC → MXN vers fx-supplier pour 1 000 000 MXN pile
-- ⬜ Pour Hugo, le déroulé des appels côté front :
+- ✅ (`docs/payment-cli.md`) Commandes exactes, dans l'ordre : `deposit_lp` (fx-lp) → `quote` → `open_hedge` (fx-lucia, échéance ~60 s) → crash du mock → `settle` → `stellar tx new path-payment-strict-receive` USDC → MXN vers fx-supplier pour 1 000 000 MXN pile
+- ✅ Pour Hugo, le déroulé des appels côté front :
   - montants à afficher : prix figé, marge déposée, P&L, montant versé par `settle`, coût total réel (= prix figé dans le plafond)
   - cas d'erreur : échéance pas atteinte, déjà réglée, capacité insuffisante, plafond trop bas, prix oracle trop ancien, path payment sans liquidité (`op_too_few_offers`) ou au-dessus du `send-max`
   - liens stellar.expert des 2 transactions
@@ -89,7 +89,7 @@ Règles de calcul : tout en `i128`, **arrondis en faveur du pool** (P&L payé pa
 
 - ✅ Vérifier la profondeur de l'offre (100 000 000 MXN à 0,055) pour 1 000 000 MXN
 - ✅ Réalignement testé : `manage-sell-offer --offer-id <id> --price "297:5000"` (0,0594)
-- ⬜ 🔴 Après le crash +12 %, **réaligner l'offre sur le nouveau prix du mock**, sinon le coût total de Lucía ne tombe plus sur le prix figé. Script `scripts/align-dex.sh` (nouveau fichier, le mien)
+- ✅ 🔴 Après le crash +12 %, **réaligner l'offre sur le nouveau prix du mock** (commande pour Hugo dans `docs/payment-cli.md` § 5, au lieu d'un script), sinon le coût total de Lucía ne tombe plus sur le prix figé. Script `scripts/align-dex.sh` (nouveau fichier, le mien)
 
 ## 9. Après le merge
 
