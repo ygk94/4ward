@@ -138,7 +138,7 @@ Les LPs déposent dans le même pool mais choisissent leur risque :
 | Profil | Veut un rendement stable | Accepte de perdre pour gagner plus |
 | Son argent sert à | Couvrir l'exposition (CETES, EURC) + trésorerie | Absorber l'exposition non couverte |
 | Pertes | Protégé par le junior | Perd en premier |
-| Rendement | Taux fixe payé en priorité (~5 %) | Tout le reste : spread, pertes des clients, trésorerie |
+| Rendement | Taux fixe payé en priorité (~4,5 %) | Tout le reste : spread, pertes des clients, trésorerie |
 
 Règles du contrat :
 1. **Perte max non couverte ≤ capital junior** : la règle de capacité s'applique au seul junior. Chaque contrat étant plafonné, le senior ne peut pas perdre à cause du change (il reste exposé aux protocoles tiers et à l'USDC).
@@ -146,29 +146,38 @@ Règles du contrat :
 3. **La part couverte est un réglage** : plus de junior, moins de couverture et plus de levier.
 4. **Junior épuisé** : le pool n'accepte plus que des couvertures entièrement couvertes.
 
-Simulation (pool de 1 M$ : 800 k$ senior, 200 k$ junior utilisé à 15 % ; peso à 13 % de vol avec sauts de 15 % ; spread 0,4 % par 90 j dont 20 % pour le protocole ; Blend 6,5 % plafonné à 20 %, bons du Trésor 4 %) :
+Simulation d'un pool de démarrage : **500 k$** (400 k$ senior payé 4,5 %, 100 k$ junior utilisé à 15 % max), **contrats de 10 k$** à 90 jours dont le sens (importateur / exportateur) est tiré au hasard ; peso à 13 % de vol avec sauts de 15 % ; spread 0,4 % par 90 j dont 20 % pour le protocole ; 8 % en USDC, le reste en bons du Trésor à 4 % ; pas de Blend.
 
-| Netting | Senior | Junior (moyenne) | Années perdantes (junior) | Pire année sur 20 (junior) |
-|---|---|---|---|---|
-| non | 5,0 % | 7,7 % | 33 % | −21 % |
-| oui (1 M$ compensé par trimestre) | 5,0 % | **16 %** | 18 % | −13 % |
+| Contrats / trimestre | Volume / trimestre | Part d'importateurs | Volume compensé | Pool | **Junior (moyenne)** | Années perdantes | Pire année sur 20 |
+|---|---|---|---|---|---|---|---|
+| 20 | 200 k$ | 50 % | 82 % | 4,3 % | 3,7 % | 22 % | −5 % |
+| 20 | 200 k$ | 70 % | 59 % | 4,4 % | 3,8 % | 35 % | −13 % |
+| 40 | 400 k$ | 50 % | 87 % | 5,0 % | 7,1 % | 15 % | −5 % |
+| 40 | 400 k$ | 70 % | 60 % | 5,0 % | 6,9 % | 34 % | −19 % |
+| **80** | **800 k$** | 50 % | 91 % | 6,4 % | **13,8 %** | 7 % | −2 % |
+| **80** | **800 k$** | 60 % | 80 % | 6,3 % | **13,6 %** | 19 % | −11 % |
+| 80 | 800 k$ | 70 % | 60 % | 6,3 % | 13,3 % | 23 % | −16 % |
 
-Référence : la même trésorerie sans activité de couverture rapporte ~4,3 %. **Sans netting, le junior n'est pas assez payé pour son risque ; avec du netting, il le devient.** Utiliser plus le junior (30-50 %) monte le rendement mais rend une perte quasi totale possible : l'utilisation est plafonnée à 15-20 %.
+Référence : la trésorerie seule (92 % à 4 %) rapporte ~3,7 % ; le senior touche 4,5 %.
+
+Ce qu'il faut retenir :
+- **Le rendement du junior vient du volume** (le spread est pris sur chaque contrat), son **risque vient du déséquilibre** importateurs / exportateurs. Avec des contrats de 10 k$, il faut **~80 contrats par trimestre** (≈ 27 par mois, 1,6 fois le pool tourné chaque trimestre) pour que le junior dépasse 13 %. À 20 contrats par trimestre, il gagne moins que les bons du Trésor.
+- **Des petits contrats nombreux compensent bien quand les deux sens existent** : à 50/50, 80 à 90 % du volume se compense tout seul. Mais avec 70 % d'importateurs, ~40 % du volume reste non compensé quel que soit le nombre de contrats : la taille ne remplace pas la demande dans les deux sens (skew de prix, distribution auprès des PME exportatrices).
+- L'utilisation du junior reste plafonnée à 15-20 % : au-delà, une perte quasi totale devient possible.
 
 ### Où dort l'argent du pool (roadmap)
 
-Quatre poches, dans l'ordre où le pool puise pour payer :
+Trois poches, dans l'ordre où le pool puise pour payer :
 
 | Poche | Taille | Rendement | Rôle |
 |---|---|---|---|
-| USDC dans le contrat | 5 % des dépôts | 0 % | Règlements et retraits LP, sans dépendre d'un tiers |
-| Blend | **20 % max** | 5,7 à 8,9 % (variable) | Rendement, sortie immédiate |
-| Bons du Trésor US tokenisés (BENJI, Etherfuse USTRY… à vérifier) | le reste | ~4 % | Rendement stable |
+| USDC dans le contrat | **8 % des dépôts** | 0 % | Règlements et retraits LP du jour, sans dépendre d'un tiers |
+| Bons du Trésor US tokenisés (BENJI, Etherfuse USTRY… à vérifier) | le reste | ~4 % | Rendement stable, rachat en un jour au plus |
 | CETES / EURC | selon l'exposition nette | taux `r_USD` du pricing | La couverture |
 
-Exemple, pool de 1 M$ + ~86 k$ de marges clients : 50 k$ en USDC, 200 k$ sur Blend, 276 k$ en bons du Trésor, 560 k$ en CETES.
+Exemple, pool de 500 k$ à 80 contrats par trimestre (60 % d'importateurs) : ~160 k$ d'exposition nette, dont 150 k$ portés par le junior et ~10 k$ couverts en CETES. Trésorerie : 40 k$ en USDC, ~530 k$ en bons du Trésor (dépôts LP + ~80 k$ de marges clients).
 
-Blend est plafonné parce que ~14 M$ seulement y sont retirables à un instant donné (78 % des dépôts USDC sont prêtés), et pour ne pas dépendre d'un seul protocole (exploit d'oracle du 22/02/2026). Une fonction `rebalance()` remet les poches à niveau : nouvelle couverture → achat de CETES ; échéance proche → retour vers la réserve d'USDC.
+**Pas de Blend dans le modèle de base** : il apporterait ~0,5 point de plus, mais ajoute un protocole tiers (liquidité limitée à ~14 M$ retirables, exploit d'oracle du 22/02/2026). Il reste une option en roadmap, plafonnée à 20 %. Une fonction `rebalance()` remet les poches à niveau : nouvelle couverture → achat de CETES ; échéance proche → retour vers la réserve d'USDC.
 
 ### Couverture du pool (roadmap)
 
@@ -188,7 +197,7 @@ Exposition au peso
 
 | Devise | Couverture | Faisabilité |
 |---|---|---|
-| EUR | EURC natif, placé sur Blend | ✅ |
+| EUR | EURC natif | ✅ |
 | MXN | CETES tokenisées (Etherfuse) | ✅ à vérifier (liquidité, accès) |
 | BRL, ARS, NGN… | Stablecoins des anchors | ⚠️ selon la liquidité |
 | Devises sans token | Teneur de marché partenaire, sinon limites serrées et plafond minimum plus haut | ⚠️ plus tard |
@@ -305,14 +314,14 @@ TODO.md                # setup et chantiers
 
 **Juste après le hackathon**
 - Paiement atomique : régler la couverture et payer le fournisseur dans une seule transaction (swap via un DEX Soroban)
-- Marge productive : la marge de la PME placée sur Blend pendant la couverture
+- Marge productive : la marge de la PME placée en bons du Trésor tokenisés pendant la couverture
 - Fixing robuste : TWAP, bornes de cohérence, plusieurs oracles
 
 **Pool et risque**
 - Netting par devise et par échéance (PME qui paient en devise / PME qui en reçoivent)
-- Couverture automatique de l'exposition nette : détention de la devise placée en obligations d'État tokenisées (CETES), EURC sur Blend ; une position par devise avec seuil de rééquilibrage
+- Couverture automatique de l'exposition nette : détention de la devise placée en obligations d'État tokenisées (CETES) ou EURC ; une position par devise avec seuil de rééquilibrage
 - Tranches senior / junior pour les LPs, parts LP en token SEP-41
-- Gestion de trésorerie : USDC 5 %, Blend ≤ 20 %, bons du Trésor tokenisés pour le reste
+- Gestion de trésorerie : USDC 8 %, bons du Trésor tokenisés pour le reste ; Blend en option (≤ 20 %, ~+0,5 pt)
 - Limites par devise, skew de prix, spread dynamique
 - Taux d'intérêt lus onchain, fixing sur les cotations SEP-38 des anchors
 
@@ -333,7 +342,7 @@ TODO.md                # setup et chantiers
 | Flux tous dans le même sens (anti-sélection) | Limites par devise, skew de prix, spread dynamique |
 | Saut de cours entre deux rééquilibrages | Limites par devise, tranche junior en première perte |
 | LP qui retire avant un règlement perdant | Retraits différés à l'échéance suivante, ou prix des parts incluant les contrats ouverts |
-| Protocoles tiers (Blend, émetteurs des CETES et bons du Trésor) | Plafond par protocole, réserve d'USDC dans le contrat |
+| Protocoles tiers (émetteurs des CETES et bons du Trésor, Blend si activé) | Plafond par protocole, réserve d'USDC dans le contrat |
 | Taux d'intérêt codés en dur | Limite assumée du MVP, lecture onchain en roadmap |
 | Oracle manipulé au fixing | TWAP sur une fenêtre, bornes de cohérence, plusieurs oracles |
 | Écart oracle / cours réel du DEX ou de l'anchor | Résidu faible, affiché à l'utilisateur |

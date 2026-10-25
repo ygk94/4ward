@@ -11,7 +11,7 @@ mod pricing_tests {
     //! Oracle de test minimal, même interface de lecture SEP-40 que Reflector FX et que `contracts/mock-oracle`
     //! (`lastprice(Asset::Other(sym))`, `decimals()` = 14). Réutilise les types `Asset` / `PriceData` du client
     //! déclaré dans `pricing.rs`, ce qui vérifie au passage que l'encodage coïncide.
-    use crate::pricing::{self, Asset, PriceData, MAX_CAP_BPS, MAX_PRICE_AGE_SECS, SECS_PER_YEAR};
+    use crate::pricing::{self, Asset, PriceData, PricingError, MAX_CAP_BPS, MAX_PRICE_AGE_SECS, SECS_PER_YEAR};
     use crate::{Pool, PoolClient, Quote, Side, BPS, PRICE_DECIMALS};
     use soroban_sdk::testutils::{Address as _, Ledger as _};
     use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol};
@@ -65,6 +65,11 @@ mod pricing_tests {
     /// Pose un prix sur l'oracle de test, horodaté au ledger courant.
     pub fn set_price(s: &Setup, currency: &Symbol, price: i128) {
         TestOracleClient::new(&s.env, &s.oracle).set_price(&Asset::Other(currency.clone()), &price);
+    }
+
+    /// Code d'erreur de contrat tel que le reçoit le client (`try_*` → `Err(Ok(..))`).
+    fn err(e: PricingError) -> soroban_sdk::Error {
+        soroban_sdk::Error::from_contract_error(e as u32)
     }
 
     pub fn mxn(env: &Env) -> Symbol {
@@ -134,7 +139,7 @@ mod pricing_tests {
     }
 
     #[test]
-    #[should_panic(expected = "no price")]
+    #[should_panic(expected = "Error(Contract, #300)")]
     fn pricing_spot_no_price_panics() {
         let s = setup();
         let brl = Symbol::new(&s.env, "BRL");
@@ -142,7 +147,7 @@ mod pricing_tests {
     }
 
     #[test]
-    #[should_panic(expected = "invalid price")]
+    #[should_panic(expected = "Error(Contract, #301)")]
     fn pricing_spot_non_positive_price_panics() {
         let s = setup();
         let mxn = mxn(&s.env);
@@ -152,7 +157,7 @@ mod pricing_tests {
     }
 
     #[test]
-    #[should_panic(expected = "stale price")]
+    #[should_panic(expected = "Error(Contract, #302)")]
     fn pricing_stale_price_panics() {
         let s = setup();
         let mxn = mxn(&s.env);
@@ -226,7 +231,7 @@ mod pricing_tests {
     }
 
     #[test]
-    #[should_panic(expected = "rate not set")]
+    #[should_panic(expected = "Error(Contract, #303)")]
     fn pricing_forward_rate_missing_panics() {
         let s = setup();
         let mxn = mxn(&s.env);
@@ -235,7 +240,7 @@ mod pricing_tests {
     }
 
     #[test]
-    #[should_panic(expected = "duration too long")]
+    #[should_panic(expected = "Error(Contract, #304)")]
     fn pricing_forward_duration_too_long_panics() {
         let (s, mxn) = setup_mxn();
         forward(&s, &mxn, Side::BuyCurrency, SECS_PER_YEAR + 1);
@@ -247,9 +252,9 @@ mod pricing_tests {
         let pool = PoolClient::new(&s.env, &s.pool);
         let mxn = mxn(&s.env);
         assert!(pool.try_set_rate(&mxn, &10_000).is_ok());
-        assert!(pool.try_set_rate(&mxn, &10_001).is_err());
+        assert_eq!(pool.try_set_rate(&mxn, &10_001), Err(Ok(err(PricingError::RateTooHigh))));
         assert!(pool.try_set_spread(&500).is_ok());
-        assert!(pool.try_set_spread(&501).is_err());
+        assert_eq!(pool.try_set_spread(&501), Err(Ok(err(PricingError::SpreadTooHigh))));
     }
 
     #[test]
@@ -303,7 +308,10 @@ mod pricing_tests {
     fn pricing_min_cap() {
         let (s, mxn) = setup_mxn_full();
         let pool = PoolClient::new(&s.env, &s.pool);
-        assert!(pool.try_quote(&mxn, &Side::BuyCurrency, &NOTIONAL_1M, &D90, &400).is_err());
+        assert_eq!(
+            pool.try_quote(&mxn, &Side::BuyCurrency, &NOTIONAL_1M, &D90, &400),
+            Err(Ok(err(PricingError::CapBelowMinimum)))
+        );
         assert!(pool.try_quote(&mxn, &Side::BuyCurrency, &NOTIONAL_1M, &D90, &500).is_ok());
         assert!(pool.try_quote(&mxn, &Side::BuyCurrency, &NOTIONAL_1M, &D90, &1000).is_ok());
     }
@@ -316,7 +324,10 @@ mod pricing_tests {
         set_price(&s, &brl, 18_000_000_000_000);
         pool.set_rate(&brl, &1050);
         // Prix et taux présents, mais pas de plafond minimum : devise non ouverte.
-        assert!(pool.try_quote(&brl, &Side::BuyCurrency, &NOTIONAL_1M, &D90, &1000).is_err());
+        assert_eq!(
+            pool.try_quote(&brl, &Side::BuyCurrency, &NOTIONAL_1M, &D90, &1000),
+            Err(Ok(err(PricingError::CurrencyNotEnabled)))
+        );
     }
 
     #[test]
@@ -324,15 +335,19 @@ mod pricing_tests {
         let (s, mxn) = setup_mxn_full();
         let pool = PoolClient::new(&s.env, &s.pool);
         assert!(pool.try_quote(&mxn, &Side::BuyCurrency, &NOTIONAL_1M, &D90, &MAX_CAP_BPS).is_ok());
-        assert!(pool.try_quote(&mxn, &Side::BuyCurrency, &NOTIONAL_1M, &D90, &(MAX_CAP_BPS + 1)).is_err());
+        assert_eq!(
+            pool.try_quote(&mxn, &Side::BuyCurrency, &NOTIONAL_1M, &D90, &(MAX_CAP_BPS + 1)),
+            Err(Ok(err(PricingError::CapTooHigh)))
+        );
     }
 
     #[test]
     fn pricing_quote_invalid_notional_rejected() {
         let (s, mxn) = setup_mxn_full();
         let pool = PoolClient::new(&s.env, &s.pool);
-        assert!(pool.try_quote(&mxn, &Side::BuyCurrency, &0, &D90, &1000).is_err());
-        assert!(pool.try_quote(&mxn, &Side::BuyCurrency, &-1, &D90, &1000).is_err());
+        let invalid = Err(Ok(err(PricingError::InvalidNotional)));
+        assert_eq!(pool.try_quote(&mxn, &Side::BuyCurrency, &0, &D90, &1000), invalid);
+        assert_eq!(pool.try_quote(&mxn, &Side::BuyCurrency, &-1, &D90, &1000), invalid);
     }
 
     #[test]
@@ -340,9 +355,10 @@ mod pricing_tests {
         let s = setup();
         let pool = PoolClient::new(&s.env, &s.pool);
         let cur = mxn(&s.env);
-        assert!(pool.try_set_min_cap(&cur, &0).is_err());
+        let out_of_range = Err(Ok(err(PricingError::CapOutOfRange)));
+        assert_eq!(pool.try_set_min_cap(&cur, &0), out_of_range);
         assert!(pool.try_set_min_cap(&cur, &MAX_CAP_BPS).is_ok());
-        assert!(pool.try_set_min_cap(&cur, &(MAX_CAP_BPS + 1)).is_err());
+        assert_eq!(pool.try_set_min_cap(&cur, &(MAX_CAP_BPS + 1)), out_of_range);
 
         // Sans mock_all_auths : l'admin n'a rien signé.
         let env = Env::default();
@@ -353,9 +369,41 @@ mod pricing_tests {
         assert!(pool.try_set_min_cap(&mxn(&env), &500).is_err());
     }
 
+    /// Les erreurs de l'oracle et des taux remontent telles quelles par `quote`, avec leur code.
+    #[test]
+    fn pricing_quote_propagates_oracle_and_rate_errors() {
+        let (s, mxn) = setup_mxn_full();
+        let pool = PoolClient::new(&s.env, &s.pool);
+        s.env.ledger().set_timestamp(T0 + MAX_PRICE_AGE_SECS + 1);
+        assert_eq!(
+            pool.try_quote(&mxn, &Side::BuyCurrency, &NOTIONAL_1M, &D90, &1000),
+            Err(Ok(err(PricingError::StalePrice)))
+        );
+        set_price(&s, &mxn, MXN_SPOT);
+        assert_eq!(
+            pool.try_quote(&mxn, &Side::BuyCurrency, &NOTIONAL_1M, &(SECS_PER_YEAR + 1), &1000),
+            Err(Ok(err(PricingError::DurationTooLong)))
+        );
+        // EUR ouvert et coté, mais sans taux : refus explicite, jamais de taux par défaut.
+        let eur = Symbol::new(&s.env, "EUR");
+        set_price(&s, &eur, 111_930_000_000_000);
+        set_min_cap(&s, &eur, 300);
+        assert_eq!(
+            pool.try_quote(&eur, &Side::BuyCurrency, &NOTIONAL_1M, &D90, &1000),
+            Err(Ok(err(PricingError::RateNotSet)))
+        );
+        // Ouvert mais pas coté.
+        let brl = Symbol::new(&s.env, "BRL");
+        set_min_cap(&s, &brl, 700);
+        assert_eq!(
+            pool.try_quote(&brl, &Side::BuyCurrency, &NOTIONAL_1M, &D90, &1000),
+            Err(Ok(err(PricingError::NoPrice)))
+        );
+    }
+
     /// MXN ouvert mais sans prix sur l'oracle : le refus doit venir de `check_cap`, pas de `spot`.
     #[test]
-    #[should_panic(expected = "cap below minimum")]
+    #[should_panic(expected = "Error(Contract, #307)")]
     fn pricing_quote_rejects_before_oracle_call() {
         let s = setup();
         let mxn = mxn(&s.env);

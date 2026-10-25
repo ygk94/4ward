@@ -84,6 +84,26 @@ F = S × (1 + r_USD·t) / (1 + r_dev·t)      t = duration_secs / 31_536_000
 ### 1.6 ✅ `extend_ttl`
 - ✅ Tout est en storage `instance` (Rate, MinCap, Spread) : `env.storage().instance().extend_ttl(...)` dans `quote` suffit (ou laisser à Vault qui le fait sur l'instance). À demander à Hugo pour éviter le doublon.
 
+### 1.7 ✅ Codes d'erreur (`PricingError`, 300+)
+Convention d'équipe (`TODO.md`) : Vault 100-199 · Paiement 200-299 · Pricing 300-399. Les textes de `panic!` sont effacés dans le WASM (on l'a vu sur le testnet : `UnreachableCodeReached` sans message) ; le front ne peut traduire qu'un code.
+
+| Code | Variante | Quand | Message proposé pour le front |
+|---|---|---|---|
+| 300 | `NoPrice` | l'oracle n'a pas de prix pour la devise | « Cours indisponible pour cette devise » |
+| 301 | `InvalidPrice` | prix ≤ 0 | « Cours invalide, réessayez plus tard » |
+| 302 | `StalePrice` | prix de plus de 900 s | « Cours trop ancien, rafraîchissez le cours » |
+| 303 | `RateNotSet` | taux de la devise ou USD absent | « Devise pas encore configurée » |
+| 304 | `DurationTooLong` | durée > 1 an | « Échéance maximale : 1 an » |
+| 305 | `InvalidNotional` | montant ≤ 0 | « Montant invalide » |
+| 306 | `CurrencyNotEnabled` | pas de `set_min_cap` (liste blanche) | « Devise non disponible » |
+| 307 | `CapBelowMinimum` | plafond sous le minimum de la devise | « Protection minimale pour cette devise : X % » |
+| 308 | `CapTooHigh` | plafond > 50 % | « Protection maximale : 50 % » |
+| 309 | `RateTooHigh` | admin : `set_rate` > 100 %/an | (admin) |
+| 310 | `CapOutOfRange` | admin : `set_min_cap` à 0 ou > 50 % | (admin) |
+| 311 | `SpreadTooHigh` | admin : `set_spread` > 5 % | (admin) |
+
+Tests : chaque refus est vérifié avec son code exact (`Err(Ok(err(PricingError::…)))` ou `Error(Contract, #3xx)`), y compris la propagation par `quote` (`pricing_quote_propagates_oracle_and_rate_errors`). 22 tests Pricing verts.
+
 ---
 
 ## 1bis. Retours de Clément (Paiement, commit 9d215de sur `feat/payment`) — à prendre en compte
@@ -219,6 +239,8 @@ Dépend de `shared/wallet.ts` et `shared/contract.ts` (Hugo, 🔴). En attendant
 > Attendu : `spot` 5500000000000, `forward_rate` 5487305413412, `usdc_cost` 548730541341, `margin` 54873054135.
 > Au passage, le README dit « 54 870 USDC » : le chiffre exact est **54 873 USDC** (54 873,05), à corriger.
 
+- ⬜ À Hugo (front) : table des codes 300-311 du §1.7 pour les messages d'erreur de `QuoteCard` / écran Paiement. Message à copier :
+  > Hugo, côté Pricing les refus sont maintenant des codes `PricingError` 300-311 (table + messages proposés dans `docs/todo-pricing.md` §1.7). Le client TS les reçoit comme `Error(Contract, #3xx)`. Les plus probables en démo : 302 (cours trop ancien → rafraîchir le mock), 307 (protection sous le minimum, MXN 5 %), 306 (devise non ouverte). Au passage : `spot` accepte un prix jusqu'à **900 s**, pas 300 s comme écrit dans `TODO.md`.
 - ⬜ À Hugo : dev-dependency `mock-oracle` dans `contracts/pool/Cargo.toml` (ou accord pour que je l'ajoute)
 - ⬜ À Paiement : props de `<QuoteCard />` figées + `onQuote` ; signaler tout changement du prix mock (offre DEX)
 - ✅ README corrigé : 54 873 USDC (25/10 soir)

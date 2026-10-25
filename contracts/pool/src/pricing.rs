@@ -4,8 +4,42 @@
 //! Forward (parité des taux) : F = S × (1 + r_USD·t) / (1 + r_dev·t), t = durée / 1 an.
 //! Spread : appliqué contre l'utilisateur (BuyCurrency → F plus haut, SellCurrency → F plus bas).
 //! Tout en i128, pas de flottants ; arrondir du côté du pool.
+//! Erreurs : `PricingError`, codes 300+ (Vault 100+, Paiement 200+). Les textes de panic! sont effacés dans
+//! le WASM : seul un code d'erreur permet au front d'afficher la bonne raison d'un refus.
 use crate::{DataKey, Quote, Side};
-use soroban_sdk::{contractclient, contracttype, Address, Env, Symbol};
+use soroban_sdk::{contractclient, contracterror, contracttype, panic_with_error, Address, Env, Symbol};
+
+/// Erreurs de Pricing. Codes 300+ pour ne pas entrer en collision avec Vault (100+) / Paiement (200+).
+/// Ne jamais réutiliser un numéro : ajouter à la suite.
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum PricingError {
+    /// L'oracle n'a aucun prix pour la devise.
+    NoPrice = 300,
+    /// Prix de l'oracle nul ou négatif.
+    InvalidPrice = 301,
+    /// Prix plus vieux que `MAX_PRICE_AGE_SECS` : il faut le rafraîchir (mock) ou attendre Reflector.
+    StalePrice = 302,
+    /// Taux d'intérêt de la devise ou de l'USD non posé par `set_rate`.
+    RateNotSet = 303,
+    /// Durée de couverture supérieure à un an.
+    DurationTooLong = 304,
+    /// `quote` avec un notionnel nul ou négatif.
+    InvalidNotional = 305,
+    /// Devise non ouverte : pas de plafond minimum posé par `set_min_cap` (liste blanche).
+    CurrencyNotEnabled = 306,
+    /// Plafond demandé sous le minimum de la devise.
+    CapBelowMinimum = 307,
+    /// Plafond demandé au-dessus de `MAX_CAP_BPS`.
+    CapTooHigh = 308,
+    /// `set_rate` au-delà de 100 %/an.
+    RateTooHigh = 309,
+    /// `set_min_cap` à 0 ou au-delà de `MAX_CAP_BPS`.
+    CapOutOfRange = 310,
+    /// `set_spread` au-delà de 5 %.
+    SpreadTooHigh = 311,
+}
 
 // ---- client SEP-40 (Reflector FX et mock-oracle) ----
 
@@ -69,7 +103,7 @@ pub(crate) fn quote(
     cap_bps: u32,
 ) -> Quote {
     if notional <= 0 {
-        panic!("invalid notional");
+        panic_with_error!(env, PricingError::InvalidNotional);
     }
     check_cap(env, currency, cap_bps);
     env.storage().instance().extend_ttl(INSTANCE_TTL_THRESHOLD, INSTANCE_TTL_EXTEND_TO);
@@ -84,7 +118,7 @@ pub(crate) fn quote(
 pub(crate) fn set_rate(env: &Env, currency: &Symbol, rate_bps: u32) {
     crate::admin(env).require_auth();
     if rate_bps > MAX_RATE_BPS {
-        panic!("rate too high");
+        panic_with_error!(env, PricingError::RateTooHigh);
     }
     env.storage().instance().set(&DataKey::Rate(currency.clone()), &rate_bps);
 }
@@ -93,7 +127,7 @@ pub(crate) fn set_rate(env: &Env, currency: &Symbol, rate_bps: u32) {
 pub(crate) fn set_min_cap(env: &Env, currency: &Symbol, cap_bps: u32) {
     crate::admin(env).require_auth();
     if cap_bps == 0 || cap_bps > MAX_CAP_BPS {
-        panic!("cap out of range");
+        panic_with_error!(env, PricingError::CapOutOfRange);
     }
     env.storage().instance().set(&DataKey::MinCap(currency.clone()), &cap_bps);
 }
@@ -101,7 +135,7 @@ pub(crate) fn set_min_cap(env: &Env, currency: &Symbol, cap_bps: u32) {
 pub(crate) fn set_spread(env: &Env, spread_bps: u32) {
     crate::admin(env).require_auth();
     if spread_bps > MAX_SPREAD_BPS {
-        panic!("spread too high");
+        panic_with_error!(env, PricingError::SpreadTooHigh);
     }
     env.storage().instance().set(&DataKey::SpreadBps, &spread_bps);
 }
@@ -115,14 +149,14 @@ pub(crate) fn spot(env: &Env, currency: &Symbol) -> i128 {
     let oracle: Address = env.storage().instance().get(&DataKey::Oracle).unwrap();
     let data = OracleClient::new(env, &oracle)
         .lastprice(&Asset::Other(currency.clone()))
-        .unwrap_or_else(|| panic!("no price"));
+        .unwrap_or_else(|| panic_with_error!(env, PricingError::NoPrice));
     if data.price <= 0 {
-        panic!("invalid price");
+        panic_with_error!(env, PricingError::InvalidPrice);
     }
     // saturating : un oracle légèrement en avance sur le ledger n'est pas « périmé ».
     let age = env.ledger().timestamp().saturating_sub(data.timestamp);
     if age > MAX_PRICE_AGE_SECS {
-        panic!("stale price");
+        panic_with_error!(env, PricingError::StalePrice);
     }
     data.price
 }
@@ -143,7 +177,7 @@ pub(crate) fn spot(env: &Env, currency: &Symbol) -> i128 {
 /// couverture à l'utilisateur, exploitable en répétant de petites couvertures.
 pub(crate) fn forward_rate(env: &Env, currency: &Symbol, side: Side, duration_secs: u64) -> i128 {
     if duration_secs > SECS_PER_YEAR {
-        panic!("duration too long");
+        panic_with_error!(env, PricingError::DurationTooLong);
     }
     let s = spot(env, currency);
     let r_usd = rate(env, &Symbol::new(env, "USD"));
@@ -169,7 +203,7 @@ fn rate(env: &Env, currency: &Symbol) -> i128 {
         .storage()
         .instance()
         .get(&DataKey::Rate(currency.clone()))
-        .unwrap_or_else(|| panic!("rate not set"));
+        .unwrap_or_else(|| panic_with_error!(env, PricingError::RateNotSet));
     bps as i128
 }
 
@@ -190,12 +224,12 @@ pub(crate) fn check_cap(env: &Env, currency: &Symbol, cap_bps: u32) {
         .storage()
         .instance()
         .get(&DataKey::MinCap(currency.clone()))
-        .unwrap_or_else(|| panic!("currency not enabled"));
+        .unwrap_or_else(|| panic_with_error!(env, PricingError::CurrencyNotEnabled));
     if cap_bps < min {
-        panic!("cap below minimum");
+        panic_with_error!(env, PricingError::CapBelowMinimum);
     }
     if cap_bps > MAX_CAP_BPS {
-        panic!("cap too high");
+        panic_with_error!(env, PricingError::CapTooHigh);
     }
 }
 
