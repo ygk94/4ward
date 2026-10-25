@@ -66,6 +66,7 @@ Chiffres calculés avec le vrai Pricing (taux Etherfuse figés dans `scripts/rat
 4. **Le crash doit avoir lieu avant l'échéance réelle** (5 min après l'ouverture) : avec le fixing, `settle` prend le cours en vigueur à l'échéance, un crash posé après ne compte pas. Couper l'attente au montage.
 5. Après le crash : **réaligner l'offre DEX sur +12 %** (fx-admin). `settle` utilise le cours en vigueur à l'échéance (fixing) : rien à rafraîchir avant `settle`, mais le crash doit dater de **moins de 15 min avant l'échéance** et `settle` doit partir peu après l'échéance (historique de Reflector ~12 h, du mock 64 prix : au-delà, erreur 312). Le mock doit être redéployé avec la fonction `price` (Hugo).
 6. Freighter sur **Testnet**, compte `fx-lucia` importé ; fermer les autres onglets et notifications.
+6 bis. (option) Lancer `./scripts/keeper.sh` dans un terminal avant d'ouvrir la couverture : `settle` part tout seul à l'échéance, la voix off du temps 4 peut dire *« On the due date, her protection settles itself — nobody has to click. »* et la signature n° 2 disparaît (il ne reste que le paiement du fournisseur). Si le keeper tourne, ne pas cliquer « Settle » dans le front (refus #201).
 7. Garder en secours le parcours CLI (`docs/payment-cli.md`) : si un écran plante, terminal + stellar.expert pour la partie 4.
 
 ## Recalculer les chiffres avec le vrai devis
