@@ -1,0 +1,9 @@
+# Taux d'intérêt annuels en bps, figés pour scripts/setup-testnet.sh (qui n'appelle pas l'API).
+# Refaire exprès : ./scripts/sync-rates.sh --snapshot, puis relancer le setup et vérifier les chiffres de la démo.
+# Source : https://api.etherfuse.com/lookup/tokens/cost (current_basis_points) ; en_dur = docs/todo-pricing.md §1.5.
+# devise bps date source
+USD 360 2026-10-25T22:47Z etherfuse:USTRY
+MXN 555 2026-10-25T22:47Z etherfuse:CETES
+BRL 1148 2026-10-25T22:47Z etherfuse:TESOURO
+ARS 2200 2026-10-25T22:47Z en_dur
+EUR 210 2026-10-25T22:47Z etherfuse:EUROB

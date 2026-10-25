@@ -205,7 +205,7 @@ Touche `vault.rs` : interface à convenir avec Hugo, c'est lui qui l'intègre da
 ### Pitch
 1. ⬜ Slide « le produit est un tunnel de change » : collar symétrique centré sur F, valeur ≈ 0 à l'ouverture, donc le spread rémunère le pool
 2. ⬜ `sim/` : notebook P&L de Lucía selon le mouvement du peso, avec et sans protection (graphique pour le deck) ; calibrer spread et plafonds minimum avec la volatilité de chaque devise
-3. ⬜ Réponses aux objections : plafond vs mouvements de 15 % · marge immobilisée vs banque · anti-sélection (limites par devise, skew en roadmap) · taux d'intérêt en dur (lecture onchain en roadmap) · réglementation des dérivés (MVP testnet, KYC via anchors en roadmap)
+3. ⬜ Réponses aux objections : plafond vs mouvements de 15 % · marge immobilisée vs banque · anti-sélection (limites par devise, skew en roadmap) · taux synchronisés depuis Etherfuse (push oracle), lecture onchain en roadmap · réglementation des dérivés (MVP testnet, KYC via anchors en roadmap)
 
 ---
 
