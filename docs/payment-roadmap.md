@@ -102,6 +102,12 @@ Règles de calcul : tout en `i128`, **arrondis en faveur du pool** (P&L payé pa
 - ⬜ Rejouer le parcours sur le déploiement d'Hugo (commandes `docs/payment-cli.md`)
 - ⬜ Vérifier les chiffres affichés par le front contre ceux de la CLI
 
+
+## 10. Points à trancher (`docs/points-a-trancher.md`)
+
+- ✅ Point 2, durée de démo (option b) : `set_time_factor` / `time_factor` (admin, 1 par défaut, #205 si 0, événement `time_factor_set`) ; prix sur la durée annoncée, échéance réelle = durée / facteur (au moins 1 s). Démo : 25 920 → 90 jours en 300 s ; chiffres du script et de `payment-cli.md` passés à 90 jours
+- ⬜ Point 1, fixing à l'échéance : `settle` appelle `pricing::fixing(env, &hedge.currency, hedge.maturity)` au lieu de `spot` (interface de Lancelot, erreur 312 `NoFixing`) ; tests avec l'historique du mock-oracle ; à faire dès que Lancelot a poussé sur `feat/pricing`
+
 ---
 
 ## À caler avec les autres

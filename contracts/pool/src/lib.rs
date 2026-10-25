@@ -210,6 +210,17 @@ impl Pool {
     pub fn get_hedge(env: Env, hedge_id: u64) -> Option<Hedge> {
         hedge::get(&env, hedge_id)
     }
+
+    /// Mode démo : échéance réelle = durée annoncée / `time_factor` (le prix reste calculé sur la
+    /// durée annoncée). 1 par défaut = temps réel.
+    pub fn time_factor(env: Env) -> u32 {
+        hedge::time_factor(&env)
+    }
+
+    /// Admin, testnet / démo uniquement : ex. 25 920 → une couverture à 90 jours échoit en 300 s.
+    pub fn set_time_factor(env: Env, factor: u32) {
+        hedge::set_time_factor(&env, factor)
+    }
 }
 
 mod test;

@@ -19,6 +19,13 @@ stellar contract invoke --id fx-mock-oracle --source-account fx-admin --network 
   set_price --asset '{"Other":"MXN"}' --price 5500000000000          # 0,055 USD/MXN
 ```
 
+## Mode démo : 90 jours en 5 minutes (fx-admin, une fois)
+
+```sh
+stellar contract invoke --id fx-pool --source-account fx-admin --network testnet --   set_time_factor --factor 25920                                      # échéance réelle = durée / 25 920
+```
+Le prix reste calculé sur la durée annoncée (`--duration_secs 7776000` = 90 jours → prix à 90 jours), l'échéance réelle tombe 300 s après l'ouverture. Événement `time_factor_set`. Lecture : `-- time_factor` (1 = temps réel).
+
 ## 1. Le LP remplit le pool (fx-lp)
 
 ```sh
@@ -32,7 +39,7 @@ Retour : les parts du LP. Contrôle : `-- capacity` → `1000000000000`.
 ```sh
 stellar contract invoke --id fx-pool --source-account fx-lucia --network testnet -- \
   open_hedge --owner fx-lucia --supplier fx-supplier --currency MXN --side BuyCurrency \
-  --notional 10000000000000 --duration_secs 60 --cap_bps 1000         # 1 000 000 MXN, 60 s, 10 %
+  --notional 10000000000000 --duration_secs 7776000 --cap_bps 1000    # 1 000 000 MXN, 90 jours, 10 %
 ```
 Retour : l'id de la couverture (`0` pour la première). Signature : **Lucía seule**.
 Effets : transfert USDC Lucía → pool de la marge, événement `hedge_opened`, `capacity` baisse de la marge, `exposure MXN` augmente.
@@ -43,7 +50,7 @@ Effets : transfert USDC Lucía → pool de la marge, événement `hedge_opened`,
 stellar contract invoke --id fx-mock-oracle --source-account fx-admin --network testnet -- \
   set_price --asset '{"Other":"MXN"}' --price 6160000000000          # +12 % : 0,0616
 ```
-(+8 % : `5940000000000`.) Aucun mouvement d'argent.
+(+8 % : `5940000000000`.) Aucun mouvement d'argent. **À faire avant l'échéance réelle** : avec le fixing, `settle` prend le cours en vigueur à l'échéance.
 
 ## 4. Règlement à l'échéance (n'importe quel compte)
 
@@ -134,7 +141,13 @@ Les textes de `panic!` sont effacés dans le WASM déployé : le front ne reçoi
 | #101 `InsufficientCapacity` | Vault | Le pool n'a pas assez de capital pour cette protection |
 | #108 `CurrencyLimitExceeded` | Vault | Limite atteinte sur cette devise |
 | #109 `UnknownPosition` | Vault | Erreur interne (couverture non enregistrée dans le pool) |
-| à venir | Pricing | Plafond trop bas pour cette devise / cours de l'oracle trop ancien |
+| #205 `InvalidTimeFactor` | Paiement (admin) | Facteur de démo invalide |
+| #302 `StalePrice` | Pricing | Cours de l'oracle trop ancien : réessayer dans un instant |
+| #306 `CurrencyNotEnabled` | Pricing | Devise non disponible |
+| #307 `CapBelowMinimum` | Pricing | Protection minimale pour cette devise : x % |
+| #308 `CapTooHigh` | Pricing | Protection trop élevée |
+| #312 `NoFixing` (à venir) | Pricing | Cours à l'échéance indisponible (règlement trop tardif) |
+| autres 300-311 | Pricing | voir `PricingError` dans `pricing.rs` |
 | `op_too_few_offers` | Path payment | Pas assez de liquidité sur le DEX pour ce montant |
 | `op_over_source_max` | Path payment | Le cours a bougé au-delà de `send-max` : relancer avec un devis à jour |
 | `op_underfunded` | Path payment / `open_hedge` | Solde USDC insuffisant |
@@ -148,17 +161,17 @@ Liens explorateur : `https://stellar.expert/explorer/testnet/tx/<hash>`.
 
 ---
 
-## Chiffres de référence (1 000 000 MXN, spot 0,055, plafond 10 %, vrai Pricing)
+## Chiffres de référence (1 000 000 MXN, 90 jours, spot 0,055, plafond 10 %, vrai Pricing)
 
-Taux bloqué `F` = 0,0552750 (parité USD 4 % / MXN 7 % sur 60 s, puis spread 0,5 % contre Lucía) → prix figé **55 275 USDC**, marge **5 527,50 USDC**.
+Taux bloqué `F` = 0,0548731 (parité USD 4 % / MXN 7 % sur 90 jours, puis spread 0,5 % contre Lucía) → prix figé **54 873,05 USDC**, marge **5 487,31 USDC**. Sur 60 s (sans mode démo) : 55 275 / 5 527,50.
 
 | Peso | Spot | P&L | Versé par `settle` | Coût des pesos | Coût total | Sans protection |
 |---|---|---|---|---|---|---|
-| +8 % | 0,0594 | +4 125,00 | 9 652,50 | 59 400 | **55 275** | 59 400 |
-| +12 % | 0,0616 | +5 527,50 (plafonné, écart 6 325) | 11 055,00 | 61 600 | **56 072,50** | 61 600 |
-| −8 % | 0,0506 | −4 675,00 | 852,50 | 50 600 | **55 275** | 50 600 |
+| +8 % | 0,0594 | +4 526,95 | 10 014,25 | 59 400 | **54 873,05** | 59 400 |
+| +12 % | 0,0616 | +5 487,31 (plafonné, écart 6 727) | 10 974,61 | 61 600 | **56 112,69** | 61 600 |
+| −8 % | 0,0506 | −4 273,05 | 1 214,25 | 50 600 | **54 873,05** | 50 600 |
 
-À +12 %, Lucía ne paie que ce qui dépasse son plafond (797,50 USDC au lieu de 6 325).
+À +12 %, Lucía ne paie que ce qui dépasse son plafond (1 239,64 USDC au lieu de 6 727).
 Avec un autre spot (mock aligné sur Reflector), recalculer avec `docs/video-script.md` § « Recalculer les chiffres ».
 
 ## Répétition du 25/10 (déploiement de Clément, +8 %)

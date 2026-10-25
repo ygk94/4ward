@@ -434,6 +434,7 @@ const MARGIN: i128 = 54_870_000_000;
 /// Environnement de test commun : USDC (SAC), mock-oracle (MXN à 0.055), pool, et les acteurs.
 struct Setup<'a> {
     env: Env,
+    admin: Address,
     lucia: Address,
     supplier: Address,
     lp: Address,
@@ -471,6 +472,7 @@ fn setup<'a>() -> Setup<'a> {
     Setup {
         usdc: TokenClient::new(&env, &usdc_id),
         env,
+        admin,
         lucia,
         supplier,
         lp,
@@ -853,4 +855,78 @@ fn open_refused_over_currency_limit() {
         s.pool.try_open_hedge(&s.lucia, &s.supplier, &mxn, &Side::BuyCurrency, &NOTIONAL, &MATURITY_IN, &1000),
         Err(Ok(contract_err(VaultError::CurrencyLimitExceeded as u32)))
     );
+}
+
+/// 90 jours, en secondes : l'échéance racontée dans la démo.
+const DAYS_90: u64 = 7_776_000;
+/// Facteur de démo : 90 jours annoncés → 300 s réelles.
+const DEMO_FACTOR: u32 = 25_920;
+
+#[test]
+fn time_factor_defaults_to_one() {
+    let s = setup();
+    assert_eq!(s.pool.time_factor(), 1);
+}
+
+#[test]
+fn accelerated_hedge_prices_on_announced_duration() {
+    let s = setup();
+    fund_pool(&s);
+    s.pool.set_time_factor(&DEMO_FACTOR);
+    let now = s.env.ledger().timestamp();
+
+    let id = s.pool.open_hedge(&s.lucia, &s.supplier, &Symbol::new(&s.env, "MXN"), &Side::BuyCurrency, &NOTIONAL, &DAYS_90, &1000);
+
+    // prix et marge à 90 jours (54 873,05 et 5 487,31 USDC), échéance réelle 300 s plus tard
+    let h = s.pool.get_hedge(&id).unwrap();
+    assert_eq!(h.locked_rate, 5_487_305_413_412);
+    assert_eq!(h.margin, 54_873_054_135);
+    assert_eq!(h.maturity, now + 300);
+}
+
+#[test]
+fn accelerated_hedge_settles_after_real_maturity() {
+    let s = setup();
+    fund_pool(&s);
+    s.pool.set_time_factor(&DEMO_FACTOR);
+    let now = s.env.ledger().timestamp();
+    let id = s.pool.open_hedge(&s.lucia, &s.supplier, &Symbol::new(&s.env, "MXN"), &Side::BuyCurrency, &NOTIONAL, &DAYS_90, &1000);
+
+    s.env.ledger().set_timestamp(now + 299);
+    assert_eq!(s.pool.try_settle(&id), Err(Ok(contract_err(HedgeError::NotMatured as u32))));
+
+    // +12 % : protection plafonnée, 2 × 5 487,31 = 10 974,61 USDC versés
+    s.env.ledger().set_timestamp(now + 300);
+    set_spot(&s, 6_160_000_000_000);
+    assert_eq!(s.pool.settle(&id), 109_746_108_270);
+}
+
+#[test]
+fn set_time_factor_is_admin_only_and_public() {
+    let s = setup();
+    s.pool.set_time_factor(&DEMO_FACTOR);
+
+    // signé par l'admin du pool
+    assert_eq!(s.env.auths()[0].0, s.admin);
+    // réglage visible sur la chaîne
+    let events = s.env.events().all().filter_by_contract(&s.pool.address);
+    assert_eq!(
+        events.events().last(),
+        Some(&hedge::TimeFactorSet { factor: DEMO_FACTOR }.to_xdr(&s.env, &s.pool.address))
+    );
+    assert_eq!(s.pool.time_factor(), DEMO_FACTOR);
+
+    // facteur nul refusé
+    assert_eq!(s.pool.try_set_time_factor(&0), Err(Ok(contract_err(HedgeError::InvalidTimeFactor as u32))));
+}
+
+#[test]
+fn accelerated_maturity_is_at_least_one_second() {
+    let s = setup();
+    fund_pool(&s);
+    s.pool.set_time_factor(&DEMO_FACTOR);
+    let now = s.env.ledger().timestamp();
+    // 60 s / 25 920 = 0 : l'échéance réelle reste dans le futur
+    let id = open_demo(&s);
+    assert_eq!(s.pool.get_hedge(&id).unwrap().maturity, now + 1);
 }

@@ -7,10 +7,12 @@
 //!        (écart notional × (spot − locked), signe selon Side, borné à ±marge) ; vault::close_position(&hedge) puis book_gain / book_loss ;
 //!        transfert au propriétaire de marge ± P&L ; settled = true ; événement.
 //! Ensuite, côté front : path payment USDC → devise vers `supplier` pour exactement `notional`.
+//! Mode démo : `time_factor` (admin, 1 par défaut) raccourcit l'échéance réelle (`durée / facteur`)
+//! sans changer le prix, calculé sur la durée annoncée. Ex. 25 920 : 90 jours → 300 s.
 //! Erreurs : `HedgeError`, codes 200+ (Vault 100+). Les textes de panic! sont effacés dans le WASM :
 //! seul un code d'erreur permet au front d'afficher la bonne raison d'un refus.
 use crate::{pricing, vault, DataKey, Hedge, Side};
-use soroban_sdk::{contracterror, contractevent, panic_with_error, token, Address, Env, Symbol};
+use soroban_sdk::{contracterror, contractevent, contracttype, panic_with_error, token, Address, Env, Symbol};
 
 /// Erreurs de Paiement. Codes 200+ pour ne pas entrer en collision avec Vault (100+) / Pricing.
 /// Ne jamais réutiliser un numéro : ajouter à la suite.
@@ -28,6 +30,22 @@ pub enum HedgeError {
     InvalidNotional = 203,
     /// `open` avec une durée nulle.
     InvalidDuration = 204,
+    /// `set_time_factor` à 0.
+    InvalidTimeFactor = 205,
+}
+
+/// Clés de stockage de Paiement (à part de `DataKey`, partagé).
+#[contracttype]
+enum HedgeKey {
+    /// Facteur d'accélération du temps (mode démo), 1 par défaut.
+    TimeFactor,
+}
+
+/// Réglage du mode démo, publié pour que tout le monde voie que les échéances sont accélérées.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TimeFactorSet {
+    pub factor: u32,
 }
 
 /// Couverture ouverte (visible sur l'explorateur, lisible par le front).
@@ -102,7 +120,8 @@ pub(crate) fn open(
         locked_rate,
         cap_bps,
         margin,
-        maturity: env.ledger().timestamp() + duration_secs,
+        // prix calculé sur `duration_secs` ; échéance réelle raccourcie en mode démo, au moins 1 s
+        maturity: env.ledger().timestamp() + (duration_secs / time_factor(env) as u64).max(1),
         settled: false,
     };
     vault::open_position(env, &hedge);
@@ -177,6 +196,21 @@ pub(crate) fn pnl(side: Side, notional: i128, locked_rate: i128, spot: i128, mar
     };
     let raw = (notional * diff).div_euclid(10i128.pow(crate::PRICE_DECIMALS));
     raw.clamp(-margin, margin)
+}
+
+/// Facteur d'accélération du temps : échéance réelle = durée annoncée / facteur.
+pub(crate) fn time_factor(env: &Env) -> u32 {
+    env.storage().instance().get(&HedgeKey::TimeFactor).unwrap_or(1)
+}
+
+/// Admin : règle le facteur (1 = temps réel). Réservé au testnet / à la démo.
+pub(crate) fn set_time_factor(env: &Env, factor: u32) {
+    crate::admin(env).require_auth();
+    if factor == 0 {
+        panic_with_error!(env, HedgeError::InvalidTimeFactor);
+    }
+    env.storage().instance().set(&HedgeKey::TimeFactor, &factor);
+    TimeFactorSet { factor }.publish(env);
 }
 
 pub(crate) fn get(env: &Env, hedge_id: u64) -> Option<Hedge> {
