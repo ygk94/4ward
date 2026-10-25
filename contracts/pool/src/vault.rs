@@ -12,8 +12,25 @@
 //! - arrondis toujours vers le bas, en faveur du pool.
 //! Le prix se calcule sur la compta interne, pas sur le solde USDC : un envoi direct d'USDC
 //! au contrat ne change pas le prix de la part (pas d'attaque par inflation).
-use crate::DataKey;
-use soroban_sdk::{contracterror, contracttype, panic_with_error, token, Address, Env};
+//!
+//! Exposition par devise : `open_position` / `close_position` (appelés par hedge.rs) réservent
+//! la marge et tiennent, par devise, les volumes acheteur / vendeur (USDC au taux bloqué) et
+//! les marges de chaque côté. Limite par devise (admin) : Σ marges de la devise ≤ x % du capital.
+//! C'est la somme BRUTE des marges : sans netting, c'est la seule borne sûre de la perte
+//! maximale d'une devise (deux couvertures de sens opposé, bloquées à des dates différentes,
+//! peuvent gagner toutes les deux contre le pool).
+//!
+//! Netting : `basket_max_loss` calcule la perte maximale exacte d'un panier de couvertures,
+//! mais n'est PAS branché sur la réserve. Conditions pour le brancher :
+//! 1. fixing commun à l'échéance : toutes les couvertures d'un panier réglées au même cours
+//!    (aujourd'hui `settle` lit le cours au moment de l'appel) ;
+//! 2. échéances arrondies à des dates de fixing (aujourd'hui `now + duration` à la seconde :
+//!    deux couvertures n'ont jamais la même échéance, les paniers sont de taille 1) ;
+//! 3. règlement par panier (toutes les jambes dans la même transaction) ou comptabilisation
+//!    de ce que doit le vendeur au fixing : sinon, si le perdant du pool est réglé en premier,
+//!    `book_loss` passe avant le gain de la jambe opposée et le capital tombe sous la réserve.
+use crate::{pricing, DataKey, Hedge, Side, BPS, PRICE_DECIMALS};
+use soroban_sdk::{contracterror, contracttype, panic_with_error, token, Address, Env, Symbol};
 
 /// Erreurs du vault. Codes 100+ pour ne pas entrer en collision avec Paiement / Pricing.
 /// Ne jamais réutiliser un numéro : ajouter à la suite.
@@ -37,6 +54,10 @@ pub enum VaultError {
     InsufficientShares = 106,
     /// Retrait qui verserait 0 USDC (capital entièrement réservé ou trop peu de parts).
     WithdrawTooSmall = 107,
+    /// Ouverture refusée : la limite de la devise (Σ marges ≤ x % du capital) serait dépassée.
+    CurrencyLimitExceeded = 108,
+    /// `close_position` d'une couverture qui n'a pas été ouverte par `open_position`.
+    UnknownPosition = 109,
 }
 
 /// Clés de stockage propres au vault.
@@ -47,6 +68,24 @@ pub enum VaultKey {
     Shares(Address),
     /// Total des parts émises (instance).
     TotalShares,
+    /// Exposition d'une devise (persistent).
+    Exposure(Symbol),
+    /// Limite d'une devise en bps du capital (persistent), absente = sans limite.
+    CurrencyLimit(Symbol),
+}
+
+/// Exposition du pool sur une devise, couvertures ouvertes seulement (USDC, 7 décimales).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Exposure {
+    /// Σ notionnels des acheteurs de la devise, en USDC au taux bloqué.
+    pub buy_notional: i128,
+    /// Σ notionnels des vendeurs de la devise, en USDC au taux bloqué.
+    pub sell_notional: i128,
+    /// buy_notional − sell_notional (> 0 : le pool perd si la devise monte).
+    pub net_notional: i128,
+    pub buy_margin: i128,
+    pub sell_margin: i128,
 }
 
 /// 1 part = 1 USDC au premier dépôt : prix exprimé en 7 décimales.
@@ -247,18 +286,77 @@ pub(crate) fn book_loss(env: &Env, amount: i128) {
     set_total_deposits(env, total - amount);
 }
 
+/// Ouverture d'une couverture : réserve la marge, contrôle la limite de la devise et ajoute
+/// l'exposition. À appeler par hedge::open une fois la `Hedge` construite.
+/// Erreurs : `InvalidAmount`, `InsufficientCapacity`, `CurrencyLimitExceeded`.
+pub(crate) fn open_position(_env: &Env, _hedge: &Hedge) {
+    panic!("TODO vault")
+}
+
+/// Clôture d'une couverture : libère la marge et retire l'exposition ajoutée à l'ouverture.
+/// À appeler par hedge::settle à la place de `release`, avant `book_gain` / `book_loss`.
+/// Erreurs : `UnknownPosition`.
+pub(crate) fn close_position(_env: &Env, _hedge: &Hedge) {
+    panic!("TODO vault")
+}
+
+pub(crate) fn exposure(_env: &Env, _currency: &Symbol) -> Exposure {
+    panic!("TODO vault")
+}
+
+pub(crate) fn currency_limit(_env: &Env, _currency: &Symbol) -> Option<u32> {
+    panic!("TODO vault")
+}
+
+pub(crate) fn set_currency_limit(_env: &Env, _currency: &Symbol, _limit_bps: u32) {
+    panic!("TODO vault")
+}
+
+// ---- netting : calcul exact, NON branché (voir l'en-tête) ----
+
+/// Une jambe d'un panier (même devise, même échéance, même fixing).
+#[derive(Clone, Copy, Debug)]
+#[allow(dead_code)]
+pub(crate) struct Leg {
+    pub side: Side,
+    /// Montant en devise, 7 décimales.
+    pub notional: i128,
+    /// Taux bloqué, USD par unité, 14 décimales.
+    pub locked_rate: i128,
+    /// Marge en USDC = perte max de la jambe pour le pool.
+    pub margin: i128,
+}
+
+/// P&L de l'utilisateur au cours `spot` (> 0 : le pool paie). Même formule que hedge::pnl.
+#[allow(dead_code)]
+pub(crate) fn leg_pnl(leg: &Leg, spot: i128) -> i128 {
+    let diff = match leg.side {
+        Side::BuyCurrency => spot - leg.locked_rate,
+        Side::SellCurrency => leg.locked_rate - spot,
+    };
+    let raw = (leg.notional * diff).div_euclid(10i128.pow(PRICE_DECIMALS));
+    raw.clamp(-leg.margin, leg.margin)
+}
+
+/// Perte maximale du pool sur un panier, pour tous les cours de fixing possibles (≥ 0).
+#[allow(dead_code)]
+pub(crate) fn basket_max_loss(_legs: &[Leg]) -> i128 {
+    panic!("TODO vault")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{Pool, PoolClient};
-    use soroban_sdk::testutils::Address as _;
-    use soroban_sdk::token;
+    use soroban_sdk::testutils::{Address as _, AuthorizedFunction};
+    use soroban_sdk::{symbol_short, token};
 
     /// 1 USDC en 7 décimales.
     const USDC: i128 = 10_000_000;
 
     struct Setup {
         env: Env,
+        admin: Address,
         pool: Address,
         usdc: Address,
     }
@@ -270,7 +368,7 @@ mod tests {
         let usdc = env.register_stellar_asset_contract_v2(admin.clone()).address();
         let oracle = Address::generate(&env);
         let pool = env.register(Pool, (&admin, &usdc, &oracle, &50u32));
-        Setup { env, pool, usdc }
+        Setup { env, admin, pool, usdc }
     }
 
     impl Setup {
@@ -756,5 +854,409 @@ mod tests {
         settle_pool_loses_margin(&s, 100 * USDC);
         assert_eq!(s.total_deposits(), 0);
         s.new_lp(100 * USDC);
+    }
+
+    // ---- Phase 3 : exposition par devise ----
+
+    /// 1 000 000 MXN (7 décimales).
+    const MXN_1M: i128 = 10_000_000_000_000;
+    /// 0,055 USD par MXN (14 décimales).
+    const RATE_055: i128 = 5_500_000_000_000;
+
+    /// Couverture construite comme hedge::open : marge = to_usdc × plafond, arrondie vers le haut.
+    fn make_hedge(s: &Setup, currency: Symbol, side: Side, notional: i128, locked_rate: i128, cap_bps: u32) -> Hedge {
+        let margin = (pricing::to_usdc(notional, locked_rate) * cap_bps as i128 + BPS - 1) / BPS;
+        Hedge {
+            owner: Address::generate(&s.env),
+            supplier: Address::generate(&s.env),
+            currency,
+            side,
+            notional,
+            locked_rate,
+            cap_bps,
+            margin,
+            maturity: 0,
+            settled: false,
+        }
+    }
+
+    /// La PME envoie sa marge au contrat, puis open_position (ordre de hedge::open).
+    fn open_pos(s: &Setup, h: &Hedge) {
+        s.mint(&h.owner, h.margin);
+        token::Client::new(&s.env, &s.usdc).transfer(&h.owner, &s.pool, &h.margin);
+        s.vault(|env| open_position(env, h));
+    }
+
+    /// Clôture à P&L nul : close_position puis la marge est rendue (ordre de hedge::settle).
+    fn close_pos_flat(s: &Setup, h: &Hedge) {
+        s.vault(|env| close_position(env, h));
+        s.pay_sme(&h.owner, h.margin);
+    }
+
+    fn zero_exposure() -> Exposure {
+        Exposure { buy_notional: 0, sell_notional: 0, net_notional: 0, buy_margin: 0, sell_margin: 0 }
+    }
+
+    #[test]
+    fn exposure_is_empty_by_default() {
+        let s = setup();
+        assert_eq!(s.client().exposure(&symbol_short!("MXN")), zero_exposure());
+    }
+
+    #[test]
+    fn open_position_reserves_margin_and_adds_buy_exposure() {
+        let s = setup();
+        s.new_lp(LP_CAPITAL);
+        let lucia = make_hedge(&s, symbol_short!("MXN"), Side::BuyCurrency, MXN_1M, RATE_055, 1000);
+        assert_eq!(lucia.margin, MARGIN);
+
+        open_pos(&s, &lucia);
+        assert_eq!(s.reserved(), MARGIN);
+        assert_eq!(s.client().capacity(), LP_CAPITAL - MARGIN);
+        assert_eq!(
+            s.client().exposure(&symbol_short!("MXN")),
+            Exposure {
+                buy_notional: 55_000 * USDC,
+                sell_notional: 0,
+                net_notional: 55_000 * USDC,
+                buy_margin: MARGIN,
+                sell_margin: 0,
+            }
+        );
+        s.assert_invariant(MARGIN);
+    }
+
+    #[test]
+    fn buyer_and_seller_give_net_exposure() {
+        let s = setup();
+        s.new_lp(LP_CAPITAL);
+        let buyer = make_hedge(&s, symbol_short!("MXN"), Side::BuyCurrency, MXN_1M, RATE_055, 1000);
+        let seller = make_hedge(&s, symbol_short!("MXN"), Side::SellCurrency, MXN_1M / 4, RATE_055, 1000);
+        open_pos(&s, &buyer);
+        open_pos(&s, &seller);
+
+        let e = s.client().exposure(&symbol_short!("MXN"));
+        assert_eq!(e.buy_notional, 55_000 * USDC);
+        assert_eq!(e.sell_notional, 13_750 * USDC);
+        assert_eq!(e.net_notional, 41_250 * USDC);
+        assert_eq!(e.sell_margin, 1_375 * USDC);
+        // Sans netting, la réserve reste la somme brute des marges.
+        assert_eq!(s.reserved(), MARGIN + 1_375 * USDC);
+        // Les autres devises ne bougent pas.
+        assert_eq!(s.client().exposure(&symbol_short!("EUR")), zero_exposure());
+        s.assert_invariant(MARGIN + 1_375 * USDC);
+    }
+
+    #[test]
+    fn close_position_removes_exposure_exactly() {
+        let s = setup();
+        s.new_lp(LP_CAPITAL);
+        let buyer = make_hedge(&s, symbol_short!("MXN"), Side::BuyCurrency, MXN_1M, RATE_055, 1000);
+        // Taux et notionnel « tordus » : le retrait doit quand même retomber à zéro pile.
+        let seller = make_hedge(&s, symbol_short!("MXN"), Side::SellCurrency, 3_333_333_333_337, 5_472_618_000_001, 1250);
+        open_pos(&s, &buyer);
+        open_pos(&s, &seller);
+
+        close_pos_flat(&s, &buyer);
+        let e = s.client().exposure(&symbol_short!("MXN"));
+        assert_eq!(e.buy_notional, 0);
+        assert_eq!(e.buy_margin, 0);
+        assert_eq!(e.sell_margin, seller.margin);
+        s.assert_invariant(seller.margin);
+
+        close_pos_flat(&s, &seller);
+        assert_eq!(s.client().exposure(&symbol_short!("MXN")), zero_exposure());
+        assert_eq!(s.reserved(), 0);
+        assert_eq!(s.client().capacity(), LP_CAPITAL);
+        s.assert_invariant(0);
+    }
+
+    #[test]
+    fn positions_match_phase_2_reserve_release() {
+        // Même scénario par open_position / close_position et par reserve / release.
+        let a = setup();
+        a.new_lp(LP_CAPITAL);
+        let h = make_hedge(&a, symbol_short!("MXN"), Side::BuyCurrency, MXN_1M, RATE_055, 1000);
+        open_pos(&a, &h);
+        let cap_open_a = a.client().capacity();
+        a.vault(|env| close_position(env, &h));
+
+        let b = setup();
+        b.new_lp(LP_CAPITAL);
+        b.vault(|env| reserve(env, h.margin));
+        let cap_open_b = b.client().capacity();
+        b.vault(|env| release(env, h.margin));
+
+        assert_eq!(cap_open_a, cap_open_b);
+        assert_eq!(a.reserved(), b.reserved());
+        assert_eq!(a.client().capacity(), b.client().capacity());
+    }
+
+    #[test]
+    fn case_a_through_positions_keeps_invariant() {
+        // Cas A de la phase 1, branché comme le fera hedge.rs.
+        let s = setup();
+        s.new_lp(LP_CAPITAL);
+        let lucia = make_hedge(&s, symbol_short!("MXN"), Side::BuyCurrency, MXN_1M, RATE_055, 1000);
+        open_pos(&s, &lucia);
+        s.assert_invariant(MARGIN);
+
+        s.vault(|env| close_position(env, &lucia));
+        s.vault(|env| book_loss(env, MARGIN));
+        s.pay_sme(&lucia.owner, 2 * MARGIN);
+        s.assert_invariant(0);
+        assert_eq!(s.total_deposits(), 94_500 * USDC);
+        assert_eq!(s.client().exposure(&symbol_short!("MXN")), zero_exposure());
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #109)")]
+    fn close_position_without_open_panics() {
+        let s = setup();
+        s.new_lp(LP_CAPITAL);
+        let h = make_hedge(&s, symbol_short!("MXN"), Side::BuyCurrency, MXN_1M, RATE_055, 1000);
+        // Ouverte par l'ancien chemin (reserve seul) : pas d'exposition enregistrée.
+        s.vault(|env| reserve(env, h.margin));
+        s.vault(|env| close_position(env, &h));
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #109)")]
+    fn close_position_twice_panics() {
+        let s = setup();
+        s.new_lp(LP_CAPITAL);
+        let h = make_hedge(&s, symbol_short!("MXN"), Side::BuyCurrency, MXN_1M, RATE_055, 1000);
+        let other = make_hedge(&s, symbol_short!("MXN"), Side::SellCurrency, MXN_1M, RATE_055, 1000);
+        open_pos(&s, &h);
+        open_pos(&s, &other);
+        s.vault(|env| close_position(env, &h));
+        s.vault(|env| close_position(env, &h));
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #101)")]
+    fn open_position_over_capacity_panics() {
+        let s = setup();
+        s.new_lp(5_000 * USDC);
+        let h = make_hedge(&s, symbol_short!("MXN"), Side::BuyCurrency, MXN_1M, RATE_055, 1000);
+        open_pos(&s, &h);
+    }
+
+    // ---- Phase 3 : limite par devise ----
+
+    #[test]
+    fn currency_limit_is_none_by_default_and_readable() {
+        let s = setup();
+        let c = s.client();
+        assert_eq!(c.currency_limit(&symbol_short!("MXN")), None);
+        c.set_currency_limit(&symbol_short!("MXN"), &1000);
+        assert_eq!(c.currency_limit(&symbol_short!("MXN")), Some(1000));
+        assert_eq!(c.currency_limit(&symbol_short!("EUR")), None);
+    }
+
+    #[test]
+    fn set_currency_limit_requires_admin_auth() {
+        let s = setup();
+        s.client().set_currency_limit(&symbol_short!("MXN"), &1000);
+        let auths = s.env.auths();
+        assert_eq!(auths.len(), 1);
+        assert_eq!(auths[0].0, s.admin);
+        match &auths[0].1.function {
+            AuthorizedFunction::Contract((contract, name, _)) => {
+                assert_eq!(contract, &s.pool);
+                assert_eq!(name, &Symbol::new(&s.env, "set_currency_limit"));
+            }
+            _ => panic!("autorisation inattendue"),
+        }
+    }
+
+    #[test]
+    fn open_up_to_currency_limit_is_accepted() {
+        let s = setup();
+        s.new_lp(LP_CAPITAL);
+        // 11 % de 100 000 = 11 000 : deux marges de 5 500 passent pile.
+        s.client().set_currency_limit(&symbol_short!("MXN"), &1100);
+        let a = make_hedge(&s, symbol_short!("MXN"), Side::BuyCurrency, MXN_1M, RATE_055, 1000);
+        let b = make_hedge(&s, symbol_short!("MXN"), Side::SellCurrency, MXN_1M, RATE_055, 1000);
+        open_pos(&s, &a);
+        open_pos(&s, &b);
+        assert_eq!(s.client().exposure(&symbol_short!("MXN")).buy_margin + s.client().exposure(&symbol_short!("MXN")).sell_margin, 11_000 * USDC);
+        s.assert_invariant(11_000 * USDC);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #108)")]
+    fn open_over_currency_limit_panics() {
+        let s = setup();
+        s.new_lp(LP_CAPITAL);
+        // 10 % de 100 000 = 10 000 : la deuxième marge de 5 500 dépasse, même en sens opposé
+        // (limite sur la somme brute des marges).
+        s.client().set_currency_limit(&symbol_short!("MXN"), &1000);
+        let a = make_hedge(&s, symbol_short!("MXN"), Side::BuyCurrency, MXN_1M, RATE_055, 1000);
+        let b = make_hedge(&s, symbol_short!("MXN"), Side::SellCurrency, MXN_1M, RATE_055, 1000);
+        open_pos(&s, &a);
+        open_pos(&s, &b);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #108)")]
+    fn zero_currency_limit_blocks_new_hedges() {
+        let s = setup();
+        s.new_lp(LP_CAPITAL);
+        s.client().set_currency_limit(&symbol_short!("ARS"), &0);
+        let h = make_hedge(&s, symbol_short!("ARS"), Side::BuyCurrency, MXN_1M, 100_000_000_000, 1000);
+        open_pos(&s, &h);
+    }
+
+    #[test]
+    fn currency_limit_does_not_affect_other_currencies() {
+        let s = setup();
+        s.new_lp(LP_CAPITAL);
+        s.client().set_currency_limit(&symbol_short!("ARS"), &0);
+        let h = make_hedge(&s, symbol_short!("MXN"), Side::BuyCurrency, MXN_1M, RATE_055, 1000);
+        open_pos(&s, &h);
+        s.assert_invariant(MARGIN);
+    }
+
+    #[test]
+    fn closing_frees_room_under_currency_limit() {
+        let s = setup();
+        s.new_lp(LP_CAPITAL);
+        s.client().set_currency_limit(&symbol_short!("MXN"), &1000);
+        let a = make_hedge(&s, symbol_short!("MXN"), Side::BuyCurrency, MXN_1M, RATE_055, 1000);
+        let b = make_hedge(&s, symbol_short!("MXN"), Side::BuyCurrency, MXN_1M, RATE_055, 1000);
+        open_pos(&s, &a);
+        close_pos_flat(&s, &a);
+        open_pos(&s, &b);
+        s.assert_invariant(MARGIN);
+    }
+
+    // ---- Phase 3 : netting, calcul exact non branché ----
+
+    /// Prix de 1 USD par unité (14 décimales), pour les exemples « à la main ».
+    const ONE: i128 = 100_000_000_000_000;
+
+    fn leg(side: Side, notional: i128, locked_rate: i128, cap_bps: u32) -> Leg {
+        let margin = (pricing::to_usdc(notional, locked_rate) * cap_bps as i128 + BPS - 1) / BPS;
+        Leg { side, notional, locked_rate, margin }
+    }
+
+    fn basket_pnl(legs: &[Leg], spot: i128) -> i128 {
+        legs.iter().map(|l| leg_pnl(l, spot)).sum()
+    }
+
+    /// Propriété : sur la grille −30 % … +30 % par pas de 0,5 % autour de `reference`,
+    /// la somme des P&L ne dépasse jamais la réserve du panier. Retourne le max de la grille.
+    fn assert_reserve_covers_grid(legs: &[Leg], reference: i128) -> i128 {
+        let reserve = basket_max_loss(legs);
+        let mut worst = i128::MIN;
+        for k in -60i128..=60 {
+            let spot = reference * (1000 + 5 * k) / 1000;
+            let loss = basket_pnl(legs, spot);
+            assert!(loss <= reserve, "cours {spot} : perte {loss} > réserve {reserve}");
+            worst = worst.max(loss);
+        }
+        worst
+    }
+
+    /// La réserve vaut `expected` à l'arrondi de sécurité près (1 stroop par jambe, en faveur du pool).
+    fn assert_reserve_is(legs: &[Leg], expected: i128) {
+        let reserve = basket_max_loss(legs);
+        assert!(
+            reserve >= expected && reserve <= expected + legs.len() as i128,
+            "réserve {reserve}, attendu {expected}"
+        );
+    }
+
+    #[test]
+    fn empty_basket_needs_no_reserve() {
+        assert_eq!(basket_max_loss(&[]), 0);
+    }
+
+    #[test]
+    fn single_leg_reserve_is_its_margin() {
+        let buyer = leg(Side::BuyCurrency, MXN_1M, RATE_055, 1000);
+        assert_reserve_is(&[buyer], MARGIN);
+        let seller = leg(Side::SellCurrency, MXN_1M, RATE_055, 1000);
+        assert_reserve_is(&[seller], MARGIN);
+    }
+
+    #[test]
+    fn opposite_legs_same_cap_offset() {
+        // Acheteur et vendeur du même montant, même taux, même plafond : risque nul.
+        let legs = [
+            leg(Side::BuyCurrency, MXN_1M, RATE_055, 1000),
+            leg(Side::SellCurrency, MXN_1M, RATE_055, 1000),
+        ];
+        assert_reserve_is(&legs, 0);
+        assert_reserve_covers_grid(&legs, RATE_055);
+    }
+
+    #[test]
+    fn different_caps_counterexample_no_abusive_offset() {
+        // Acheteur 100 USD plafond 5 % (marge 5) ; vendeur 10 USD plafond 20 % (marge 2).
+        // Le net des marges dirait 3 ; à +5 %, le pool paie 5 et ne récupère que 0,5 : 4,5.
+        let legs = [
+            leg(Side::BuyCurrency, 100 * USDC, ONE, 500),
+            leg(Side::SellCurrency, 10 * USDC, ONE, 2000),
+        ];
+        assert_eq!(legs[0].margin, 5 * USDC);
+        assert_eq!(legs[1].margin, 2 * USDC);
+        assert_reserve_is(&legs, 45 * USDC / 10);
+        let worst = assert_reserve_covers_grid(&legs, ONE);
+        assert_eq!(worst, 45 * USDC / 10);
+    }
+
+    #[test]
+    fn locked_at_different_dates_both_can_win() {
+        // Acheteur bloqué à 0,050, vendeur à 0,060 : entre les deux, les deux gagnent contre
+        // le pool. La réserve dépasse max(marge acheteur, marge vendeur) : un « net » serait faux.
+        let buyer = leg(Side::BuyCurrency, MXN_1M, 5_000_000_000_000, 1000);
+        let seller = leg(Side::SellCurrency, MXN_1M, 6_000_000_000_000, 1000);
+        let legs = [buyer, seller];
+        assert_reserve_is(&legs, 10_000 * USDC);
+        assert!(basket_max_loss(&legs) > buyer.margin.max(seller.margin));
+        assert_reserve_covers_grid(&legs, RATE_055);
+    }
+
+    #[test]
+    fn mixed_basket_reserve_covers_every_move_and_nets() {
+        // Paniers mixtes : taux bloqués différents (spread de chaque côté), plafond commun.
+        let legs = [
+            leg(Side::BuyCurrency, MXN_1M, RATE_055 * 1005 / 1000, 1000),
+            leg(Side::BuyCurrency, MXN_1M * 3 / 10, RATE_055 * 1002 / 1000, 1000),
+            leg(Side::SellCurrency, MXN_1M * 8 / 10, RATE_055 * 995 / 1000, 1000),
+            leg(Side::SellCurrency, MXN_1M * 2 / 10, RATE_055 * 990 / 1000, 1000),
+        ];
+        let gross: i128 = legs.iter().map(|l| l.margin).sum();
+        let worst = assert_reserve_covers_grid(&legs, RATE_055);
+        let reserve = basket_max_loss(&legs);
+        assert!(reserve < gross, "le netting doit réserver moins que la somme brute");
+        assert!(reserve >= worst);
+    }
+
+    #[test]
+    fn pseudo_random_baskets_reserve_covers_grid() {
+        // Paniers variés (sens, montants, taux, plafonds différents) tirés d'un générateur fixe.
+        let mut seed: u64 = 0x5EED_2026;
+        let mut next = |modulo: u64| {
+            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+            (seed >> 33) % modulo
+        };
+        for _ in 0..50 {
+            let n = 1 + next(6) as usize;
+            let mut legs = [leg(Side::BuyCurrency, 1, RATE_055, 1000); 6];
+            for l in legs.iter_mut().take(n) {
+                let side = if next(2) == 0 { Side::BuyCurrency } else { Side::SellCurrency };
+                let notional = (1 + next(2_000_000) as i128) * USDC;
+                let rate = RATE_055 * (900 + next(201) as i128) / 1000;
+                let cap = [300u32, 500, 1000, 1500, 2000][next(5) as usize];
+                *l = leg(side, notional, rate, cap);
+            }
+            let legs = &legs[..n];
+            assert_reserve_covers_grid(legs, RATE_055);
+            let gross: i128 = legs.iter().map(|l| l.margin).sum();
+            assert!(basket_max_loss(legs) <= gross + n as i128);
+        }
     }
 }

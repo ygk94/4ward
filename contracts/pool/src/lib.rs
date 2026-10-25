@@ -151,6 +151,23 @@ impl Pool {
         vault::total_assets(&env)
     }
 
+    /// Exposition du pool sur une devise (couvertures ouvertes) : volumes acheteur / vendeur
+    /// en USDC au taux bloqué, net = acheteur − vendeur, et marges de chaque côté.
+    pub fn exposure(env: Env, currency: Symbol) -> vault::Exposure {
+        vault::exposure(&env, &currency)
+    }
+
+    /// Limite de la devise en bps du capital (Σ marges de la devise), `None` = sans limite.
+    pub fn currency_limit(env: Env, currency: Symbol) -> Option<u32> {
+        vault::currency_limit(&env, &currency)
+    }
+
+    /// Admin : Σ marges ouvertes d'une devise ≤ `limit_bps` × capital / 10 000.
+    /// 0 = plus de nouvelles couvertures sur cette devise.
+    pub fn set_currency_limit(env: Env, currency: Symbol, limit_bps: u32) {
+        vault::set_currency_limit(&env, &currency, limit_bps)
+    }
+
     // ---- Pricing ----
 
     pub fn quote(env: Env, currency: Symbol, side: Side, notional: i128, duration_secs: u64, cap_bps: u32) -> Quote {
