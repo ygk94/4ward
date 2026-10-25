@@ -8,7 +8,7 @@ Légende : ✅ fait · ⬜ à faire · 🔴 bloquant pour les autres ou pour la 
 
 ## Qui fait quoi
 
-| | **Vault + Front** — Hugo | **Paiement** — ? | **Pricing** — Lancelot |
+| | **Vault + Front** — Hugo | **Paiement** — Clément | **Pricing** — Lancelot |
 |---|---|---|---|
 | Rôle | L'argent du pool, **tout le front**, et le transversal (déploiement, merge, deck, vidéo, soumission) | Le parcours de Lucía côté contrat : ouvrir la couverture, la régler, le paiement du fournisseur | Le prix : oracle, taux forward, spread, plafonds, crash du peso, **rendement du capital libre (Etherfuse / bons du Trésor US)** |
 | Contrat | `contracts/pool/src/vault.rs` | `contracts/pool/src/hedge.rs` | `contracts/pool/src/pricing.rs` |
@@ -22,6 +22,8 @@ Légende : ✅ fait · ⬜ à faire · 🔴 bloquant pour les autres ou pour la 
 - Paiement appelle Vault (`reserve`, `release`, `book_gain`, `book_loss`) et Pricing (`spot`, `forward_rate`, `check_cap`, `to_usdc`). Ces fonctions sont **déjà déclarées** : Paiement code contre elles dès maintenant.
 - Le front s'appuie sur les points d'entrée publics de `lib.rs`, qui sont figés : Hugo peut construire les écrans tout de suite, avec des données factices en attendant le déploiement.
 - `contracts/pool/src/lib.rs` (types partagés et points d'entrée) ne bouge plus, sauf accord à trois. **On ne change pas une signature sans prévenir.**
+
+**Codes d'erreur (`#[contracterror]`) :** Vault 100-199 · Paiement 200-299 · Pricing 300-399. Jamais réutiliser un numéro : le front traduit chaque code en message.
 
 **Conventions communes :**
 - prix en USD par unité de devise, **14 décimales** (format Reflector) ;
@@ -131,7 +133,7 @@ Commencer avec des données factices, brancher le contrat après le merge.
 5. ⬜ README final : nom, captures/GIF, lien vidéo, IDs à jour
 6. ⬜ 🔴 Soumission HackMeridian avant 12h : tracks **Stellar Unlocked + Stellar Composed**
 
-## Paiement — ?
+## Paiement — Clément
 
 ### Contrat (`hedge.rs`) : marche à suivre détaillée en tête du fichier
 1. ⬜ `settle` en premier, piloté par les tests : hausse (le pool paie), baisse (Lucía paie sur sa marge), au-delà du plafond (borné), garde-fous (pas avant l'échéance, pas deux fois)
@@ -165,7 +167,7 @@ Un prix faux = arbitrage contre le pool : c'est ce qui rend le produit crédible
 
 ### Oracle et scripts
 1. ⬜ `scripts/crash.sh` : `set_price` du MXN +12 % sur le mock en ligne de commande (filet de sécurité pendant la vidéo). Utiliser les alias (`fx-admin`, `fx-mock-oracle`) : tu le testes sur ton déploiement, Hugo le lance sur le sien
-2. ⬜ Juste avant la vidéo : donner à Hugo la commande pour aligner le prix du mock sur le vrai spot Reflector (c'est lui qui la lance, avec `fx-admin`) ; prévenir Paiement pour l'offre DEX
+2. ⬜ ⚠️ `spot` refuse un prix de plus de 300 s : pendant la démo, le prix du mock doit être réécrit juste avant chaque `settle` (le crash le fait ; sinon relancer `set_price`). Juste avant la vidéo : donner à Hugo la commande pour aligner le prix du mock sur le vrai spot Reflector (c'est lui qui la lance, avec `fx-admin`) ; prévenir Paiement pour l'offre DEX
 3. ⬜ Donner à Hugo la lecture du spot Reflector côté front (contrat, `Asset::Other("MXN")`, conversion des 14 décimales) pour `QuoteCard`
 
 ### Rendement du capital libre (Etherfuse, indexé sur les bons du Trésor US)
