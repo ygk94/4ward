@@ -8,9 +8,9 @@ Légende : ✅ fait · ⬜ à faire · 🔴 bloquant pour les autres ou pour la 
 
 ## Qui fait quoi
 
-| | **Vault + Front** — Hugo | **Paiement** — ? | **Pricing** — ? |
+| | **Vault + Front** — Hugo | **Paiement** — ? | **Pricing** — Lancelot |
 |---|---|---|---|
-| Rôle | L'argent du pool, **tout le front**, et le transversal (déploiement, merge, deck, vidéo, soumission) | Le parcours de Lucía côté contrat : ouvrir la couverture, la régler, le paiement du fournisseur | Le prix : oracle, taux forward, spread, plafonds, crash du peso |
+| Rôle | L'argent du pool, **tout le front**, et le transversal (déploiement, merge, deck, vidéo, soumission) | Le parcours de Lucía côté contrat : ouvrir la couverture, la régler, le paiement du fournisseur | Le prix : oracle, taux forward, spread, plafonds, crash du peso, **rendement du capital libre (Etherfuse / bons du Trésor US)** |
 | Contrat | `contracts/pool/src/vault.rs` | `contracts/pool/src/hedge.rs` | `contracts/pool/src/pricing.rs` |
 | Front | **tout `front/`** | — (fournit à Hugo le déroulé des appels) | — (fournit à Hugo les appels et formules) |
 | Scripts | `scripts/setup-testnet.sh` | — | `scripts/crash.sh` |
@@ -57,11 +57,11 @@ Légende : ✅ fait · ⬜ à faire · 🔴 bloquant pour les autres ou pour la 
 
 ### Contrat (`vault.rs`)
 
-**Principe :** le vault ne contient **que des dollars** (USDC). Chaque couverture est une jambe devise contre USD, sur les devises de Reflector testnet (EUR, GBP, CHF, CAD, MXN, ARS, BRL, THB). Couvertures croisées (MXN → EUR) : plus tard. Option : placer le capital libre en **stablebonds Etherfuse (USTRY)** ; Etherfuse n'a pas d'actifs sur le testnet Stellar, on émet les nôtres et on le présente comme la cible mainnet.
+**Principe :** le vault ne contient **que des dollars** (USDC). Chaque couverture est une jambe devise contre USD, sur les devises de Reflector testnet (EUR, GBP, CHF, CAD, MXN, ARS, BRL, THB). Couvertures croisées (MXN → EUR) : plus tard. Le rendement du capital libre (Etherfuse, indexé sur les bons du Trésor US) est **géré par Pricing (Lancelot)** ; le vault lui expose le capital libre.
 
 Checklist cochable : https://claude.ai/artifact/9hWHDQW8siGsCBVb3TZHmY
 
-**Invariant à tenir partout :** `USDC liquide + valeur USTRY = capital des LPs + Σ marges des couvertures ouvertes`
+**Invariant à tenir partout :** `USDC du contrat (+ valeur placée, si Pricing ajoute le rendement) = capital des LPs + Σ marges des couvertures ouvertes`
 
 #### Phase 0 — Préparation
 1. ⬜ Ne pas toucher `lib.rs` pour le stockage : définir ses propres clés (`enum VaultKey`) et ses erreurs (`#[contracterror] enum VaultError`, codes 100+) dans `vault.rs`
@@ -88,27 +88,18 @@ Checklist cochable : https://claude.ai/artifact/9hWHDQW8siGsCBVb3TZHmY
 17. ⬜ Limite par devise : exposition nette ≤ x % du capital (ex. MXN 30 %, ARS 10 %), paramétrable par l'admin
 18. ⬜ Tests : un acheteur et un vendeur de MXN se compensent ; limite par devise refusée
 
-#### Phase 4 — Rendement du capital libre (optionnel)
-
-0. ⬜ Décision : USDC pur (simple, les LPs ne gagnent que le spread) ou placement USTRY (~4 %/an en plus, KYC et délai de rachat en vrai). Regarder le sandbox d'API Etherfuse (`api.sand.etherfuse.com`)
-19. ⬜ Interface d'adaptateur de rendement : `invest(montant)`, `divest(montant)`, `value()` (pour pouvoir changer de source plus tard : Etherfuse, Blend…)
-20. ⬜ Contrat `contracts/mock-stablebond` pour le testnet : token USTRY dont la valeur de rachat monte avec le temps (~4 %/an), `buy(usdc)` / `redeem(ustry)`
-21. ⬜ `total_assets()` = USDC liquide (hors marges) + quantité d'USTRY × prix ; le capital des LPs devient calculé, et le rendement fait monter le prix de la part
-22. ⬜ Coussin de liquidité : garder en USDC au moins `max(Reserved, x % du capital)` pour payer les règlements et les retraits ; n'investir que le surplus
-23. ⬜ `rebalance()` permissionless : investit ou désinvestit pour revenir au coussin cible
-24. ⬜ Désinvestissement automatique quand un retrait ou un règlement dépasse le liquide
-25. ⬜ Tests : le rendement fait monter le prix de la part ; un retrait plus gros que le liquide déclenche `divest` ; l'invariant tient avec une partie investie
-26. ⬜ Note pour le pitch et le mainnet : Etherfuse exige un KYC (porté par l'entité qui opère le pool), risque de taux faible sur des bons courts, délai de rachat éventuel
+#### Phase 4 — Rendement du capital libre → confié à Pricing (Lancelot)
+Le vault expose `capacity()` et `total_assets()` ; si Lancelot ajoute le placement, se mettre d'accord sur l'interface `invest` / `divest` / `value` dans `vault.rs`.
 
 #### Phase 5 — Robustesse Soroban
 27. ⬜ `extend_ttl` sur l'instance, les parts et les expositions
-28. ⬜ Événements : `deposit`, `withdraw`, `invest`, `divest`, `rebalance`
+28. ⬜ Événements : `deposit`, `withdraw`
 29. ⬜ Multiplications en `checked_mul` (montants × prix en i128), arrondis toujours en faveur du pool
-30. ⬜ Fonctions admin : `set_buffer_bps`, `set_currency_limit`, `set_yield_adapter` (avec `require_auth`)
+30. ⬜ Fonctions admin : `set_currency_limit` (avec `require_auth`)
 
 #### Phase 6 — Intégration
-31. ⬜ `setup-testnet.sh` : déployer `mock-stablebond`, brancher l'adaptateur, faire le dépôt du LP via `deposit_lp` (et plus seulement un envoi d'USDC)
-32. ⬜ Mettre à jour le README : Etherfuse remplace Blend (architecture, acteurs, roadmap), couvertures croisées via les jambes USD
+31. ⬜ `setup-testnet.sh` : faire le dépôt du LP via `deposit_lp` (et plus seulement un envoi d'USDC)
+32. ⬜ Mettre à jour le README : vault 100 % USDC, parts LP, règle de capacité
 
 ### Front (tout `front/`)
 1. ⬜ `shared/wallet.ts` : connexion Freighter via Stellar Wallets Kit (`connect`, `getAddress`, `signTransaction`)
@@ -122,7 +113,7 @@ Checklist cochable : https://claude.ai/artifact/9hWHDQW8siGsCBVb3TZHmY
    - comparaison « sans protection / avec protection » après le crash
 5. ⬜ `pricing/QuoteCard.tsx` : spot réel Reflector, prix figé, marge à déposer (appel `quote`)
 6. ⬜ `pricing/CrashButton.tsx` : `set_price` sur le mock (compte admin), le peso monte de 12 %
-7. ⬜ `vault/PoolPanel.tsx` : capital total, réservé, libre, **investi en USTRY et rendement**, prix de la part, position du LP, **exposition nette par devise** (graphique), indicateur « solvable », déposer / retirer (compte `fx-lp`)
+7. ⬜ `vault/PoolPanel.tsx` : capital total, réservé, libre, prix de la part, position du LP, **exposition nette par devise** (graphique), indicateur « solvable », déposer / retirer (compte `fx-lp`)
 
 Commencer avec des données factices, brancher le contrat après le merge.
 
@@ -159,7 +150,7 @@ Commencer avec des données factices, brancher le contrat après le merge.
 - ⬜ 🔴 Script de la vidéo en 5 temps (voir § Démo), à livrer à Hugo dimanche soir
 - ⬜ Expliquer honnêtement les 2 signatures (`settle` puis path payment) : une transaction Soroban ne peut pas contenir d'opération classique ; version atomique en roadmap
 
-## Pricing — ? ⭐ prioritaire
+## Pricing — Lancelot ⭐ prioritaire
 
 Un prix faux = arbitrage contre le pool : c'est ce qui rend le produit crédible face à un jury finance.
 
@@ -177,12 +168,31 @@ Un prix faux = arbitrage contre le pool : c'est ce qui rend le produit crédible
 2. ⬜ Juste avant la vidéo : donner à Hugo la commande pour aligner le prix du mock sur le vrai spot Reflector (c'est lui qui la lance, avec `fx-admin`) ; prévenir Paiement pour l'offre DEX
 3. ⬜ Donner à Hugo la lecture du spot Reflector côté front (contrat, `Asset::Other("MXN")`, conversion des 14 décimales) pour `QuoteCard`
 
+### Rendement du capital libre (Etherfuse, indexé sur les bons du Trésor US)
+Touche `vault.rs` : interface à convenir avec Hugo, c'est lui qui l'intègre dans le vault.
+
+0. ⬜ Décision : USDC pur (simple, les LPs ne gagnent que le spread) ou placement USTRY (~4 %/an en plus, KYC et délai de rachat en vrai). Regarder le sandbox d'API Etherfuse (`api.sand.etherfuse.com`)
+19. ⬜ Interface d'adaptateur de rendement : `invest(montant)`, `divest(montant)`, `value()` (pour pouvoir changer de source plus tard : Etherfuse, Blend…)
+20. ⬜ Contrat `contracts/mock-stablebond` pour le testnet : token USTRY dont la valeur de rachat monte avec le temps (~4 %/an), `buy(usdc)` / `redeem(ustry)`
+21. ⬜ `total_assets()` = USDC liquide (hors marges) + quantité d'USTRY × prix ; le capital des LPs devient calculé, et le rendement fait monter le prix de la part
+22. ⬜ Coussin de liquidité : garder en USDC au moins `max(Reserved, x % du capital)` pour payer les règlements et les retraits ; n'investir que le surplus
+23. ⬜ `rebalance()` permissionless : investit ou désinvestit pour revenir au coussin cible
+24. ⬜ Désinvestissement automatique quand un retrait ou un règlement dépasse le liquide
+25. ⬜ Tests : le rendement fait monter le prix de la part ; un retrait plus gros que le liquide déclenche `divest` ; l'invariant tient avec une partie investie
+26. ⬜ Note pour le pitch et le mainnet : Etherfuse exige un KYC (porté par l'entité qui opère le pool), risque de taux faible sur des bons courts, délai de rachat éventuel
+
 ### Pitch
 1. ⬜ Slide « le produit est un tunnel de change » : collar symétrique centré sur F, valeur ≈ 0 à l'ouverture, donc le spread rémunère le pool
 2. ⬜ `sim/` : notebook P&L de Lucía selon le mouvement du peso, avec et sans protection (graphique pour le deck) ; calibrer spread et plafonds minimum avec la volatilité de chaque devise
 3. ⬜ Réponses aux objections : plafond vs mouvements de 15 % · marge immobilisée vs banque · anti-sélection (limites par devise, skew en roadmap) · taux d'intérêt en dur (lecture onchain en roadmap) · réglementation des dérivés (MVP testnet, KYC via anchors en roadmap)
 
 ---
+
+## À dire dans la présentation
+
+- **Devises :** la démo utilise les devises que Reflector couvre sur testnet (EUR, GBP, CHF, CAD, MXN, ARS, BRL, THB). Sur mainnet, toute devise couverte par l'oracle s'ajoute sans changer le contrat.
+- **Etherfuse :** pas d'actifs sur le testnet Stellar, donc on émet nos propres actifs de test ; en production, le capital libre passe par Etherfuse (stablebonds indexés sur les bons du Trésor US).
+- **Couvertures croisées** (ex. MXN → EUR) : en roadmap. Le modèle « une jambe par devise contre USD » les rend naturelles : chaque jambe compte dans l'exposition de sa devise.
 
 ## Démo (vidéo de 3 min)
 
