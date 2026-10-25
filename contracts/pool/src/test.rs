@@ -21,7 +21,9 @@ fn pricing_min_cap() {}
 
 // ---- Paiement ----
 
-use crate::{hedge, DataKey, Hedge, Pool, PoolClient, Side};
+use crate::hedge::{self, HedgeError};
+use crate::vault::VaultError;
+use crate::{Hedge, Pool, PoolClient, Side};
 use mock_oracle::{Asset as OracleAsset, MockOracle, MockOracleClient};
 use soroban_sdk::testutils::{Address as _, Events as _, Ledger};
 use soroban_sdk::token::{StellarAssetClient, TokenClient};
@@ -147,41 +149,20 @@ const LUCIA_START: i128 = 2_000_000_000_000;
 /// Échéance de la couverture, en secondes après l'ouverture.
 const MATURITY_IN: u64 = 60;
 
-/// Met le capital des LPs dans le pool (en attendant `deposit_lp` du Vault).
+/// Le LP dépose son capital dans le pool (vrai `deposit_lp` du Vault).
 fn fund_pool(s: &Setup) {
-    let pool_id = s.pool.address.clone();
-    StellarAssetClient::new(&s.env, &s.usdc.address).mint(&pool_id, &LP_CAPITAL);
-    s.env.as_contract(&pool_id, || {
-        s.env.storage().instance().set(&DataKey::TotalDeposits, &LP_CAPITAL);
-    });
+    s.pool.deposit_lp(&s.lp, &LP_CAPITAL);
 }
 
-/// Place une couverture ouverte dans le pool sans passer par `open` (teste `settle` seul) :
-/// capital LP et marge de Lucía dans le contrat, `Reserved` = marge. Retourne son id.
-fn seed_hedge(s: &Setup, side: Side) -> u64 {
-    let pool_id = s.pool.address.clone();
+/// Pool financé puis couverture de la démo ouverte par Lucía dans le sens `side`. Retourne son id.
+fn open_funded(s: &Setup, side: Side) -> u64 {
     fund_pool(s);
-    s.usdc.transfer(&s.lucia, &pool_id, &MARGIN);
+    s.pool.open_hedge(&s.lucia, &s.supplier, &Symbol::new(&s.env, "MXN"), &side, &NOTIONAL, &MATURITY_IN, &1000)
+}
 
-    let hedge = Hedge {
-        owner: s.lucia.clone(),
-        supplier: s.supplier.clone(),
-        currency: Symbol::new(&s.env, "MXN"),
-        side,
-        notional: NOTIONAL,
-        locked_rate: LOCKED,
-        cap_bps: 1000,
-        margin: MARGIN,
-        maturity: s.env.ledger().timestamp() + MATURITY_IN,
-        settled: false,
-    };
-    s.env.as_contract(&pool_id, || {
-        s.env.storage().persistent().set(&DataKey::Hedge(0), &hedge);
-        let i = s.env.storage().instance();
-        i.set(&DataKey::Reserved, &MARGIN);
-        i.set(&DataKey::NextId, &1u64);
-    });
-    0
+/// Code d'erreur de contrat tel que le reçoit le client (`try_*` → `Err(Ok(..))`).
+fn contract_err(code: u32) -> soroban_sdk::Error {
+    soroban_sdk::Error::from_contract_error(code)
 }
 
 /// Avance le ledger à l'échéance et fixe le cours MXN du jour.
@@ -190,12 +171,10 @@ fn at_maturity(s: &Setup, price: i128) {
     set_spot(s, price);
 }
 
-/// (TotalDeposits, Reserved) du pool.
+/// (capital des LPs, capital réservé) du pool, lus par les points d'entrée publics du Vault.
 fn pool_books(s: &Setup) -> (i128, i128) {
-    s.env.as_contract(&s.pool.address, || {
-        let i = s.env.storage().instance();
-        (i.get(&DataKey::TotalDeposits).unwrap(), i.get(&DataKey::Reserved).unwrap())
-    })
+    let total = s.pool.total_assets();
+    (total, total - s.pool.capacity())
 }
 
 /// Vérifie l'état après `settle` : versement à Lucía, P&L du pool, capital libéré, couverture close.
@@ -209,10 +188,10 @@ fn assert_settled(s: &Setup, id: u64, paid: i128, payout: i128, pool_pnl: i128) 
 }
 
 #[test]
-#[ignore = "attend Vault + Pricing"]
+#[ignore = "attend Pricing"]
 fn settle_currency_up_pool_pays() {
     let s = setup();
-    let id = seed_hedge(&s, Side::BuyCurrency);
+    let id = open_funded(&s, Side::BuyCurrency);
     at_maturity(&s, 5_940_000_000_000); // +8 %
 
     // marge 5 487 + P&L 4 530 = 10 017 USDC
@@ -221,10 +200,10 @@ fn settle_currency_up_pool_pays() {
 }
 
 #[test]
-#[ignore = "attend Vault + Pricing"]
+#[ignore = "attend Pricing"]
 fn settle_currency_down_user_pays() {
     let s = setup();
-    let id = seed_hedge(&s, Side::BuyCurrency);
+    let id = open_funded(&s, Side::BuyCurrency);
     at_maturity(&s, 5_060_000_000_000); // −8 %
 
     // marge 5 487 − perte 4 270 = 1 217 USDC
@@ -233,10 +212,10 @@ fn settle_currency_down_user_pays() {
 }
 
 #[test]
-#[ignore = "attend Vault + Pricing"]
+#[ignore = "attend Pricing"]
 fn settle_beyond_cap_is_capped() {
     let s = setup();
-    let id = seed_hedge(&s, Side::BuyCurrency);
+    let id = open_funded(&s, Side::BuyCurrency);
     at_maturity(&s, 6_325_000_000_000); // +15 %
 
     // écart 8 380 borné à la marge : 2 × 5 487 = 10 974 USDC
@@ -245,10 +224,10 @@ fn settle_beyond_cap_is_capped() {
 }
 
 #[test]
-#[ignore = "attend Vault + Pricing"]
+#[ignore = "attend Pricing"]
 fn settle_total_loss_pays_nothing() {
     let s = setup();
-    let id = seed_hedge(&s, Side::BuyCurrency);
+    let id = open_funded(&s, Side::BuyCurrency);
     at_maturity(&s, 4_675_000_000_000); // −15 %
 
     // perte bornée à la marge : rien à rendre, toute la marge va au pool
@@ -257,10 +236,10 @@ fn settle_total_loss_pays_nothing() {
 }
 
 #[test]
-#[ignore = "attend Vault + Pricing"]
+#[ignore = "attend Pricing"]
 fn settle_sell_side() {
     let s = setup();
-    let id = seed_hedge(&s, Side::SellCurrency);
+    let id = open_funded(&s, Side::SellCurrency);
     at_maturity(&s, 5_060_000_000_000); // −8 %, l'exportateur est protégé
 
     // marge 5 487 + P&L 4 270 = 9 757 USDC
@@ -269,23 +248,23 @@ fn settle_sell_side() {
 }
 
 #[test]
-#[ignore = "attend Vault + Pricing"]
+#[ignore = "attend Pricing"]
 fn settle_guards() {
     let s = setup();
-    let id = seed_hedge(&s, Side::BuyCurrency);
+    let id = open_funded(&s, Side::BuyCurrency);
 
     // avant l'échéance
     s.env.ledger().set_timestamp(s.env.ledger().timestamp() + MATURITY_IN - 1);
-    assert!(s.pool.try_settle(&id).is_err());
+    assert_eq!(s.pool.try_settle(&id), Err(Ok(contract_err(HedgeError::NotMatured as u32))));
 
     // id inconnu
-    assert!(s.pool.try_settle(&42).is_err());
+    assert_eq!(s.pool.try_settle(&42), Err(Ok(contract_err(HedgeError::UnknownHedge as u32))));
 
     // à l'échéance pile : OK, puis refusé une deuxième fois
     s.env.ledger().set_timestamp(s.env.ledger().timestamp() + 1);
     set_spot(&s, SPOT_0);
     s.pool.settle(&id);
-    assert!(s.pool.try_settle(&id).is_err());
+    assert_eq!(s.pool.try_settle(&id), Err(Ok(contract_err(HedgeError::AlreadySettled as u32))));
     assert_eq!(s.usdc.balance(&s.lucia), LUCIA_START - MARGIN + MARGIN + hedge::pnl(Side::BuyCurrency, NOTIONAL, LOCKED, SPOT_0, MARGIN));
 }
 
@@ -303,7 +282,7 @@ fn open_demo(s: &Setup) -> u64 {
 }
 
 #[test]
-#[ignore = "attend Vault + Pricing"]
+#[ignore = "attend Pricing"]
 fn open_locks_rate_and_takes_margin() {
     let s = setup();
     fund_pool(&s);
@@ -339,7 +318,7 @@ fn open_locks_rate_and_takes_margin() {
 }
 
 #[test]
-#[ignore = "attend Vault + Pricing"]
+#[ignore = "attend Pricing"]
 fn open_ids_increment() {
     let s = setup();
     fund_pool(&s);
@@ -349,7 +328,7 @@ fn open_ids_increment() {
 }
 
 #[test]
-#[ignore = "attend Vault + Pricing"]
+#[ignore = "attend Pricing"]
 fn open_margin_follows_cap() {
     let s = setup();
     fund_pool(&s);
@@ -360,23 +339,30 @@ fn open_margin_follows_cap() {
 }
 
 #[test]
-#[ignore = "attend Vault + Pricing"]
+#[ignore = "attend Pricing"]
 fn open_refusals() {
     let s = setup();
     let mxn = Symbol::new(&s.env, "MXN");
     let buy = Side::BuyCurrency;
 
-    // pool vide : capacité insuffisante
-    assert!(s.pool.try_open_hedge(&s.lucia, &s.supplier, &mxn, &buy, &NOTIONAL, &MATURITY_IN, &1000).is_err());
+    // pool vide : capacité insuffisante (erreur du Vault)
+    assert_eq!(
+        s.pool.try_open_hedge(&s.lucia, &s.supplier, &mxn, &buy, &NOTIONAL, &MATURITY_IN, &1000),
+        Err(Ok(contract_err(VaultError::InsufficientCapacity as u32)))
+    );
 
     fund_pool(&s);
-    // plafond sous le minimum de la devise
+    // plafond sous le minimum de la devise (erreur de Pricing, code à venir)
     assert!(s.pool.try_open_hedge(&s.lucia, &s.supplier, &mxn, &buy, &NOTIONAL, &MATURITY_IN, &400).is_err());
     // notionnel nul ou négatif
-    assert!(s.pool.try_open_hedge(&s.lucia, &s.supplier, &mxn, &buy, &0, &MATURITY_IN, &1000).is_err());
-    assert!(s.pool.try_open_hedge(&s.lucia, &s.supplier, &mxn, &buy, &-NOTIONAL, &MATURITY_IN, &1000).is_err());
+    let invalid_notional = Err(Ok(contract_err(HedgeError::InvalidNotional as u32)));
+    assert_eq!(s.pool.try_open_hedge(&s.lucia, &s.supplier, &mxn, &buy, &0, &MATURITY_IN, &1000), invalid_notional);
+    assert_eq!(s.pool.try_open_hedge(&s.lucia, &s.supplier, &mxn, &buy, &-NOTIONAL, &MATURITY_IN, &1000), invalid_notional);
     // durée nulle
-    assert!(s.pool.try_open_hedge(&s.lucia, &s.supplier, &mxn, &buy, &NOTIONAL, &0, &1000).is_err());
+    assert_eq!(
+        s.pool.try_open_hedge(&s.lucia, &s.supplier, &mxn, &buy, &NOTIONAL, &0, &1000),
+        Err(Ok(contract_err(HedgeError::InvalidDuration as u32)))
+    );
 
     // rien n'a bougé
     assert_eq!(s.usdc.balance(&s.lucia), LUCIA_START);
@@ -387,7 +373,7 @@ fn open_refusals() {
 }
 
 #[test]
-#[ignore = "attend Vault + Pricing"]
+#[ignore = "attend Pricing"]
 fn open_then_settle_full_flow() {
     let s = setup();
     fund_pool(&s);
@@ -399,7 +385,7 @@ fn open_then_settle_full_flow() {
 }
 
 #[test]
-#[ignore = "attend Vault + Pricing"]
+#[ignore = "attend Pricing"]
 fn open_emits_event() {
     let s = setup();
     fund_pool(&s);
@@ -425,10 +411,10 @@ fn open_emits_event() {
 }
 
 #[test]
-#[ignore = "attend Vault + Pricing"]
+#[ignore = "attend Pricing"]
 fn settle_emits_event() {
     let s = setup();
-    let id = seed_hedge(&s, Side::BuyCurrency);
+    let id = open_funded(&s, Side::BuyCurrency);
     at_maturity(&s, 5_940_000_000_000); // +8 %
     s.pool.settle(&id);
 
@@ -442,5 +428,38 @@ fn settle_emits_event() {
     assert_eq!(
         s.env.events().all().filter_by_contract(&s.pool.address),
         [expected.to_xdr(&s.env, &s.pool.address)]
+    );
+}
+
+#[test]
+#[ignore = "attend Pricing"]
+fn open_and_settle_track_exposure() {
+    let s = setup();
+    let mxn = Symbol::new(&s.env, "MXN");
+    let id = open_funded(&s, Side::BuyCurrency);
+
+    // ouverture : notionnel 54 870 USDC au taux bloqué et marge côté acheteur
+    let e = s.pool.exposure(&mxn);
+    assert_eq!((e.buy_notional, e.buy_margin, e.sell_notional, e.sell_margin), (548_700_000_000, MARGIN, 0, 0));
+    assert_eq!(e.net_notional, 548_700_000_000);
+
+    // règlement : l'exposition retombe à zéro
+    at_maturity(&s, SPOT_0);
+    s.pool.settle(&id);
+    let e = s.pool.exposure(&mxn);
+    assert_eq!((e.buy_notional, e.buy_margin, e.net_notional), (0, 0, 0));
+}
+
+#[test]
+#[ignore = "attend Pricing"]
+fn open_refused_over_currency_limit() {
+    let s = setup();
+    fund_pool(&s);
+    let mxn = Symbol::new(&s.env, "MXN");
+    // limite MXN de l'admin : 5 % du capital = 5 000 USDC de marges, sous la marge de 5 487
+    s.pool.set_currency_limit(&mxn, &500);
+    assert_eq!(
+        s.pool.try_open_hedge(&s.lucia, &s.supplier, &mxn, &Side::BuyCurrency, &NOTIONAL, &MATURITY_IN, &1000),
+        Err(Ok(contract_err(VaultError::CurrencyLimitExceeded as u32)))
     );
 }

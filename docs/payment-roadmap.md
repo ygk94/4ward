@@ -57,6 +57,9 @@ Règles de calcul : tout en `i128`, **arrondis en faveur du pool** (P&L payé pa
 - ✅ Tests de refus : plafond sous le minimum, capacité du pool insuffisante, notionnel ou durée ≤ 0, sans signature du owner
 - ✅ Code : `require_auth(owner)`, `check_cap`, `forward_rate`, calcul de marge, transfert owner → contrat, `vault::reserve`, `NextId`, stockage persistant + `extend_ttl`, retour de l'id
 - ✅ Test bout en bout `open_then_settle_full_flow` (ouverture puis règlement à +8 %)
+- ✅ Branché sur le vrai Vault (`main`) : `vault::open_position(&hedge)` dans `open`, `vault::close_position(&hedge)` dans `settle` (exposition par devise, limite par devise #108)
+- ✅ Codes d'erreur `HedgeError` 200+ (`UnknownHedge`, `AlreadySettled`, `NotMatured`, `InvalidNotional`, `InvalidDuration`) : les textes de `panic!` sont effacés dans le WASM, le front a besoin des codes
+- ✅ Fixtures de test sur les vrais appels (`deposit_lp`, `open_hedge`, `total_assets`, `capacity`) ; tests marqués `#[ignore = "attend Pricing"]`
 - ⬜ Refus « sans signature du owner » : vérifié via `env.auths()` (Lucía a signé), pas de test de refus explicite
 
 ## 5. Événements
@@ -75,7 +78,7 @@ Règles de calcul : tout en `i128`, **arrondis en faveur du pool** (P&L payé pa
 ## 7. Parcours CLI testnet 🔴 pour le front d'Hugo
 
 - ⬜ Montrer à Clément comment suivre chaque transaction : hash dans la CLI, page stellar.expert (opérations, événements, appels de contrat), soldes des comptes avant / après
-- ⬜ Répétition sur un pool à moi (déployé depuis ma branche avec stubs) si le merge tarde
+- ✅ Répétition sur un pool à moi : les 6 transactions validées (dépôt LP, `open_hedge`, crash +8 %, `settle` signé par le fournisseur, réalignement DEX, path payment de 1 000 000 MXN) ; coût total de Lucía = 54 870 USDC (déployé depuis ma branche avec stubs) si le merge tarde
 - ⬜ Commandes exactes, dans l'ordre : `deposit_lp` (fx-lp) → `quote` → `open_hedge` (fx-lucia, échéance ~60 s) → crash du mock → `settle` → `stellar tx new path-payment-strict-receive` USDC → MXN vers fx-supplier pour 1 000 000 MXN pile
 - ⬜ Pour Hugo, le déroulé des appels côté front :
   - montants à afficher : prix figé, marge déposée, P&L, montant versé par `settle`, coût total réel (= prix figé dans le plafond)
@@ -84,7 +87,8 @@ Règles de calcul : tout en `i128`, **arrondis en faveur du pool** (P&L payé pa
 
 ## 8. DEX MXN/USDC
 
-- ⬜ Vérifier la profondeur de l'offre (100 000 000 MXN à 0,055) pour 1 000 000 MXN
+- ✅ Vérifier la profondeur de l'offre (100 000 000 MXN à 0,055) pour 1 000 000 MXN
+- ✅ Réalignement testé : `manage-sell-offer --offer-id <id> --price "297:5000"` (0,0594)
 - ⬜ 🔴 Après le crash +12 %, **réaligner l'offre sur le nouveau prix du mock**, sinon le coût total de Lucía ne tombe plus sur le prix figé. Script `scripts/align-dex.sh` (nouveau fichier, le mien)
 
 ## 9. Après le merge
@@ -98,9 +102,10 @@ Règles de calcul : tout en `i128`, **arrondis en faveur du pool** (P&L payé pa
 
 | Avec | Sujet |
 |---|---|
-| Pricing | `spot` refuse un prix de plus de 300 s : le mock doit être remis à jour juste avant le `settle` de la démo |
+| Pricing + Hugo | `spot` refuse un prix de plus de 300 s, et `forward_rate` le lit : le prix du mock doit être remis à jour juste avant **`open_hedge`** et juste avant **`settle`** dans la démo (vu sur testnet : prix posé 765 s avant l'ouverture) |
+| Pricing | Erreurs de Pricing en `#[contracterror]` (codes 300+ ?) pour que le front distingue « plafond trop bas » / « prix trop ancien » |
 | Pricing | Formule du forward : le README a raison (`r_USD / r_devise`), le transcript du council est inversé |
 | Pricing | Prix du mock après crash → je réaligne l'offre DEX |
-| Vault | Ordre `release` puis `book_gain` / `book_loss` ; c'est `hedge.rs` qui fait le transfert USDC vers la PME |
+| Vault | ✅ Réglé : `open_position` / `close_position`, transfert USDC vers la PME fait par `hedge.rs` |
 | Vault + Pricing | `mock-oracle` ajouté en dev-dependency du pool |
 | Hugo | Script vidéo, commandes CLI, déroulé des appels, PR |
