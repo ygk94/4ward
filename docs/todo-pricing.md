@@ -133,7 +133,7 @@ Dépend de `shared/wallet.ts` et `shared/contract.ts` (Hugo, 🔴). En attendant
   ```
 - ⬜ `pricing/oracle.ts` : `readSpot(contractId, currency)` → simulation de `lastprice({Other: currency})` sur **Reflector** (`config.reflectorFxId`) ET sur le mock (`config.mockOracleId`). Affichage : « Cours réel (Reflector) : 1 MXN = 0,0550 $ » + « Cours de démo (oracle de test) » quand ils divergent.
 - ⬜ `pricing/quote.ts` : simulation de `pool.quote(currency, side, notional, duration, cap)` → `Quote { spot, forward_rate, usdc_cost, margin }` ; décodage des `i128` (14 et 7 déc.) en helpers `fmtPrice14`, `fmtAmount7`.
-- ⬜ Rendu, zéro jargon : « Prix figé : vous paierez **54 870 USDC** quoi qu'il arrive » · « Protection ±10 % » · « Dépôt de garantie : 5 487 USDC (restitué à l'échéance, ± l'écart) » · petit texte « taux à terme = cours du jour ajusté de l'écart de taux MXN 7 % / USD 4 % ».
+- ⬜ Rendu, zéro jargon : « Prix figé : vous paierez **54 873 USDC** quoi qu'il arrive » · « Protection ±10 % » · « Dépôt de garantie : 5 487 USDC (restitué à l'échéance, ± l'écart) » · petit texte « taux à terme = cours du jour ajusté de l'écart de taux MXN 7 % / USD 4 % ».
 - ⬜ États : chargement, erreur (`cap below minimum` → message « protection minimale pour le peso : 5 % »), rafraîchissement quand les props changent (debounce 300 ms).
 - ⬜ Exposer `onQuote` pour que Paiement récupère `margin` (montant à approuver dans Freighter).
 
@@ -221,7 +221,8 @@ Dépend de `shared/wallet.ts` et `shared/contract.ts` (Hugo, 🔴). En attendant
 
 - ⬜ À Hugo : dev-dependency `mock-oracle` dans `contracts/pool/Cargo.toml` (ou accord pour que je l'ajoute)
 - ⬜ À Paiement : props de `<QuoteCard />` figées + `onQuote` ; signaler tout changement du prix mock (offre DEX)
-- ⬜ À Hugo : chiffre exact de `usdc_cost` pour le README (54 870 ?) et les 2 slides pricing
+- ✅ README corrigé : 54 873 USDC (25/10 soir)
+- ⬜ À Hugo : les slides pricing (§6)
 
 ---
 
@@ -238,6 +239,24 @@ Dépend de `shared/wallet.ts` et `shared/contract.ts` (Hugo, 🔴). En attendant
   - réglementation des dérivés → MVP testnet, KYC via anchors en roadmap
 
 ---
+
+## 7. Suites de la discussion « économie du pool » (25/10 soir)
+
+Le README a gagné les sections *Ce que paie la PME*, *Tranche senior et tranche junior*, *Où dort l'argent du pool* et *Couvrir le portefeuille, pas chaque contrat* (non commitées, sur `feat/pricing`). Conséquences pour Pricing :
+
+- ✅ Oracle : Reflector FX reste le choix (seul oracle de change SEP-40 sur Stellar). Mainnet `CBKGPWGKSKZF52CFHMTRR23TBWTPMRDIYZ4O2P5VS65BMHYH4DXMCJZC` = **24 devises** vérifiées onchain (EUR, GBP, CAD, JPY, CNY, HKD, KRW, INR, PHP, TRY, RUB, ZAR, MXN, BRL, ARS, COP, CLP, PEN, CRC, VES, NGN, KES, CDF, XAU), testnet = 9. Pyth = 2ᵉ source possible en roadmap (pull, non SEP-40) ; Chainlink, Band, DIA, RedStone : pas de change fiat confirmé sur Stellar.
+- ✅ `r_USD` = taux des bons du Trésor US tokenisés (~4 %, coût d'opportunité du capital mis en couverture) : cohérent avec `USD 400`, rien à changer dans le code.
+- ⬜ (option) `forward_rate` utilise `twap` de Reflector au lieu de `lastprice` pour le fixing de `settle` (parade anti-manipulation citée dans le README). Hors MVP si pas le temps.
+- ⬜ `QuoteCard` : afficher le **coût de la protection** (spread + rendement perdu sur la marge ≈ 0,6 % pour 90 j) à côté du prix figé.
+- ⬜ `sim/` : y déposer les simulations faites pendant la discussion (copies dans le scratchpad de Claude : `tranches2.py`, `lp_annual.py`), en plus de `pnl.py` (§4.2).
+- ⬜ Slides (§6), en plus des deux prévues :
+  - « Ce que paie la PME » : ~0,6 % pour 90 j vs forward bancaire 0,5-2 % (avec ligne de crédit) vs option ~2,6 % ;
+  - « Comment le pool se couvre » : netting → détention de la devise en CETES (le rendement local paie l'écart forward/spot) → limites ; couverture par portefeuille avec seuil ;
+  - « Senior / junior » : senior ~5 % protégé par construction, junior ~16 % avec netting (7,7 % sans) ;
+  - « 24 devises dès le mainnet » (liste Reflector).
+- ⬜ Objections, à ajouter au §6 :
+  - « Comment les LPs se couvrent ? » → netting, puis détention de la devise en obligations d'État tokenisées ; le reste (sauts, écarts oracle/DEX) est petit et payé par le spread ; jamais « couverture totale » ;
+  - « Le rendement LP bat-il un vault ? » → senior ≈ bons du Trésor + 1 pt ; le junior n'est bien payé qu'avec du netting, d'où le skew de prix.
 
 ## Ordre d'attaque
 
