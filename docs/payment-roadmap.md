@@ -60,7 +60,7 @@ Règles de calcul : tout en `i128`, **arrondis en faveur du pool** (P&L payé pa
 - ✅ Branché sur le vrai Vault (`main`) : `vault::open_position(&hedge)` dans `open`, `vault::close_position(&hedge)` dans `settle` (exposition par devise, limite par devise #108)
 - ✅ Codes d'erreur `HedgeError` 200+ (`UnknownHedge`, `AlreadySettled`, `NotMatured`, `InvalidNotional`, `InvalidDuration`) : les textes de `panic!` sont effacés dans le WASM, le front a besoin des codes
 - ✅ Fixtures de test sur les vrais appels (`deposit_lp`, `open_hedge`, `total_assets`, `capacity`) ; tests marqués `#[ignore = "attend Pricing"]`
-- ⬜ Refus « sans signature du owner » : vérifié via `env.auths()` (Lucía a signé), pas de test de refus explicite
+- ✅ Refus sans la signature du owner : `open_refused_without_owner_signature` (signé par le fournisseur ou par personne → refusé, rien ne bouge ; témoin signé par Lucía → passe ; le test casse si on retire `require_auth`) et `settle_needs_no_signature`
 
 ## 5. Événements
 

@@ -418,9 +418,9 @@ use crate::hedge::{self, HedgeError};
 use crate::vault::VaultError;
 use crate::{Hedge, Pool, PoolClient, Side};
 use mock_oracle::{Asset as OracleAsset, MockOracle, MockOracleClient};
-use soroban_sdk::testutils::{Address as _, Events as _, Ledger};
+use soroban_sdk::testutils::{Address as _, Events as _, Ledger, MockAuth, MockAuthInvoke};
 use soroban_sdk::token::{StellarAssetClient, TokenClient};
-use soroban_sdk::{Address, Env, Event, Symbol};
+use soroban_sdk::{Address, Env, Event, IntoVal, Symbol};
 
 /// 1 000 000 MXN (7 décimales).
 const NOTIONAL: i128 = 10_000_000_000_000;
@@ -929,4 +929,65 @@ fn accelerated_maturity_is_at_least_one_second() {
     // 60 s / 25 920 = 0 : l'échéance réelle reste dans le futur
     let id = open_demo(&s);
     assert_eq!(s.pool.get_hedge(&id).unwrap().maturity, now + 1);
+}
+
+#[test]
+fn open_refused_without_owner_signature() {
+    let s = setup();
+    fund_pool(&s);
+    let mxn = Symbol::new(&s.env, "MXN");
+
+    let open_args = (&s.lucia, &s.supplier, &mxn, Side::BuyCurrency, NOTIONAL, MATURITY_IN, 1000u32);
+    // signature attendue : `open_hedge`, et dedans le transfert de la marge Lucía → pool
+    let transfer = MockAuthInvoke {
+        contract: &s.usdc.address,
+        fn_name: "transfer",
+        args: (&s.lucia, &s.pool.address, HEDGE_MARGIN).into_val(&s.env),
+        sub_invokes: &[],
+    };
+    let open = MockAuthInvoke {
+        contract: &s.pool.address,
+        fn_name: "open_hedge",
+        args: open_args.into_val(&s.env),
+        sub_invokes: core::slice::from_ref(&transfer),
+    };
+    let signed_by = |who| MockAuth { address: who, invoke: &open };
+
+    // le fournisseur signe à la place de Lucía : refusé
+    let by_supplier = s
+        .pool
+        .mock_auths(&[signed_by(&s.supplier)])
+        .try_open_hedge(&s.lucia, &s.supplier, &mxn, &Side::BuyCurrency, &NOTIONAL, &MATURITY_IN, &1000);
+    assert!(by_supplier.is_err());
+
+    // personne ne signe : refusé
+    let unsigned = s
+        .pool
+        .set_auths(&[])
+        .try_open_hedge(&s.lucia, &s.supplier, &mxn, &Side::BuyCurrency, &NOTIONAL, &MATURITY_IN, &1000);
+    assert!(unsigned.is_err());
+
+    // rien n'a bougé
+    assert_eq!(s.usdc.balance(&s.lucia), LUCIA_START);
+    assert_eq!(pool_books(&s), (LP_CAPITAL, 0));
+
+    // témoin : le même appel signé par Lucía passe, donc les refus venaient bien de la signature
+    let id = s
+        .pool
+        .mock_auths(&[signed_by(&s.lucia)])
+        .open_hedge(&s.lucia, &s.supplier, &mxn, &Side::BuyCurrency, &NOTIONAL, &MATURITY_IN, &1000);
+    assert_eq!(s.pool.get_hedge(&id).unwrap().owner, s.lucia);
+    assert_eq!(s.usdc.balance(&s.lucia), LUCIA_START - HEDGE_MARGIN);
+}
+
+#[test]
+fn settle_needs_no_signature() {
+    let s = setup();
+    let id = open_funded(&s, Side::BuyCurrency);
+    at_maturity(&s, SPOT_0);
+
+    // règlement sans aucune signature : n'importe qui peut le déclencher
+    let paid = s.pool.set_auths(&[]).settle(&id);
+    assert_eq!(paid, HEDGE_MARGIN + hedge::pnl(Side::BuyCurrency, NOTIONAL, HEDGE_LOCKED, SPOT_0, HEDGE_MARGIN));
+    assert!(s.pool.get_hedge(&id).unwrap().settled);
 }
