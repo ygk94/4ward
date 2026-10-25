@@ -101,16 +101,21 @@ Une transaction Soroban ne peut pas contenir d'opération classique : le front e
 ### Interface du contrat
 
 ```rust
+// Vault
 fn deposit_lp(lp: Address, amount: i128) -> i128;
 fn withdraw(lp: Address, amount: i128) -> i128;          // limité au capital non réservé
-fn quote(currency: Symbol, side: Side, notional: i128, duration_secs: u64) -> Quote;
-fn open_hedge(owner: Address, currency: Symbol, side: Side,
+fn capacity() -> i128;
+fn lp_balance(lp: Address) -> i128;
+// Pricing
+fn quote(currency: Symbol, side: Side, notional: i128, duration_secs: u64, cap_bps: u32) -> Quote;
+fn set_rate(currency: Symbol, rate_bps: u32);            // admin
+fn set_min_cap(currency: Symbol, cap_bps: u32);          // admin
+fn set_spread(spread_bps: u32);                          // admin
+// Couvertures / paiement
+fn open_hedge(owner: Address, supplier: Address, currency: Symbol, side: Side,
               notional: i128, duration_secs: u64, cap_bps: u32) -> u64;
 fn settle(hedge_id: u64) -> i128;                        // permissionless après l'échéance
 fn get_hedge(hedge_id: u64) -> Option<Hedge>;
-fn capacity() -> i128;
-fn set_rate(currency: Symbol, rate_bps: u32);            // admin
-fn set_min_cap(currency: Symbol, cap_bps: u32);          // admin
 ```
 
 ---
@@ -119,8 +124,8 @@ fn set_min_cap(currency: Symbol, cap_bps: u32);          // admin
 
 | Élément | ID |
 |---|---|
-| Contrat pool | `CAAN4KBEVYNTPN3IN5LOHO3D2HHGTBDALCVVVHOV5DMJVDVXH77XVZHP` |
-| mock-oracle (SEP-40) | `CAEYQDHI74ITRIVN2RVTMMP4TILH4YE74OYTVJVYSJXQJUZISDXSZLRI` |
+| Contrat pool | `CBEUIYUGVJFHRZORP4XCMPMLCISVLAAMK4OCDLILHP3HKGX2M3UB6CJR` |
+| mock-oracle (SEP-40) | `CAJB3DAOV7HMIZL4L3DFDAH4LGLC7JOM64G24KSEBAJRPKS465PLE6T2` |
 | Reflector FX (testnet) | `CCSSOHTBL3LEWUCBBEB5NJFC2OKFRC74OWEIJIZLRJBGAAU4VMU5NV4W` |
 | USDC de test (SAC) | `CCLMFOUKC7ZQ5OPFE67F5XUGCOWTVCOOVTKTEPQGEYKWWRRKJGNVR2OC` |
 | MXN de test (SAC) | `CAFK4PTVDK6Y33HWTSUPH57JV3G4YZFS6PL77FNGWOOMHBJJESYBMVMS` |
@@ -146,7 +151,7 @@ cd front && pnpm install && pnpm dev
 ## Structure
 
 ```
-contracts/pool         # pool LP + couvertures (interface figée, corps à écrire)
+contracts/pool         # vault.rs · pricing.rs · hedge.rs (interface figée, corps à écrire)
 contracts/mock-oracle  # oracle SEP-40 pilotable par l'admin (démo)
 front/                 # Vite + React + TS, stellar-sdk, Stellar Wallets Kit
 scripts/               # setup testnet

@@ -1,10 +1,25 @@
 #![no_std]
-//! Contrat principal : pool USDC des LPs + couvertures de change plafonnées (NDF réglé en USDC).
+//! Contrat principal : pool USDC des LPs + couvertures de change plafonnées.
 //!
-//! Squelette d'interface figé pour que front et contrat avancent en parallèle.
-//! Les corps sont à écrire, en commençant par `settle` (voir `test.rs`).
-//! Spec complète : README.md et docs/SPEC.md.
+//! Découpage par personne (voir TODO.md) :
+//! - `vault.rs`   — Vault : dépôts / retraits LP, capital réservé, flux USDC du pool
+//! - `pricing.rs` — Pricing : spot oracle, taux forward, spread, plafonds minimum
+//! - `hedge.rs`   — Paiement : ouverture et règlement des couvertures (marge, P&L, restitution)
+//!
+//! Ce fichier ne contient que les points d'entrée publics et les types partagés.
+//! Les fonctions `pub(crate)` entre modules sont le contrat d'interface entre vous :
+//! ne pas changer leur signature sans prévenir les deux autres.
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol};
+
+mod hedge;
+mod pricing;
+mod vault;
+
+/// Décimales de l'oracle (Reflector FX) : prix en USD par unité de devise.
+pub const PRICE_DECIMALS: u32 = 14;
+/// Décimales des montants (USDC et notionnels en devise, comme les actifs Stellar).
+pub const AMOUNT_DECIMALS: u32 = 7;
+pub const BPS: i128 = 10_000;
 
 /// Sens de la couverture, vu par l'utilisateur.
 #[contracttype]
@@ -19,26 +34,31 @@ pub enum Side {
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Quote {
-    /// Taux forward + spread, en USD par unité de devise, 14 décimales (comme l'oracle).
-    pub forward_rate: i128,
-    /// Coût total en USDC (7 décimales) au taux bloqué.
-    pub usdc_cost: i128,
-    /// Spot de l'oracle utilisé pour le calcul.
+    /// Spot de l'oracle (USD par unité, 14 décimales).
     pub spot: i128,
+    /// Taux forward spread inclus (USD par unité, 14 décimales) = taux bloqué.
+    pub forward_rate: i128,
+    /// Coût total en USDC (7 décimales) au taux bloqué : notional × forward_rate.
+    pub usdc_cost: i128,
+    /// Marge à déposer en USDC (7 décimales) pour le plafond demandé.
+    pub margin: i128,
 }
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Hedge {
     pub owner: Address,
+    /// Fournisseur à payer en devise à l'échéance (utilisé par le front pour le path payment).
+    pub supplier: Address,
     pub currency: Symbol,
     pub side: Side,
-    /// Montant en devise (ex. 1_000_000 MXN), en unités entières de devise.
+    /// Montant en devise, 7 décimales (1 000 000 MXN = 10_000_000_000_000).
     pub notional: i128,
+    /// Taux bloqué (USD par unité, 14 décimales).
     pub locked_rate: i128,
     /// Plafond = marge, en points de base (1000 = 10 %).
     pub cap_bps: u32,
-    /// Marge déposée en USDC (7 décimales).
+    /// Marge déposée en USDC (7 décimales). Égale au capital réservé dans le vault.
     pub margin: i128,
     /// Échéance, en secondes Unix (`env.ledger().timestamp()`).
     pub maturity: u64,
@@ -50,17 +70,24 @@ pub enum DataKey {
     Admin,
     Usdc,
     Oracle,
+    // -- pricing
     SpreadBps,
-    /// Taux d'intérêt annuel par devise, en bps (codés en dur pour le MVP).
+    /// Taux d'intérêt annuel par devise, en bps. `USD` inclus.
     Rate(Symbol),
     /// Plafond minimum par devise, en bps.
     MinCap(Symbol),
+    // -- vault
     LpBalance(Address),
     TotalDeposits,
-    /// Σ (notionnel en USDC × plafond) des couvertures ouvertes = perte max du pool.
+    /// Σ des marges des couvertures ouvertes = perte max du pool.
     Reserved,
+    // -- hedge
     NextId,
     Hedge(u64),
+}
+
+pub(crate) fn admin(env: &Env) -> Address {
+    env.storage().instance().get(&DataKey::Admin).unwrap()
 }
 
 #[contract]
@@ -79,67 +106,68 @@ impl Pool {
         s.set(&DataKey::NextId, &0u64);
     }
 
-    // ---- LPs ----
+    // ---- Vault ----
 
     /// Dépose des USDC dans le pool. Retourne le nouveau solde du LP.
-    pub fn deposit_lp(_env: Env, _lp: Address, _amount: i128) -> i128 {
-        panic!("TODO")
+    pub fn deposit_lp(env: Env, lp: Address, amount: i128) -> i128 {
+        vault::deposit(&env, &lp, amount)
     }
 
-    /// Retire des USDC, limité au capital non réservé (TotalDeposits - Reserved).
-    pub fn withdraw(_env: Env, _lp: Address, _amount: i128) -> i128 {
-        panic!("TODO")
+    /// Retire des USDC, limité au capital non réservé.
+    pub fn withdraw(env: Env, lp: Address, amount: i128) -> i128 {
+        vault::withdraw(&env, &lp, amount)
     }
-
-    // ---- Utilisateurs ----
-
-    /// Spot et F en USD par unité de devise : F = Spot × (1 + r_USD·t) / (1 + r_devise·t) ± spread.
-    pub fn quote(_env: Env, _currency: Symbol, _side: Side, _notional: i128, _duration_secs: u64) -> Quote {
-        panic!("TODO")
-    }
-
-    /// Ouvre une couverture : transfère la marge (notionnel USDC × cap_bps) et vérifie la capacité.
-    /// Retourne l'id de la position.
-    pub fn open_hedge(
-        _env: Env,
-        _owner: Address,
-        _currency: Symbol,
-        _side: Side,
-        _notional: i128,
-        _duration_secs: u64,
-        _cap_bps: u32,
-    ) -> u64 {
-        panic!("TODO")
-    }
-
-    /// Permissionless après l'échéance. Règle l'écart (taux bloqué vs spot oracle), borné par le plafond,
-    /// rend le reste de la marge au propriétaire. Retourne le montant versé au propriétaire.
-    pub fn settle(_env: Env, _hedge_id: u64) -> i128 {
-        panic!("TODO")
-    }
-
-    pub fn get_hedge(env: Env, hedge_id: u64) -> Option<Hedge> {
-        env.storage().persistent().get(&DataKey::Hedge(hedge_id))
-    }
-
-    // ---- Pool ----
 
     /// Capital encore disponible pour de nouvelles couvertures.
     pub fn capacity(env: Env) -> i128 {
-        let s = env.storage().instance();
-        let total: i128 = s.get(&DataKey::TotalDeposits).unwrap_or(0);
-        let reserved: i128 = s.get(&DataKey::Reserved).unwrap_or(0);
-        total - reserved
+        vault::capacity(&env)
     }
 
-    // ---- Admin (MVP) ----
-
-    pub fn set_rate(_env: Env, _currency: Symbol, _rate_bps: u32) {
-        panic!("TODO")
+    pub fn lp_balance(env: Env, lp: Address) -> i128 {
+        vault::balance(&env, &lp)
     }
 
-    pub fn set_min_cap(_env: Env, _currency: Symbol, _cap_bps: u32) {
-        panic!("TODO")
+    // ---- Pricing ----
+
+    pub fn quote(env: Env, currency: Symbol, side: Side, notional: i128, duration_secs: u64, cap_bps: u32) -> Quote {
+        pricing::quote(&env, &currency, side, notional, duration_secs, cap_bps)
+    }
+
+    pub fn set_rate(env: Env, currency: Symbol, rate_bps: u32) {
+        pricing::set_rate(&env, &currency, rate_bps)
+    }
+
+    pub fn set_min_cap(env: Env, currency: Symbol, cap_bps: u32) {
+        pricing::set_min_cap(&env, &currency, cap_bps)
+    }
+
+    pub fn set_spread(env: Env, spread_bps: u32) {
+        pricing::set_spread(&env, spread_bps)
+    }
+
+    // ---- Couvertures / paiement ----
+
+    /// Ouvre une couverture et retourne son id.
+    pub fn open_hedge(
+        env: Env,
+        owner: Address,
+        supplier: Address,
+        currency: Symbol,
+        side: Side,
+        notional: i128,
+        duration_secs: u64,
+        cap_bps: u32,
+    ) -> u64 {
+        hedge::open(&env, &owner, &supplier, &currency, side, notional, duration_secs, cap_bps)
+    }
+
+    /// Permissionless après l'échéance. Retourne le montant USDC versé au propriétaire.
+    pub fn settle(env: Env, hedge_id: u64) -> i128 {
+        hedge::settle(&env, hedge_id)
+    }
+
+    pub fn get_hedge(env: Env, hedge_id: u64) -> Option<Hedge> {
+        hedge::get(&env, hedge_id)
     }
 }
 
