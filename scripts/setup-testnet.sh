@@ -69,6 +69,19 @@ POOL=$(stellar contract deploy --wasm target/wasm32v1-none/release/pool.wasm \
   --admin $ADMIN --usdc $USDC_SAC --oracle $ORACLE --spread_bps $SPREAD_BPS)
 echo "   pool = $POOL"
 
+say "Dépôt du LP dans le pool (1 000 000 USDC contre des parts)"
+LP_DEPOSIT=10000000000000   # 1 000 000 USDC, 7 décimales
+LP_USDC=$(stellar contract invoke --id $USDC_SAC --source-account $LP --network $NET --quiet -- \
+  balance --id $LP | tr -d '"')
+if [ "$LP_USDC" -lt "$LP_DEPOSIT" ]; then
+  echo "   $LP n'a que $LP_USDC stroops d'USDC (il en faut $LP_DEPOSIT) : dépôt sauté."
+  echo "   Relancer le script (il renvoie de l'USDC au LP) ou déposer à la main avec deposit_lp."
+else
+  SHARES=$(stellar contract invoke --id $POOL --source-account $LP --network $NET --quiet -- \
+    deposit_lp --lp $LP --amount $LP_DEPOSIT | tr -d '"')
+  echo "   parts de $LP = $SHARES"
+fi
+
 REFLECTOR_FX=CCSSOHTBL3LEWUCBBEB5NJFC2OKFRC74OWEIJIZLRJBGAAU4VMU5NV4W
 cat > .env.testnet <<ENV
 NETWORK=testnet
