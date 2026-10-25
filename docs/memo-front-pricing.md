@@ -66,7 +66,7 @@ Pour la référence ci-dessus (arrondir à l'USDC dans les gros titres) :
   - « Sans protection : **61 600 USDC** » (`withoutProtection`)
   - « Avec <NOM> : **56 112,69 USDC** » (`withProtection`) ; protection versée 5 487,31 (plafonnée au dépôt)
 
-⚠️ `docs/video-script.md` cite encore les chiffres à 60 s (55 275 / 5 527,50 / 56 072,50) : avec l'option b, ce sont ceux ci-dessus (54 873 / 5 487 / 56 112,69). Si le mock est aligné sur Reflector avant la vidéo, tout se recalcule tout seul depuis `quote` ; à 0,05325 : ≈ 53 129,56 et ≈ 54 329,81.
+Si le mock est aligné sur Reflector avant la vidéo, tout se recalcule tout seul depuis `quote` ; à 0,05325 : prix figé 53 127,09, avec protection 54 327,29 (`sim/out/chiffres-demo.md`).
 
 ## 4. Erreurs
 
