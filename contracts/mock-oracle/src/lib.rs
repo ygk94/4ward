@@ -1,6 +1,7 @@
 #![no_std]
 //! Oracle de démo, même interface de lecture que Reflector (SEP-40) :
-//! `base`, `decimals`, `resolution`, `assets`, `lastprice`.
+//! `base`, `decimals`, `resolution`, `assets`, `lastprice`, `price`.
+//! L'historique des prix sert au fixing à l'échéance (`price(asset, ts)`).
 //! L'admin peut fixer un prix à la main (bouton « crash du peso »).
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol, Vec};
 
@@ -24,11 +25,15 @@ enum DataKey {
     Admin,
     Assets,
     Price(Asset),
+    /// Prix successifs d'un actif, du plus ancien au plus récent, `MAX_HISTORY` au plus.
+    History(Asset),
 }
 
 /// Reflector FX : 14 décimales, base USD, résolution 300 s.
 const DECIMALS: u32 = 14;
 const RESOLUTION: u32 = 300;
+/// Taille de l'historique par actif : largement assez pour une démo (un prix toutes les quelques minutes).
+const MAX_HISTORY: u32 = 64;
 
 #[contract]
 pub struct MockOracle;
@@ -56,6 +61,13 @@ impl MockOracle {
             price,
             timestamp: env.ledger().timestamp(),
         };
+        let key = DataKey::History(asset.clone());
+        let mut history: Vec<PriceData> = env.storage().persistent().get(&key).unwrap_or(Vec::new(&env));
+        if history.len() >= MAX_HISTORY {
+            history.pop_front();
+        }
+        history.push_back(data.clone());
+        env.storage().persistent().set(&key, &history);
         env.storage().persistent().set(&DataKey::Price(asset), &data);
     }
 
@@ -77,6 +89,17 @@ impl MockOracle {
 
     pub fn lastprice(env: Env, asset: Asset) -> Option<PriceData> {
         env.storage().persistent().get(&DataKey::Price(asset))
+    }
+
+    /// Prix en vigueur à `timestamp` : le dernier posé à cet instant ou avant (SEP-40 `price`).
+    /// `None` si `timestamp` est dans le futur ou avant le premier prix, comme Reflector
+    /// (qui renvoie le cours de la période de 300 s contenant `timestamp`).
+    pub fn price(env: Env, asset: Asset, timestamp: u64) -> Option<PriceData> {
+        if timestamp > env.ledger().timestamp() {
+            return None;
+        }
+        let history: Vec<PriceData> = env.storage().persistent().get(&DataKey::History(asset))?;
+        history.iter().rev().find(|p| p.timestamp <= timestamp)
     }
 }
 

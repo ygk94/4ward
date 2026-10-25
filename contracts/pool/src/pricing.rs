@@ -39,6 +39,9 @@ pub enum PricingError {
     CapOutOfRange = 310,
     /// `set_spread` au-delà de 5 %.
     SpreadTooHigh = 311,
+    /// Pas de cours de fixing à l'échéance : aucun prix à cette date (ou échéance trop ancienne
+    /// pour l'historique de l'oracle, ~12 h sur Reflector testnet).
+    NoFixing = 312,
 }
 
 // ---- client SEP-40 (Reflector FX et mock-oracle) ----
@@ -87,6 +90,8 @@ pub struct PriceData {
 #[allow(dead_code)] // le trait n'existe que pour engendrer `OracleClient`
 pub trait Sep40Oracle {
     fn lastprice(env: Env, asset: Asset) -> Option<PriceData>;
+    /// Prix en vigueur à `timestamp` (Reflector : cours de la période de 300 s qui le contient ; `None` si futur).
+    fn price(env: Env, asset: Asset, timestamp: u64) -> Option<PriceData>;
     fn decimals(env: Env) -> u32;
 }
 
@@ -156,6 +161,26 @@ pub(crate) fn spot(env: &Env, currency: &Symbol) -> i128 {
     // saturating : un oracle légèrement en avance sur le ledger n'est pas « périmé ».
     let age = env.ledger().timestamp().saturating_sub(data.timestamp);
     if age > MAX_PRICE_AGE_SECS {
+        panic_with_error!(env, PricingError::StalePrice);
+    }
+    data.price
+}
+
+/// Cours de règlement : le prix en vigueur **à l'échéance**, pas au moment où `settle` est appelé.
+/// Sans ça, celui qui règle choisit son moment (option gratuite contre le pool ou contre la PME), et un
+/// `set_price` posé après l'échéance changerait le règlement. USD par unité de devise, 14 décimales.
+/// Panique `NoFixing` si l'oracle n'a pas de prix à cette date, `InvalidPrice` si prix ≤ 0, `StalePrice`
+/// si le dernier prix avant l'échéance a plus de `MAX_PRICE_AGE_SECS` (oracle non mis à jour).
+/// Appelée par `hedge::settle` avec l'échéance réelle (`hedge.maturity`).
+pub(crate) fn fixing(env: &Env, currency: &Symbol, maturity: u64) -> i128 {
+    let oracle: Address = env.storage().instance().get(&DataKey::Oracle).unwrap();
+    let data = OracleClient::new(env, &oracle)
+        .price(&Asset::Other(currency.clone()), &maturity)
+        .unwrap_or_else(|| panic_with_error!(env, PricingError::NoFixing));
+    if data.price <= 0 {
+        panic_with_error!(env, PricingError::InvalidPrice);
+    }
+    if maturity.saturating_sub(data.timestamp) > MAX_PRICE_AGE_SECS {
         panic_with_error!(env, PricingError::StalePrice);
     }
     data.price

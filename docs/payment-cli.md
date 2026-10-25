@@ -12,12 +12,20 @@ cd fistea-hackmeridian
 source .env.testnet          # ISSUER, USDC_SAC, POOL_ID, … du déploiement
 ```
 
-**Prix du mock frais.** Dès que le vrai Pricing est branché, `forward_rate` (dans `open_hedge`) et `settle` lisent le spot, refusé s'il a plus de 300 s. Relancer `set_price` **juste avant `open_hedge` et juste avant `settle`** :
+**Prix du mock frais avant `open_hedge`.** `forward_rate` lit le spot, refusé s'il a plus de 900 s (#302). Relancer `set_price` **juste avant `open_hedge`**.
+`settle` ne lit plus le spot mais le **fixing** : le cours en vigueur à l'échéance (`price(asset, maturity)` de l'oracle). Il faut donc un prix posé **dans les 900 s avant l'échéance** (le crash suffit), et rien à rafraîchir au moment du `settle`. Le mock doit être celui de `main` après le fixing (fonction `price` avec historique).
 
 ```sh
 stellar contract invoke --id fx-mock-oracle --source-account fx-admin --network testnet -- \
   set_price --asset '{"Other":"MXN"}' --price 5500000000000          # 0,055 USD/MXN
 ```
+
+## Mode démo : 90 jours en 5 minutes (fx-admin, une fois)
+
+```sh
+stellar contract invoke --id fx-pool --source-account fx-admin --network testnet --   set_time_factor --factor 25920                                      # échéance réelle = durée / 25 920
+```
+Le prix reste calculé sur la durée annoncée (`--duration_secs 7776000` = 90 jours → prix à 90 jours), l'échéance réelle tombe 300 s après l'ouverture. Événement `time_factor_set`. Lecture : `-- time_factor` (1 = temps réel).
 
 ## 1. Le LP remplit le pool (fx-lp)
 
@@ -32,7 +40,7 @@ Retour : les parts du LP. Contrôle : `-- capacity` → `1000000000000`.
 ```sh
 stellar contract invoke --id fx-pool --source-account fx-lucia --network testnet -- \
   open_hedge --owner fx-lucia --supplier fx-supplier --currency MXN --side BuyCurrency \
-  --notional 10000000000000 --duration_secs 60 --cap_bps 1000         # 1 000 000 MXN, 60 s, 10 %
+  --notional 10000000000000 --duration_secs 7776000 --cap_bps 1000    # 1 000 000 MXN, 90 jours, 10 %
 ```
 Retour : l'id de la couverture (`0` pour la première). Signature : **Lucía seule**.
 Effets : transfert USDC Lucía → pool de la marge, événement `hedge_opened`, `capacity` baisse de la marge, `exposure MXN` augmente.
@@ -43,17 +51,18 @@ Effets : transfert USDC Lucía → pool de la marge, événement `hedge_opened`,
 stellar contract invoke --id fx-mock-oracle --source-account fx-admin --network testnet -- \
   set_price --asset '{"Other":"MXN"}' --price 6160000000000          # +12 % : 0,0616
 ```
-(+8 % : `5940000000000`.) Aucun mouvement d'argent.
+(+8 % : `5940000000000`.) Aucun mouvement d'argent. **À faire avant l'échéance réelle** : avec le fixing, `settle` prend le cours en vigueur à l'échéance.
 
 ## 4. Règlement à l'échéance (n'importe quel compte)
 
-Attendre `duration_secs` après l'ouverture (`get_hedge` → champ `maturity`, en secondes Unix), prix du mock frais (§ 0), puis :
+Attendre l'échéance réelle (`get_hedge` → champ `maturity`, en secondes Unix ; en mode démo, durée / facteur), puis :
 
 ```sh
 stellar contract invoke --id fx-pool --source-account fx-supplier --network testnet -- \
   settle --hedge_id 0
 ```
 Retour : l'USDC versé à Lucía (marge ± P&L, entre 0 et 2 × marge). Effets : transfert USDC pool → Lucía, événement `hedge_settled` (spot de fixing, P&L, versement).
+Le cours utilisé est celui **en vigueur à l'échéance**, quel que soit le moment de l'appel : un prix posé après l'échéance ne compte pas. Régler peu après l'échéance : l'historique de Reflector ne remonte qu'à ~12 h, celui du mock à 64 prix (au-delà : #312).
 
 ## 5. Réaligner l'offre DEX sur le nouveau prix (fx-admin)
 
@@ -134,7 +143,14 @@ Les textes de `panic!` sont effacés dans le WASM déployé : le front ne reçoi
 | #101 `InsufficientCapacity` | Vault | Le pool n'a pas assez de capital pour cette protection |
 | #108 `CurrencyLimitExceeded` | Vault | Limite atteinte sur cette devise |
 | #109 `UnknownPosition` | Vault | Erreur interne (couverture non enregistrée dans le pool) |
-| à venir | Pricing | Plafond trop bas pour cette devise / cours de l'oracle trop ancien |
+| #205 `InvalidTimeFactor` | Paiement (admin) | Facteur de démo invalide |
+| #302 `StalePrice` | Pricing | Cours de l'oracle trop ancien : réessayer dans un instant |
+| #306 `CurrencyNotEnabled` | Pricing | Devise non disponible |
+| #307 `CapBelowMinimum` | Pricing | Protection minimale pour cette devise : x % |
+| #308 `CapTooHigh` | Pricing | Protection trop élevée |
+| #312 `NoFixing` | Pricing | Cours à l'échéance indisponible (règlement trop tardif) |
+| #302 `StalePrice` au `settle` | Pricing | Aucun cours publié dans les 15 min avant l'échéance |
+| autres 300-311 | Pricing | voir `PricingError` dans `pricing.rs` |
 | `op_too_few_offers` | Path payment | Pas assez de liquidité sur le DEX pour ce montant |
 | `op_over_source_max` | Path payment | Le cours a bougé au-delà de `send-max` : relancer avec un devis à jour |
 | `op_underfunded` | Path payment / `open_hedge` | Solde USDC insuffisant |
@@ -148,17 +164,17 @@ Liens explorateur : `https://stellar.expert/explorer/testnet/tx/<hash>`.
 
 ---
 
-## Chiffres de référence (1 000 000 MXN, spot 0,055, plafond 10 %, vrai Pricing)
+## Chiffres de référence (1 000 000 MXN, 90 jours, spot 0,055, plafond 10 %, vrai Pricing)
 
-Taux bloqué `F` = 0,0552750 (parité USD 4 % / MXN 7 % sur 60 s, puis spread 0,5 % contre Lucía) → prix figé **55 275 USDC**, marge **5 527,50 USDC**.
+Taux bloqué `F` = 0,0548731 (parité USD 4 % / MXN 7 % sur 90 jours, puis spread 0,5 % contre Lucía) → prix figé **54 873,05 USDC**, marge **5 487,31 USDC**. Sur 60 s (sans mode démo) : 55 275 / 5 527,50.
 
 | Peso | Spot | P&L | Versé par `settle` | Coût des pesos | Coût total | Sans protection |
 |---|---|---|---|---|---|---|
-| +8 % | 0,0594 | +4 125,00 | 9 652,50 | 59 400 | **55 275** | 59 400 |
-| +12 % | 0,0616 | +5 527,50 (plafonné, écart 6 325) | 11 055,00 | 61 600 | **56 072,50** | 61 600 |
-| −8 % | 0,0506 | −4 675,00 | 852,50 | 50 600 | **55 275** | 50 600 |
+| +8 % | 0,0594 | +4 526,95 | 10 014,25 | 59 400 | **54 873,05** | 59 400 |
+| +12 % | 0,0616 | +5 487,31 (plafonné, écart 6 727) | 10 974,61 | 61 600 | **56 112,69** | 61 600 |
+| −8 % | 0,0506 | −4 273,05 | 1 214,25 | 50 600 | **54 873,05** | 50 600 |
 
-À +12 %, Lucía ne paie que ce qui dépasse son plafond (797,50 USDC au lieu de 6 325).
+À +12 %, Lucía ne paie que ce qui dépasse son plafond (1 239,64 USDC au lieu de 6 727).
 Avec un autre spot (mock aligné sur Reflector), recalculer avec `docs/video-script.md` § « Recalculer les chiffres ».
 
 ## Répétition du 25/10 (déploiement de Clément, +8 %)
@@ -194,4 +210,26 @@ Bilan Lucía : 545 130 → 489 057,50 USDC, soit **56 072,50** (le chiffre du sc
 Après `settle` : USDC du pool = `total_assets` = `capacity` = 994 472,50, exposition MXN à 0.
 
 Note Windows : `setup-testnet.sh` appelle `python3`, qui sous Windows ouvre le Microsoft Store. Contournement : un alias `python3` → `python` dans le `PATH` le temps du script.
+
+## Validation du fixing et du mode démo (25/10, code de `feat/payment` 9c37868)
+
+**Fixing** (couverture à 120 s, sans mode démo) : crash +12 % posé 115 s avant l'échéance, puis peso à −8 % posé après l'échéance.
+`lastprice` = 0,0506, `price(…, maturity)` = 0,0616 ; `settle` règle à **0,0616** et verse 2 × marge (11 054,99). Le prix posé après l'échéance est ignoré.
+[crash](https://stellar.expert/explorer/testnet/tx/ca073de883d271aca4422662587f3fb14b16564f8e951cb6006a8be2d74a57f0) ·
+[−8 % après l'échéance](https://stellar.expert/explorer/testnet/tx/48fb13e307b13a8a2210c6434754ab7e1b33c714f2be4433b9f79eb39ca8f334) ·
+[settle](https://stellar.expert/explorer/testnet/tx/3546c5095230fafa4c42b16445f8c3e03917c98be3bfc914025b909a5060639c)
+
+**Scénario de la vidéo** (mode démo 25 920, couverture à 90 jours, crash +12 %, `settle` sans rafraîchir le prix) :
+
+| # | Transaction | Résultat | Lien |
+|---|---|---|---|
+| 0 | `set_time_factor 25920` | événement `time_factor_set` | [ebfa2300…](https://stellar.expert/explorer/testnet/tx/ebfa2300b85ab6863d3cf765fdc17233512c6f728db3645dc1f93c10ca3b6ff2) |
+| — | `quote` 90 jours | taux 0,0548731, marge 5 487,31 | |
+| 2 | `open_hedge` 7 776 000 s → id 1 | même taux et marge, échéance réelle +300 s | [b1f9fdbd…](https://stellar.expert/explorer/testnet/tx/b1f9fdbd71adcb4ecce4f35e28cf7e0adcb2cb82f8a65022e68d5efd9ea64192) |
+| 3 | crash +12 % | avant l'échéance | [ffda98a4…](https://stellar.expert/explorer/testnet/tx/ffda98a465028fecaa8e896022118a8005c157f1c99172b2bee5f9b7d71d8c5a) |
+| 5 | offre DEX à 0,0616 | | [9858c368…](https://stellar.expert/explorer/testnet/tx/9858c368ddff73a9a5735815f927534bd942bec637a5f1a514c55519bd91dade) |
+| 6 | path payment 1 000 000 MXN | 61 600 USDC | [1361ff9b…](https://stellar.expert/explorer/testnet/tx/1361ff9b5626703364e53de0b4159ea904165b63d533e3a38a6319b7aefe6938) |
+| 4 | `settle` 10 s après l'échéance | fixing 0,0616, versé 10 974,61 | [bc3f506f…](https://stellar.expert/explorer/testnet/tx/bc3f506f54060c2bf18d897e30ac2a1a87d5908ca713ad956a4f7487388b62ef) |
+
+Coût total de Lucía : **56 112,69 USDC** au centime, le chiffre du script vidéo.
 

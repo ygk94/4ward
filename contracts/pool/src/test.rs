@@ -401,6 +401,82 @@ mod pricing_tests {
         );
     }
 
+    // ---- fixing à l'échéance, sur le vrai mock-oracle (historique des prix) ----
+
+    /// Pool branché sur `mock_oracle::MockOracle` : vérifie aussi que l'appel `price` coïncide en XDR.
+    /// Retourne (env, pool, oracle).
+    fn setup_mock_oracle() -> (Env, Address, Address) {
+        let env = Env::default();
+        env.mock_all_auths();
+        env.ledger().set_timestamp(T0);
+        let admin = Address::generate(&env);
+        let usdc = Address::generate(&env);
+        let oracle = env.register(mock_oracle::MockOracle, (&admin,));
+        let pool = env.register(Pool, (&admin, &usdc, &oracle, 50u32));
+        (env, pool, oracle)
+    }
+
+    /// Avance le ledger à `ts` puis pose le prix MXN sur le mock (horodaté à `ts`).
+    fn mock_price_at(env: &Env, oracle: &Address, ts: u64, price: i128) {
+        env.ledger().set_timestamp(ts);
+        let mxn = mock_oracle::Asset::Other(mxn(env));
+        mock_oracle::MockOracleClient::new(env, oracle).set_price(&mxn, &price);
+    }
+
+    fn fixing(env: &Env, pool: &Address, maturity: u64) -> i128 {
+        env.as_contract(pool, || pricing::fixing(env, &mxn(env), maturity))
+    }
+
+    /// Le crash posé avant l'échéance compte ; un prix posé après l'échéance est ignoré,
+    /// quel que soit le moment où `settle` est appelé.
+    #[test]
+    fn pricing_fixing_uses_price_in_force_at_maturity() {
+        let (env, pool, oracle) = setup_mock_oracle();
+        let maturity = T0 + 300;
+        mock_price_at(&env, &oracle, T0, MXN_SPOT);
+        mock_price_at(&env, &oracle, T0 + 120, 6_160_000_000_000); // crash +12 % avant l'échéance
+        mock_price_at(&env, &oracle, T0 + 400, 7_000_000_000_000); // après l'échéance : ignoré
+        env.ledger().set_timestamp(T0 + 1_000);
+        assert_eq!(fixing(&env, &pool, maturity), 6_160_000_000_000);
+        // Prix posé exactement à l'échéance : c'est lui qui compte.
+        assert_eq!(fixing(&env, &pool, T0 + 400), 7_000_000_000_000);
+    }
+
+    #[test]
+    fn pricing_fixing_price_at_max_age_is_accepted() {
+        let (env, pool, oracle) = setup_mock_oracle();
+        mock_price_at(&env, &oracle, T0, MXN_SPOT);
+        env.ledger().set_timestamp(T0 + 2_000);
+        assert_eq!(fixing(&env, &pool, T0 + MAX_PRICE_AGE_SECS), MXN_SPOT);
+    }
+
+    /// Dernier prix avant l'échéance trop ancien : l'oracle n'était pas à jour, on ne règle pas dessus.
+    #[test]
+    #[should_panic(expected = "Error(Contract, #302)")]
+    fn pricing_fixing_stale_price_panics() {
+        let (env, pool, oracle) = setup_mock_oracle();
+        mock_price_at(&env, &oracle, T0, MXN_SPOT);
+        env.ledger().set_timestamp(T0 + 2_000);
+        fixing(&env, &pool, T0 + MAX_PRICE_AGE_SECS + 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #312)")]
+    fn pricing_fixing_no_price_before_maturity_panics() {
+        let (env, pool, oracle) = setup_mock_oracle();
+        mock_price_at(&env, &oracle, T0 + 400, MXN_SPOT); // premier prix après l'échéance
+        fixing(&env, &pool, T0 + 300);
+    }
+
+    /// Échéance dans le futur : pas encore de cours de fixing.
+    #[test]
+    #[should_panic(expected = "Error(Contract, #312)")]
+    fn pricing_fixing_future_maturity_panics() {
+        let (env, pool, oracle) = setup_mock_oracle();
+        mock_price_at(&env, &oracle, T0, MXN_SPOT);
+        fixing(&env, &pool, T0 + 60);
+    }
+
     /// MXN ouvert mais sans prix sur l'oracle : le refus doit venir de `check_cap`, pas de `spot`.
     #[test]
     #[should_panic(expected = "Error(Contract, #307)")]
@@ -415,12 +491,13 @@ mod pricing_tests {
 // ---- Paiement ----
 
 use crate::hedge::{self, HedgeError};
+use crate::pricing::PricingError;
 use crate::vault::VaultError;
 use crate::{Hedge, Pool, PoolClient, Side};
 use mock_oracle::{Asset as OracleAsset, MockOracle, MockOracleClient};
-use soroban_sdk::testutils::{Address as _, Events as _, Ledger};
+use soroban_sdk::testutils::{Address as _, Events as _, Ledger, MockAuth, MockAuthInvoke};
 use soroban_sdk::token::{StellarAssetClient, TokenClient};
-use soroban_sdk::{Address, Env, Event, Symbol};
+use soroban_sdk::{Address, Env, Event, IntoVal, Symbol};
 
 /// 1 000 000 MXN (7 décimales).
 const NOTIONAL: i128 = 10_000_000_000_000;
@@ -434,6 +511,7 @@ const MARGIN: i128 = 54_870_000_000;
 /// Environnement de test commun : USDC (SAC), mock-oracle (MXN à 0.055), pool, et les acteurs.
 struct Setup<'a> {
     env: Env,
+    admin: Address,
     lucia: Address,
     supplier: Address,
     lp: Address,
@@ -471,6 +549,7 @@ fn setup<'a>() -> Setup<'a> {
     Setup {
         usdc: TokenClient::new(&env, &usdc_id),
         env,
+        admin,
         lucia,
         supplier,
         lp,
@@ -853,4 +932,186 @@ fn open_refused_over_currency_limit() {
         s.pool.try_open_hedge(&s.lucia, &s.supplier, &mxn, &Side::BuyCurrency, &NOTIONAL, &MATURITY_IN, &1000),
         Err(Ok(contract_err(VaultError::CurrencyLimitExceeded as u32)))
     );
+}
+
+/// 90 jours, en secondes : l'échéance racontée dans la démo.
+const DAYS_90: u64 = 7_776_000;
+/// Facteur de démo : 90 jours annoncés → 300 s réelles.
+const DEMO_FACTOR: u32 = 25_920;
+
+#[test]
+fn time_factor_defaults_to_one() {
+    let s = setup();
+    assert_eq!(s.pool.time_factor(), 1);
+}
+
+#[test]
+fn accelerated_hedge_prices_on_announced_duration() {
+    let s = setup();
+    fund_pool(&s);
+    s.pool.set_time_factor(&DEMO_FACTOR);
+    let now = s.env.ledger().timestamp();
+
+    let id = s.pool.open_hedge(&s.lucia, &s.supplier, &Symbol::new(&s.env, "MXN"), &Side::BuyCurrency, &NOTIONAL, &DAYS_90, &1000);
+
+    // prix et marge à 90 jours (54 873,05 et 5 487,31 USDC), échéance réelle 300 s plus tard
+    let h = s.pool.get_hedge(&id).unwrap();
+    assert_eq!(h.locked_rate, 5_487_305_413_412);
+    assert_eq!(h.margin, 54_873_054_135);
+    assert_eq!(h.maturity, now + 300);
+}
+
+#[test]
+fn accelerated_hedge_settles_after_real_maturity() {
+    let s = setup();
+    fund_pool(&s);
+    s.pool.set_time_factor(&DEMO_FACTOR);
+    let now = s.env.ledger().timestamp();
+    let id = s.pool.open_hedge(&s.lucia, &s.supplier, &Symbol::new(&s.env, "MXN"), &Side::BuyCurrency, &NOTIONAL, &DAYS_90, &1000);
+
+    s.env.ledger().set_timestamp(now + 299);
+    assert_eq!(s.pool.try_settle(&id), Err(Ok(contract_err(HedgeError::NotMatured as u32))));
+
+    // +12 % : protection plafonnée, 2 × 5 487,31 = 10 974,61 USDC versés
+    s.env.ledger().set_timestamp(now + 300);
+    set_spot(&s, 6_160_000_000_000);
+    assert_eq!(s.pool.settle(&id), 109_746_108_270);
+}
+
+#[test]
+fn set_time_factor_is_admin_only_and_public() {
+    let s = setup();
+    s.pool.set_time_factor(&DEMO_FACTOR);
+
+    // signé par l'admin du pool
+    assert_eq!(s.env.auths()[0].0, s.admin);
+    // réglage visible sur la chaîne
+    let events = s.env.events().all().filter_by_contract(&s.pool.address);
+    assert_eq!(
+        events.events().last(),
+        Some(&hedge::TimeFactorSet { factor: DEMO_FACTOR }.to_xdr(&s.env, &s.pool.address))
+    );
+    assert_eq!(s.pool.time_factor(), DEMO_FACTOR);
+
+    // facteur nul refusé
+    assert_eq!(s.pool.try_set_time_factor(&0), Err(Ok(contract_err(HedgeError::InvalidTimeFactor as u32))));
+}
+
+#[test]
+fn accelerated_maturity_is_at_least_one_second() {
+    let s = setup();
+    fund_pool(&s);
+    s.pool.set_time_factor(&DEMO_FACTOR);
+    let now = s.env.ledger().timestamp();
+    // 60 s / 25 920 = 0 : l'échéance réelle reste dans le futur
+    let id = open_demo(&s);
+    assert_eq!(s.pool.get_hedge(&id).unwrap().maturity, now + 1);
+}
+
+#[test]
+fn open_refused_without_owner_signature() {
+    let s = setup();
+    fund_pool(&s);
+    let mxn = Symbol::new(&s.env, "MXN");
+
+    let open_args = (&s.lucia, &s.supplier, &mxn, Side::BuyCurrency, NOTIONAL, MATURITY_IN, 1000u32);
+    // signature attendue : `open_hedge`, et dedans le transfert de la marge Lucía → pool
+    let transfer = MockAuthInvoke {
+        contract: &s.usdc.address,
+        fn_name: "transfer",
+        args: (&s.lucia, &s.pool.address, HEDGE_MARGIN).into_val(&s.env),
+        sub_invokes: &[],
+    };
+    let open = MockAuthInvoke {
+        contract: &s.pool.address,
+        fn_name: "open_hedge",
+        args: open_args.into_val(&s.env),
+        sub_invokes: core::slice::from_ref(&transfer),
+    };
+    let signed_by = |who| MockAuth { address: who, invoke: &open };
+
+    // le fournisseur signe à la place de Lucía : refusé
+    let by_supplier = s
+        .pool
+        .mock_auths(&[signed_by(&s.supplier)])
+        .try_open_hedge(&s.lucia, &s.supplier, &mxn, &Side::BuyCurrency, &NOTIONAL, &MATURITY_IN, &1000);
+    assert!(by_supplier.is_err());
+
+    // personne ne signe : refusé
+    let unsigned = s
+        .pool
+        .set_auths(&[])
+        .try_open_hedge(&s.lucia, &s.supplier, &mxn, &Side::BuyCurrency, &NOTIONAL, &MATURITY_IN, &1000);
+    assert!(unsigned.is_err());
+
+    // rien n'a bougé
+    assert_eq!(s.usdc.balance(&s.lucia), LUCIA_START);
+    assert_eq!(pool_books(&s), (LP_CAPITAL, 0));
+
+    // témoin : le même appel signé par Lucía passe, donc les refus venaient bien de la signature
+    let id = s
+        .pool
+        .mock_auths(&[signed_by(&s.lucia)])
+        .open_hedge(&s.lucia, &s.supplier, &mxn, &Side::BuyCurrency, &NOTIONAL, &MATURITY_IN, &1000);
+    assert_eq!(s.pool.get_hedge(&id).unwrap().owner, s.lucia);
+    assert_eq!(s.usdc.balance(&s.lucia), LUCIA_START - HEDGE_MARGIN);
+}
+
+#[test]
+fn settle_needs_no_signature() {
+    let s = setup();
+    let id = open_funded(&s, Side::BuyCurrency);
+    at_maturity(&s, SPOT_0);
+
+    // règlement sans aucune signature : n'importe qui peut le déclencher
+    let paid = s.pool.set_auths(&[]).settle(&id);
+    assert_eq!(paid, HEDGE_MARGIN + hedge::pnl(Side::BuyCurrency, NOTIONAL, HEDGE_LOCKED, SPOT_0, HEDGE_MARGIN));
+    assert!(s.pool.get_hedge(&id).unwrap().settled);
+}
+
+/// Avance le ledger à `ts` et y pose le cours MXN du mock (l'historique garde la date).
+fn price_at(s: &Setup, ts: u64, price: i128) {
+    s.env.ledger().set_timestamp(ts);
+    set_spot(s, price);
+}
+
+#[test]
+fn settle_uses_rate_at_maturity() {
+    let s = setup();
+    let now = s.env.ledger().timestamp();
+    let id = open_funded(&s, Side::BuyCurrency);
+
+    // crash +12 % 10 s avant l'échéance : c'est lui qui compte
+    price_at(&s, now + MATURITY_IN - 10, 6_160_000_000_000);
+    // le peso retombe (−8 %) après l'échéance : ignoré, même si on règle maintenant
+    price_at(&s, now + MATURITY_IN + 60, 5_060_000_000_000);
+
+    let paid = s.pool.settle(&id);
+    assert_settled(&s, id, paid, 2 * HEDGE_MARGIN, -HEDGE_MARGIN);
+}
+
+#[test]
+fn settle_refused_when_rate_at_maturity_is_stale() {
+    let s = setup();
+    fund_pool(&s);
+    let now = s.env.ledger().timestamp();
+    // échéance à 2 000 s, aucun prix posé entre l'ouverture et l'échéance
+    let id = s.pool.open_hedge(&s.lucia, &s.supplier, &Symbol::new(&s.env, "MXN"), &Side::BuyCurrency, &NOTIONAL, &2_000, &1000);
+
+    // un prix frais après l'échéance ne rattrape pas un oracle muet à l'échéance
+    price_at(&s, now + 2_010, SPOT_0);
+    assert_eq!(s.pool.try_settle(&id), Err(Ok(contract_err(PricingError::StalePrice as u32))));
+}
+
+#[test]
+fn settle_refused_when_no_rate_at_maturity() {
+    let s = setup();
+    let now = s.env.ledger().timestamp();
+    let id = open_funded(&s, Side::BuyCurrency);
+
+    // 64 prix posés après l'échéance : l'historique du mock ne remonte plus jusqu'à elle
+    for i in 1..=64 {
+        price_at(&s, now + MATURITY_IN + i, SPOT_0);
+    }
+    assert_eq!(s.pool.try_settle(&id), Err(Ok(contract_err(PricingError::NoFixing as u32))));
 }

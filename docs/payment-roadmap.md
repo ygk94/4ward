@@ -60,7 +60,7 @@ Règles de calcul : tout en `i128`, **arrondis en faveur du pool** (P&L payé pa
 - ✅ Branché sur le vrai Vault (`main`) : `vault::open_position(&hedge)` dans `open`, `vault::close_position(&hedge)` dans `settle` (exposition par devise, limite par devise #108)
 - ✅ Codes d'erreur `HedgeError` 200+ (`UnknownHedge`, `AlreadySettled`, `NotMatured`, `InvalidNotional`, `InvalidDuration`) : les textes de `panic!` sont effacés dans le WASM, le front a besoin des codes
 - ✅ Fixtures de test sur les vrais appels (`deposit_lp`, `open_hedge`, `total_assets`, `capacity`) ; tests marqués `#[ignore = "attend Pricing"]`
-- ⬜ Refus « sans signature du owner » : vérifié via `env.auths()` (Lucía a signé), pas de test de refus explicite
+- ✅ Refus sans la signature du owner : `open_refused_without_owner_signature` (signé par le fournisseur ou par personne → refusé, rien ne bouge ; témoin signé par Lucía → passe ; le test casse si on retire `require_auth`) et `settle_needs_no_signature`
 
 ## 5. Événements
 
@@ -101,6 +101,13 @@ Règles de calcul : tout en `i128`, **arrondis en faveur du pool** (P&L payé pa
 - ✅ Parcours rejoué sur testnet avec le code fusionné (mon déploiement, commandes de `docs/payment-cli.md` telles quelles) : coût total 56 072,50 au centime, codes #200 / #201 / #202 vus sur le réseau
 - ⬜ Rejouer le parcours sur le déploiement d'Hugo (commandes `docs/payment-cli.md`)
 - ⬜ Vérifier les chiffres affichés par le front contre ceux de la CLI
+
+
+## 10. Points à trancher (`docs/points-a-trancher.md`)
+
+- ✅ Point 2, durée de démo (option b) : `set_time_factor` / `time_factor` (admin, 1 par défaut, #205 si 0, événement `time_factor_set`) ; prix sur la durée annoncée, échéance réelle = durée / facteur (au moins 1 s). Démo : 25 920 → 90 jours en 300 s ; chiffres du script et de `payment-cli.md` passés à 90 jours
+- ✅ Point 1, fixing à l'échéance : `settle` appelle `pricing::fixing(env, &hedge.currency, hedge.maturity)` (feat/pricing de Lancelot fusionné dans feat/payment) ; tests : crash avant l'échéance compté et prix posé après ignoré, #302 si oracle muet à l'échéance, #312 si l'historique ne remonte plus ; `#[allow(dead_code)]` de `fixing` retiré
+- ✅ Validés sur testnet : fixing (prix posé après l'échéance ignoré) et scénario complet de la vidéo en mode démo (90 jours en 5 min, coût total 56 112,69 au centime)
 
 ---
 
