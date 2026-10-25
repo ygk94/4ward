@@ -87,32 +87,102 @@ fn set_lp_shares(env: &Env, lp: &Address, value: i128) {
 
 // ---- appelé par lib.rs (points d'entrée publics) ----
 
-pub(crate) fn deposit(_env: &Env, _lp: &Address, _amount: i128) -> i128 {
-    panic!("TODO vault")
+/// Dépose `amount` USDC contre des parts au prix plein, arrondi vers le bas.
+/// Retourne les parts du LP après le dépôt.
+/// Erreurs : `InvalidAmount`, `PoolDepleted`, `DepositTooSmall`.
+pub(crate) fn deposit(env: &Env, lp: &Address, amount: i128) -> i128 {
+    lp.require_auth();
+    if amount <= 0 {
+        panic_with_error!(env, VaultError::InvalidAmount);
+    }
+    let total = total_deposits(env);
+    let shares_total = total_shares(env);
+    let minted = if shares_total == 0 {
+        amount
+    } else {
+        if total == 0 {
+            panic_with_error!(env, VaultError::PoolDepleted);
+        }
+        amount * shares_total / total
+    };
+    if minted == 0 {
+        panic_with_error!(env, VaultError::DepositTooSmall);
+    }
+
+    usdc(env).transfer(lp, &env.current_contract_address(), &amount);
+
+    let shares = lp_shares(env, lp) + minted;
+    set_lp_shares(env, lp, shares);
+    set_total_shares(env, shares_total + minted);
+    set_total_deposits(env, total + amount);
+    shares
 }
 
-pub(crate) fn withdraw(_env: &Env, _lp: &Address, _shares: i128) -> i128 {
-    panic!("TODO vault")
+/// Brûle `shares` parts du LP et lui verse leur valeur au prix de sortie, arrondi vers le bas.
+/// Le capital réservé n'est pas versé : le montant ne dépasse jamais `capacity()`.
+/// Retourne l'USDC versé.
+/// Erreurs : `InvalidAmount`, `InsufficientShares`, `WithdrawTooSmall`.
+pub(crate) fn withdraw(env: &Env, lp: &Address, shares: i128) -> i128 {
+    lp.require_auth();
+    if shares <= 0 {
+        panic_with_error!(env, VaultError::InvalidAmount);
+    }
+    let owned = lp_shares(env, lp);
+    if shares > owned {
+        panic_with_error!(env, VaultError::InsufficientShares);
+    }
+    let amount = shares * capacity(env) / total_shares(env);
+    if amount == 0 {
+        panic_with_error!(env, VaultError::WithdrawTooSmall);
+    }
+
+    // État mis à jour avant le transfert sortant.
+    set_lp_shares(env, lp, owned - shares);
+    set_total_shares(env, total_shares(env) - shares);
+    set_total_deposits(env, total_deposits(env) - amount);
+
+    usdc(env).transfer(&env.current_contract_address(), lp, &amount);
+    amount
 }
 
-pub(crate) fn balance(_env: &Env, _lp: &Address) -> i128 {
-    panic!("TODO vault")
+/// Valeur en USDC des parts du LP au prix de sortie (ce qu'il recevrait en retirant tout).
+pub(crate) fn balance(env: &Env, lp: &Address) -> i128 {
+    let shares_total = total_shares(env);
+    if shares_total == 0 {
+        return 0;
+    }
+    lp_shares(env, lp) * capacity(env) / shares_total
 }
 
-pub(crate) fn lp_shares(_env: &Env, _lp: &Address) -> i128 {
-    panic!("TODO vault")
+pub(crate) fn lp_shares(env: &Env, lp: &Address) -> i128 {
+    env.storage().persistent().get(&VaultKey::Shares(lp.clone())).unwrap_or(0)
 }
 
-pub(crate) fn share_price(_env: &Env) -> i128 {
-    panic!("TODO vault")
+/// Prix plein d'une part : TotalDeposits / TotalShares (7 décimales), 1 USDC si aucune part.
+pub(crate) fn share_price(env: &Env) -> i128 {
+    price(env, total_deposits(env))
 }
 
-pub(crate) fn exit_price(_env: &Env) -> i128 {
-    panic!("TODO vault")
+/// Prix de sortie d'une part : (TotalDeposits - Reserved) / TotalShares (7 décimales).
+pub(crate) fn exit_price(env: &Env) -> i128 {
+    price(env, capacity(env))
 }
 
-pub(crate) fn total_assets(_env: &Env) -> i128 {
-    panic!("TODO vault")
+pub(crate) fn total_assets(env: &Env) -> i128 {
+    total_deposits(env)
+}
+
+fn price(env: &Env, assets: i128) -> i128 {
+    let shares_total = total_shares(env);
+    if shares_total == 0 {
+        return PRICE_ONE;
+    }
+    assets * PRICE_ONE / shares_total
+}
+
+fn usdc(env: &Env) -> token::Client<'_> {
+    let address: Address = env.storage().instance().get(&DataKey::Usdc).unwrap();
+    token::Client::new(env, &address)
 }
 
 pub(crate) fn capacity(env: &Env) -> i128 {
