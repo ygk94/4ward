@@ -29,7 +29,7 @@ Préparer trois fenêtres avant la prise : le site (4ward-fx.vercel.app, Freight
 | 2:40 → 3:00 | **Code** `contracts/pool/src/pricing.rs:204` `forward_rate` (num / den, le spread arrondi côté pool), puis `contracts/pool/src/vault.rs:587` `reserve` | Le prix à terme en entiers, et le pool refuse toute couverture au-delà de sa capacité. |
 | 3:00 → 3:15 | Terminal : `./scripts/crash.sh 12`, puis Mes positions avec le compte à rebours | Le peso prend 12 %. Mode démo : 90 jours en 5 minutes. |
 | 3:15 → 3:40 | **Code** `contracts/pool/src/pricing.rs:175` `fixing` puis `contracts/pool/src/hedge.rs:249` `pnl` (`clamp(-margin, margin)`) | Le règlement prend le cours à l'échéance, pas au moment du clic. Le gain est plafonné à la garantie. |
-| 3:40 → 4:00 | Settle sur Mes positions (+11 002,56 USDC), puis path payment en terminal (`docs/payment-cli.md` § 6) | Le pool paie, puis le fournisseur reçoit 1 000 000 MXN pile. |
+| 3:40 → 4:00 | Settle sur Mes positions (+11 002,56 USDC), puis « Pay my supplier » sur la même carte : aperçu du coût sur le DEX, signature, récapitulatif du coût total (56 098,72 USDC) | Le pool paie, puis le fournisseur reçoit 1 000 000 MXN pile, depuis l'app. |
 | 4:00 → 4:15 | stellar.expert : la transaction et l'événement du règlement, le paiement reçu | Tout est vérifiable on-chain. |
 | 4:15 → 4:35 | **Code** `contracts/pool/src/hedge.rs:189` `close_early`, puis le bouton « Close early » sur une autre couverture ouverte (aperçu du montant) | La PME peut sortir avant l'échéance, au prix du marché, le spread sert de frais de sortie. |
 | 4:35 → 4:50 | Terminal : `cargo test` qui défile, « 152 passed » | 152 tests, dont l'invariant de solvabilité vérifié après chaque opération. |

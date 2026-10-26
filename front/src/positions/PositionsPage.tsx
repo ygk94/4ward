@@ -1,9 +1,19 @@
 // [FRONT — Hugo] Mes positions : protections (en cours / à régler / fermées) et position LP.
 import { useCallback, useEffect, useState } from 'react'
-import { explainError, fmtRate, fmtUsdc, pool, read, readHedges, type Hedge } from '../shared/contract'
+import { explainError, fmtRate, fmtUsdc, pool, read, readHedges, PRICE_DECIMALS, type Hedge } from '../shared/contract'
+import {
+  PAYABLE,
+  paySupplier,
+  quoteSupplierPayment,
+  recallPaid,
+  recallPayout,
+  rememberPaid,
+  rememberPayout,
+  type PaidRecord,
+} from '../payment/supplierPayment'
 import { go } from '../shared/router'
 import { TxStatus } from '../shared/TxStatus'
-import { useTx } from '../shared/useTx'
+import { explorerTx, useTx } from '../shared/useTx'
 import { WalletButton } from '../shared/TopBar'
 import { useWallet } from '../shared/wallet'
 import { readMine, type Mine } from '../vault/poolApi'
@@ -164,7 +174,8 @@ function HedgeRow({ id, hedge, status, now, onSettled }: { id: bigint; hedge: He
             className="btn btn-primary"
             disabled={state.step === 'signing'}
             onClick={async () => {
-              await run((p) => p.settle({ hedge_id: id }))
+              const payout = await run((p) => p.settle({ hedge_id: id }))
+              if (typeof payout === 'bigint') rememberPayout(id, payout)
               // Relire même en cas d'échec : si le keeper l'a déjà réglée (201), la ligne passe en « Closed ».
               onSettled()
             }}
@@ -195,7 +206,8 @@ function HedgeRow({ id, hedge, status, now, onSettled }: { id: bigint; hedge: He
                 className="btn btn-primary"
                 disabled={state.step === 'signing'}
                 onClick={async () => {
-                  await run((p) => p.close_early({ hedge_id: id }))
+                  const payout = await run((p) => p.close_early({ hedge_id: id }))
+                  if (typeof payout === 'bigint') rememberEarly(id)
                   setPreview(null)
                   onSettled()
                 }}
@@ -210,7 +222,114 @@ function HedgeRow({ id, hedge, status, now, onSettled }: { id: bigint; hedge: He
           <TxStatus state={state} success={(r) => `Closed early: ${fmtUsdc(r as bigint, 2)} USDC paid out.`} />
         </div>
       )}
+      {status === 'closed' && pay && PAYABLE.includes(hedge.currency) && !recallEarly(id) && (
+        <SupplierPayment id={id} hedge={hedge} />
+      )}
     </article>
+  )
+}
+
+// Une couverture clôturée par anticipation n'a pas de facture échue à payer : on la marque pour ne pas proposer le paiement.
+function rememberEarly(id: bigint) {
+  try {
+    localStorage.setItem(`fx.early.${id}`, '1')
+  } catch {
+    // stockage indisponible
+  }
+}
+function recallEarly(id: bigint) {
+  try {
+    return localStorage.getItem(`fx.early.${id}`) === '1'
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Dernière étape du parcours : après le règlement, payer le fournisseur en devise (path payment strict receive).
+ * Coût total = USDC payés sur le DEX − P&L de la couverture (versement du règlement − marge déposée).
+ */
+function SupplierPayment({ id, hedge }: { id: bigint; hedge: Hedge }) {
+  const [paid, setPaid] = useState<PaidRecord | null>(() => recallPaid(id))
+  const [estimate, setEstimate] = useState<bigint | null>(null)
+  const [busy, setBusy] = useState<'quote' | 'signing' | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const notional = `${fmtUsdc(hedge.notional)} ${hedge.currency}`
+
+  async function preview() {
+    setBusy('quote')
+    setError(null)
+    try {
+      setEstimate((await quoteSupplierPayment(hedge.currency, hedge.notional)).usdcCost)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function pay() {
+    setBusy('signing')
+    setError(null)
+    try {
+      const rec = await paySupplier(hedge.currency, hedge.notional, hedge.supplier)
+      rememberPaid(id, rec)
+      setPaid(rec)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  if (paid) {
+    const payout = recallPayout(id)
+    const locked = (hedge.notional * hedge.locked_rate) / 10n ** BigInt(PRICE_DECIMALS)
+    const pnl = payout === null ? null : payout - hedge.margin
+    return (
+      <div className="pos-action">
+        <p className="tx tx-ok">
+          Your supplier received exactly {notional}. You paid {fmtUsdc(paid.usdcPaid, 2)} USDC on the Stellar DEX
+          {pnl === null ? (
+            '.'
+          ) : (
+            <>
+              {' '}
+              and your protection {pnl >= 0n ? 'paid you' : 'cost you'} {fmtUsdc(pnl >= 0n ? pnl : -pnl, 2)} USDC: total
+              cost <b>{fmtUsdc(paid.usdcPaid - pnl, 2)} USDC</b> (locked price {fmtUsdc(locked, 2)} USDC).
+            </>
+          )}{' '}
+          <a href={explorerTx(paid.hash)} target="_blank" rel="noreferrer">
+            View on explorer ↗
+          </a>
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="pos-action">
+      {estimate === null ? (
+        <button className="btn btn-primary" disabled={busy !== null} onClick={preview}>
+          {busy === 'quote' ? 'Checking the DEX…' : 'Pay my supplier'}
+        </button>
+      ) : (
+        <>
+          <p className="small">
+            Your supplier receives exactly <b>{notional}</b>. Cost on the Stellar DEX right now: about{' '}
+            {fmtUsdc(estimate, 2)} USDC (at most 0.5% more if the price moves while you sign).
+          </p>
+          <button className="btn btn-primary" disabled={busy !== null} onClick={pay}>
+            {busy === 'signing' ? 'Waiting…' : `Pay ${notional}`}
+          </button>
+          <button className="btn btn-ghost" disabled={busy !== null} onClick={() => setEstimate(null)}>
+            Not now
+          </button>
+        </>
+      )}
+      {busy === 'signing' && <p className="tx tx-wait">Confirm the payment in your wallet…</p>}
+      {error && <p className="tx tx-err">{error}</p>}
+    </div>
   )
 }
 

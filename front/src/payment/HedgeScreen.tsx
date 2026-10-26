@@ -1,5 +1,5 @@
 // [FRONT — Hugo] (logique fournie par Paiement) Écran Lucía : facture, blocage du taux (open_hedge).
-// Le règlement (settle) + path payment au fournisseur se font depuis « Mes positions ».
+// Le règlement (settle) puis le paiement du fournisseur (path payment, payment/supplierPayment.ts) se font depuis « Mes positions ».
 import { useEffect, useState } from 'react'
 import { QuoteCard } from '../pricing/QuoteCard'
 import { config, TRADABLE } from '../shared/config'
