@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useSlidingPill } from '../shared/useSlidingPill'
 import { pct } from './format'
-import { Histogram } from './Histogram'
+import { Histogram, type Focus } from './Histogram'
 import { CAP, DYNAMIC, SAFE, SENIOR_RATE, type Params, type Summary } from './montecarlo'
 import './risk.css'
 import { useTween } from './useTween'
@@ -72,6 +72,9 @@ export function RiskPage() {
   const { wrap: moodsWrap, pill: moodsPill } = useSlidingPill(vol)
   const { wrap: presetsWrap, pill: presetsPill } = useSlidingPill(`${vol}-${advanced}`)
 
+  // Repère « épinglé » depuis la légende (le survol de sa ligne fait la même chose, le temps du survol).
+  const [pinned, setPinned] = useState<Focus | null>(null)
+  const pin = (f: Focus) => setPinned((p) => (p === f ? null : f))
   const mean = useTween(s?.mean)
 
   const reset = () => {
@@ -124,8 +127,12 @@ export function RiskPage() {
           <div className="histo-head">
             <p className="eyebrow">Dynamic return in 40,000 simulated years</p>
             <p className="histo-legend">
-              <span className="safe">┆ Safe</span>
-              <span className="mean">┆ Dynamic avg</span>
+              <button className={`safe ${pinned === 'safe' ? 'on' : ''}`} aria-pressed={pinned === 'safe'} onClick={() => pin('safe')}>
+                ┆ Safe
+              </button>
+              <button className={`mean ${pinned === 'mean' ? 'on' : ''}`} aria-pressed={pinned === 'mean'} onClick={() => pin('mean')}>
+                ┆ Dynamic avg
+              </button>
               {prev && showPrev && <span className="prev">▭ previous</span>}
               {prev && (
                 <button className="chip" onClick={() => setShowPrev((v) => !v)}>
@@ -134,7 +141,7 @@ export function RiskPage() {
               )}
             </p>
           </div>
-          {s ? <Histogram s={s} prev={prev} showPrev={showPrev} /> : <p className="muted small">Simulating…</p>}
+          {s ? <Histogram s={s} prev={prev} showPrev={showPrev} pinned={pinned} /> : <p className="muted small">Simulating…</p>}
           <p className="risk-foot tiny muted">Simulation of the target pool. Some features are on the roadmap: see Advanced.</p>
         </div>
       </section>

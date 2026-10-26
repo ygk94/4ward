@@ -22,7 +22,7 @@ const theme: SwkAppTheme = {
   border: 'rgba(35,37,46,0.12)',
   shadow: '0 20px 60px rgba(47,107,255,0.15)',
   'border-radius': '14px',
-  'font-family': "'Space Grotesk', system-ui, sans-serif",
+  'font-family': "'Geist', system-ui, sans-serif",
 }
 
 StellarWalletsKit.init({ modules: defaultModules(), network: Networks.TESTNET, theme })

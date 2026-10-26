@@ -1,4 +1,4 @@
-/* [FRONT — Hugo] Thème : fond crème, encre bleu nuit, accents pastel, typo géométrique (Space Grotesk). */
+/* [FRONT — Hugo] Thème : fond crème, encre bleu nuit, accents pastel, typo Geist / Geist Mono. */
 :root {
   --bg: #f4efe4;
   --bg-2: #fbf8f1;
@@ -32,8 +32,8 @@
   --peach: var(--ice);
   --peach-ink: #4a5bd8;
 
-  --sans: 'Space Grotesk', system-ui, sans-serif;
-  --mono: 'JetBrains Mono', ui-monospace, monospace;
+  --sans: 'Geist', system-ui, sans-serif;
+  --mono: 'Geist Mono', ui-monospace, monospace;
 
   --gutter: clamp(16px, 4vw, 48px);
   --radius: 14px;
@@ -1252,8 +1252,9 @@ select {
   gap: 8px;
   flex-wrap: wrap;
 }
-.tranche-actions {
-  flex-wrap: nowrap;
+.tranche-actions .link {
+  white-space: nowrap;
+  margin-left: auto;
 }
 .tranche-actions .btn {
   padding: 8px 12px;
@@ -1375,6 +1376,20 @@ select {
   .kpis {
     grid-template-columns: repeat(2, 1fr);
   }
+  /* KPI sur 2 colonnes : le panneau ne tient plus dans l'écran, la page défile au lieu d'écraser les cartes du bas */
+  .vault-page {
+    height: auto;
+    min-height: 100svh;
+    align-items: start;
+  }
+  .pool-panel {
+    overflow: visible;
+  }
+  .vault-page .side-panel {
+    position: sticky;
+    top: 76px;
+    max-height: calc(100svh - 96px);
+  }
 }
 @media (max-width: 900px) {
   .vault-page {
@@ -1383,6 +1398,10 @@ select {
   }
   .pool-panel {
     overflow: visible;
+  }
+  .vault-page .side-panel {
+    position: static;
+    max-height: none;
   }
   .pos-card {
     grid-template-columns: 1fr;

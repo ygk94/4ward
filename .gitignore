@@ -9,3 +9,4 @@ target
 node_modules
 test_snapshots
 keepalive.log
+demo-video/

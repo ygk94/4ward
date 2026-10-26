@@ -147,6 +147,20 @@
 .histo-legend .mean {
   color: var(--ink);
 }
+.histo-legend > button:not(.chip) {
+  font: inherit;
+  padding: 2px 6px;
+  margin: -2px -6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.histo-legend > button:not(.chip):hover,
+.histo-legend > button.on {
+  background: rgba(35, 37, 46, 0.06);
+}
+.histo-legend > button.safe.on {
+  background: rgba(21, 147, 196, 0.12);
+}
 .histo-legend .prev {
   color: var(--muted);
   font-weight: 500;
@@ -173,11 +187,19 @@
   max-height: 100%;
   display: block;
 }
-.histo .bar {
+/* x / width / transform glissent quand un repère écarte les barres */
+.histo .bar,
+.histo .ghost {
   transition:
+    x 0.4s cubic-bezier(0.2, 0.7, 0.2, 1),
+    width 0.4s cubic-bezier(0.2, 0.7, 0.2, 1),
     y 0.45s cubic-bezier(0.2, 0.7, 0.2, 1),
     height 0.45s cubic-bezier(0.2, 0.7, 0.2, 1),
     opacity 0.2s;
+}
+.histo .tick,
+.histo .marker {
+  transition: transform 0.4s cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 .histo .bar.gain {
   fill: var(--blue);
@@ -227,6 +249,55 @@
 }
 .histo .marker.mean {
   stroke: var(--ink);
+}
+.histo .marker.on {
+  stroke-dasharray: none;
+  stroke-width: 1.5;
+}
+/* carte du repère en focus, dans l'espace libéré entre les barres */
+.histo-focus {
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: 2px;
+  padding: 8px 10px 10px;
+  text-align: center;
+  /* fond : la ligne du repère passe derrière le texte */
+  background: rgba(251, 248, 241, 0.92);
+  border-radius: 10px;
+  font-size: 12px;
+  color: var(--text);
+  animation: focus-in 0.35s 0.12s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.histo-focus p {
+  margin: 0;
+  max-width: 100%;
+}
+.histo-focus .eyebrow {
+  font-size: 10px;
+}
+.histo-focus .focus-big {
+  font-weight: 700;
+  font-size: 18px;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+  margin: 0 0 2px;
+}
+.histo-focus.safe .focus-big,
+.histo-focus.safe .eyebrow {
+  color: var(--mint-ink);
+}
+.histo-focus.mean .focus-big {
+  color: var(--ink);
+}
+@keyframes focus-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
 }
 /* entrée : chaque barre monte depuis la ligne de base, en décalé de gauche à droite */
 .histo.intro .bar {
@@ -348,6 +419,15 @@
     transition: none;
   }
   .histo.intro .bar {
+    animation: none;
+  }
+  .histo .ghost,
+  .histo .tick,
+  .histo .marker,
+  .histo .cursor {
+    transition: none;
+  }
+  .histo-focus {
     animation: none;
   }
 }
