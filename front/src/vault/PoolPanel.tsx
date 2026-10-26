@@ -5,10 +5,23 @@ import { hedgeUsdc, type Activity } from '../shared/activity'
 import { fmtUsdc, fromUnits, pool, read, type PoolStats } from '../shared/contract'
 import { shortAddress, useWallet } from '../shared/wallet'
 import { InkVault } from '../visual/InkVault'
+import { readSplit } from './poolApi'
 
 export function PoolPanel({ stats, demo, activity }: { stats: PoolStats | null; demo: boolean; activity: Activity | null }) {
   const { address } = useWallet()
   const [mine, setMine] = useState<{ balance: bigint; shares: bigint } | null>(null)
+  // Capital réellement bloqué par les couvertures (pris sur la tranche Dynamic), relu à chaque rafraîchissement.
+  const [locked, setLocked] = useState<bigint | null>(null)
+
+  useEffect(() => {
+    if (!stats || demo) {
+      setLocked(null)
+      return
+    }
+    readSplit()
+      .then((s) => setLocked(s.locked))
+      .catch(() => setLocked(null))
+  }, [stats, demo])
 
   useEffect(() => {
     if (!address) {
@@ -24,7 +37,9 @@ export function PoolPanel({ stats, demo, activity }: { stats: PoolStats | null; 
       .catch(() => setMine(null))
   }, [address, stats])
 
-  const reserved = stats ? stats.totalAssets - stats.capacity : 0n
+  // capacity = junior − réservé (vault.rs) : totalAssets − capacity compterait aussi tout le capital Safe.
+  // Hors ligne (données de démo, sans tranche Safe), junior = totalAssets.
+  const reserved = locked ?? (stats ? stats.totalAssets - stats.capacity : 0n)
   const usage = stats && stats.totalAssets > 0n ? Number((reserved * 10_000n) / stats.totalAssets) / 100 : 0
   const raw = stats ? (fromUnits(stats.sharePrice) - 1) * 100 : 0
   // Arrondi d'affichage : un écart sous 0,005 % s'affiche +0%, pas -0%.

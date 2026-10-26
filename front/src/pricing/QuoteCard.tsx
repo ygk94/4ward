@@ -1,11 +1,23 @@
 // [FRONT — Hugo] (logique fournie par Pricing) Devis : spot de l'oracle du pool (mock en démo), prix figé, marge à déposer (appel quote).
-import { fmtRate, fmtUsdc, type Quote } from '../shared/contract'
+import { fmtRate, fmtUsdc, type Quote, type SideTag } from '../shared/contract'
 
-export function QuoteCard({ quote, loading, error, currency }: { quote: Quote | null; loading: boolean; error: string | null; currency: string }) {
+export function QuoteCard({
+  quote,
+  loading,
+  error,
+  currency,
+  side = 'BuyCurrency',
+}: {
+  quote: Quote | null
+  loading: boolean
+  error: string | null
+  currency: string
+  side?: SideTag
+}) {
   if (error) return <div className="quote quote-err">{error}</div>
   return (
     <div className={`quote ${loading ? 'loading' : ''}`}>
-      <p className="quote-l">You’ll pay, no matter what</p>
+      <p className="quote-l">{side === 'SellCurrency' ? 'You’ll receive, no matter what' : 'You’ll pay, no matter what'}</p>
       <p className="quote-big">
         {quote ? fmtUsdc(quote.usdc_cost, 2) : '—'} <span>USDC</span>
       </p>

@@ -10,7 +10,6 @@ import { useTx } from '../shared/useTx'
 
 const CURRENCIES = ['MXN', 'BRL', 'ARS', 'EUR']
 const DURATIONS = [
-  { label: '2 min (demo)', secs: 120 },
   { label: '30 days', secs: 30 * 86_400 },
   { label: '90 days', secs: 90 * 86_400 },
 ]
@@ -27,12 +26,20 @@ export function HedgeScreen({ onDone }: { onDone: () => void }) {
   const [loading, setLoading] = useState(false)
   const { state, run } = useTx()
 
-  const notional = Number(amount.replace(',', '.')) || 0
-  const args = { currency, side: { tag: side }, notional: toUnits(amount || '0'), duration_secs: BigInt(duration), cap_bps: cap * 100 }
+  // Saisie tolérante (espaces, « _ ») mais validée : toUnits/BigInt lèveraient pendant le rendu sur « 1,000,000 » ou « 1e6 ».
+  const clean = amount.replace(/[\s_]/g, '')
+  const valid = /^\d+([.,]\d{0,7})?$/.test(clean)
+  const notional = valid ? Number(clean.replace(',', '.')) : 0
+  const args = { currency, side: { tag: side }, notional: valid ? toUnits(clean) : 0n, duration_secs: BigInt(duration), cap_bps: cap * 100 }
 
   // Devis simulé (aucune signature), recalculé 400 ms après la dernière saisie.
   useEffect(() => {
-    if (notional <= 0) return
+    if (notional <= 0) {
+      setQuote(null)
+      setQuoteErr(null)
+      setLoading(false)
+      return
+    }
     setLoading(true)
     const id = setTimeout(async () => {
       try {
@@ -108,9 +115,9 @@ export function HedgeScreen({ onDone }: { onDone: () => void }) {
         </label>
       )}
 
-      <QuoteCard quote={quote} loading={loading} error={quoteErr} currency={currency} />
+      <QuoteCard quote={quote} loading={loading} error={quoteErr} currency={currency} side={side} />
 
-      <button className="btn btn-primary wide" disabled={!quote || state.step === 'signing' || !supplier} onClick={submit}>
+      <button className="btn btn-primary wide" disabled={!quote || notional <= 0 || state.step === 'signing' || !supplier} onClick={submit}>
         {state.step === 'signing' ? 'Waiting for wallet…' : 'Lock my price'}
       </button>
       <TxStatus state={state} success={(id) => `Hedge #${String(id)} opened.`} />

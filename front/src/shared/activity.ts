@@ -66,14 +66,20 @@ async function depositors(): Promise<Set<string>> {
 
 export async function readActivity(): Promise<Activity> {
   const p = await pool()
-  const [hedges, lps] = await Promise.all([readAllHedges(), depositors().catch(() => new Set<string>())])
+  const [hedges, lps, timeFactor] = await Promise.all([
+    readAllHedges(),
+    depositors().catch(() => new Set<string>()),
+    read(p.time_factor()).catch(() => 1),
+  ])
   const shares = await Promise.all([...lps].map((lp) => read(p.lp_shares({ lp })).catch(() => 0n)))
 
   const open = hedges.filter(({ hedge }) => !hedge.settled)
   const sum = (xs: { hedge: Hedge }[]) => xs.reduce((s, { hedge }) => s + hedgeUsdc(hedge), 0n)
   const n = hedges.length || 1
   // Durée restante moyenne des couvertures ouvertes (la date d'ouverture n'est pas stockée).
+  // Les échéances sont en secondes RÉELLES : × time_factor pour retrouver des jours de contrat (mode démo).
   const now = Date.now() / 1000
+  const tf = Number(timeFactor) || 1
 
   return {
     providers: shares.filter((s) => s > 0n).length,
@@ -83,7 +89,7 @@ export async function readActivity(): Promise<Activity> {
     volume: sum(hedges),
     openVolume: sum(open),
     avgCapBps: hedges.reduce((s, { hedge }) => s + hedge.cap_bps, 0) / n,
-    avgTenorDays: open.length ? open.reduce((s, { hedge }) => s + Math.max(0, Number(hedge.maturity) - now), 0) / open.length / 86_400 : 0,
+    avgTenorDays: open.length ? open.reduce((s, { hedge }) => s + Math.max(0, Number(hedge.maturity) - now) * tf, 0) / open.length / 86_400 : 0,
     currencies: [...new Set(hedges.map(({ hedge }) => hedge.currency))],
     recent: hedges.slice(-4).reverse(),
   }

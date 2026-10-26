@@ -1,6 +1,7 @@
 // [FRONT — Hugo] Adaptateur des appels LP du panneau « Safe / Dynamic » (tranches senior / junior).
 // Seul ce fichier connaît les noms des fonctions du contrat : quand feat/tranches sera mergé (ou renommé),
-// c'est ici qu'on ajuste. Tant que le contrat déployé n'a pas `deposit_senior`, la tranche Safe est désactivée.
+// c'est ici qu'on ajuste. Tranches Safe/Dynamic déployées (deposit_senior, withdraw_senior, senior_balance, tranche_values) ;
+// la tranche Safe se désactive seule face à un contrat qui ne les aurait pas.
 import type { contract } from '@stellar/stellar-sdk'
 import { pool, read, type PoolClient } from '../shared/contract'
 
@@ -17,7 +18,7 @@ interface TrancheValues {
   junior: bigint
   senior_price: bigint
 }
-// Fonctions de feat/tranches : absentes du contrat actuellement déployé.
+// Tranches Safe/Dynamic déployées (deposit_senior, withdraw_senior, senior_balance, tranche_values).
 interface TrancheMethods {
   deposit_senior(a: { lp: string; amount: bigint }): Promise<Tx<bigint>>
   withdraw_senior(a: { lp: string; shares: bigint }): Promise<Tx<bigint>>
@@ -101,12 +102,17 @@ export function deposit(kind: Kind, amount: bigint) {
 export function withdraw(kind: Kind, usdc: bigint | 'all', split: Split, mine: Mine) {
   return (p: Client, lp: string): Promise<Tx<bigint>> => {
     if (kind === 'dynamic') {
-      const shares = usdc === 'all' ? mine.dynamic.shares : (usdc * ONE) / split.exitPrice
+      // exit_price est tronqué à 7 décimales : diviser par (prix + 1 unité) arrondit les parts vers le bas,
+      // et on plafonne aux parts détenues (taper son solde affiché ne doit pas donner l'erreur 106).
+      const calc = usdc === 'all' ? mine.dynamic.shares : (usdc * ONE) / (split.exitPrice + 1n)
+      const shares = calc < mine.dynamic.shares ? calc : mine.dynamic.shares
       return p.withdraw({ lp, amount: shares })
     }
     if (!hasTranches(p)) throw new Error('Safe withdrawals are not available yet.')
-    // Pas de lecture des parts Safe : on les déduit de la valeur (arrondi vers le bas, jamais plus que détenu).
+    // Pas de lecture des parts Safe : on les déduit de la valeur. senior_price est TRONQUÉ à 7 décimales
+    // (prix interne en 1e18) : diviser par lui seul arrondirait les parts vers le haut (erreur 112).
+    // On divise par (prix + 1 unité) pour rester sous les parts détenues.
     const value = usdc === 'all' ? (mine.safe?.balance ?? 0n) : usdc
-    return p.withdraw_senior({ lp, shares: (value * ONE) / split.safePrice })
+    return p.withdraw_senior({ lp, shares: (value * ONE) / (split.safePrice + 1n) })
   }
 }

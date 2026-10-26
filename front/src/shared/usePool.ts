@@ -6,14 +6,14 @@ import { readStats, toUnits, type PoolStats } from './contract'
 
 const DEMO: PoolStats = {
   totalAssets: toUnits(1_000_000),
-  capacity: toUnits(945_127),
+  capacity: toUnits(944_987),
   sharePrice: toUnits(1.0042),
   exitPrice: toUnits(0.9493),
   exposure: {
-    buy_notional: toUnits(548_730),
+    buy_notional: toUnits(550_128),
     sell_notional: toUnits(0),
-    net_notional: toUnits(548_730),
-    buy_margin: toUnits(54_873),
+    net_notional: toUnits(550_128),
+    buy_margin: toUnits(55_013),
     sell_margin: 0n,
   },
 }

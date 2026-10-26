@@ -50,6 +50,8 @@ interface PoolMethods {
   capacity(): Promise<Tx<bigint>>
   share_price(): Promise<Tx<bigint>>
   exit_price(): Promise<Tx<bigint>>
+  /** Facteur d'accélération du temps (mode démo : 25920, 90 jours = 5 min réelles). */
+  time_factor(): Promise<Tx<number>>
   lp_balance(a: { lp: string }): Promise<Tx<bigint>>
   lp_shares(a: { lp: string }): Promise<Tx<bigint>>
   exposure(a: { currency: string }): Promise<Tx<Exposure>>
@@ -187,6 +189,9 @@ const ERRORS: Record<number, string> = {
   110: 'Amount too large.',
   111: 'Dynamic must stay at least 20% of deposits: this deposit or withdrawal would break that.',
   112: 'You don’t hold that many Safe shares.',
+  // Erreurs du contrat token USDC (SAC), hors spec du pool : #10 solde insuffisant, #13 trustline absente.
+  10: 'Not enough USDC in your wallet.',
+  13: 'Your wallet has no USDC trustline.',
   200: 'Hedge not found.',
   201: 'This hedge is already settled.',
   202: 'Maturity not reached yet.',
@@ -223,6 +228,7 @@ export function explainError(e: unknown): string {
 const DOC_CODES: [string, number][] = [
   ['Montant nul ou négatif', 100],
   ['`reserve` au-delà', 101],
+  ['`release` au-delà', 102],
   ['`book_loss` rendrait', 103],
   ['plus de capital', 104],
   ['Dépôt trop petit', 105],
@@ -230,6 +236,7 @@ const DOC_CODES: [string, number][] = [
   ['Retrait de plus de parts', 106],
   ['Retrait qui verserait 0', 107],
   ['limite de la devise', 108],
+  ['`close_position`', 109],
   ['Débordement', 110],
   ['passerait sous', 111],
   ["id qui n'existe pas", 200],
@@ -237,6 +244,7 @@ const DOC_CODES: [string, number][] = [
   ["avant l'échéance", 202],
   ['`open` avec un notionnel', 203],
   ['`open` avec une durée', 204],
+  ['`set_time_factor` à 0', 205],
   ['aucun prix pour la devise', 300],
   ["Prix de l'oracle nul", 301],
   ['MAX_PRICE_AGE_SECS', 302],
@@ -247,6 +255,9 @@ const DOC_CODES: [string, number][] = [
   ['Devise non ouverte', 306],
   ['sous le minimum', 307],
   ['au-dessus de `MAX_CAP_BPS`', 308],
+  ['`set_min_cap` à 0', 310],
+  ['`set_spread`', 311],
+  ['cours de fixing', 312],
 ]
 
 function translateDoc(doc: string): string {
