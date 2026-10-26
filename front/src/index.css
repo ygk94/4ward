@@ -1152,6 +1152,13 @@ canvas.vault-globe {
   letter-spacing: 0;
   color: var(--sky-ink);
 }
+.quote-rates {
+  margin-top: 6px;
+}
+.quote-rates a {
+  color: inherit;
+  text-decoration: underline;
+}
 .quote-err,
 .tx-err {
   color: var(--pink-ink);

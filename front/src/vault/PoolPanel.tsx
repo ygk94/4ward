@@ -1,9 +1,11 @@
 // [FRONT — Hugo] Panneau pool (2/3 gauche de la page vault), tout tient dans l'écran :
 // capital, usage (fournisseurs, PME, volume, encours), utilisation, équilibre du pool par devise, dernières couvertures.
 // En haut à droite, le petit vault devient un globe quand la PME couvre une facture (cf. VaultGlobe).
+// Sous le TVL : source des taux du prix (Etherfuse, lus en direct) ; le pool ne détient pas encore de stablebonds.
 import { useEffect, useState } from 'react'
 import { hedgeUsdc, type Activity } from '../shared/activity'
 import { fmtUsdc, fromUnits, pool, read, type Exposure, type PoolStats } from '../shared/contract'
+import { ETHERFUSE_SITE, fmtBps, useEtherfuseRates } from '../shared/etherfuse'
 import { shortAddress, useWallet } from '../shared/wallet'
 import { VaultGlobe } from '../visual/VaultGlobe'
 import { readSplit } from './poolApi'
@@ -18,6 +20,7 @@ interface Props {
 
 export function PoolPanel({ stats, demo, activity, globe = false, link }: Props) {
   const { address } = useWallet()
+  const rates = useEtherfuseRates()
   const [mine, setMine] = useState<{ balance: bigint; shares: bigint } | null>(null)
   // Capital réellement bloqué par les couvertures (pris sur la tranche Dynamic), relu à chaque rafraîchissement.
   const [locked, setLocked] = useState<bigint | null>(null)
@@ -79,6 +82,16 @@ export function PoolPanel({ stats, demo, activity, globe = false, link }: Props)
               </>
             )}
           </p>
+          {rates && (
+            <p className="muted tiny">
+              Rate source:{' '}
+              <a className="link" href={ETHERFUSE_SITE} target="_blank" rel="noreferrer">
+                Etherfuse stablebonds (live rates)
+              </a>{' '}
+              · USTRY {fmtBps(rates.bps.USTRY)}
+              {rates.bps.CETES !== undefined && <> · CETES {fmtBps(rates.bps.CETES)}</>} · in every forward · holding them: roadmap
+            </p>
+          )}
         </div>
         <VaultGlobe className={`pool-vault ${globe ? 'is-globe' : ''}`} globe={globe} from={link?.[0]} to={link?.[1]} />
       </header>

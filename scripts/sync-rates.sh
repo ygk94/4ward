@@ -4,12 +4,15 @@
 #   ./scripts/sync-rates.sh --all      ajoute GBP ← GILTS
 #   ./scripts/sync-rates.sh --dry-run  calcule et affiche tout, sans envoyer set_rate
 #   ./scripts/sync-rates.sh --snapshot écrit les taux dans scripts/rates.snapshot (lu par setup-testnet.sh), sans set_rate
+#   ./scripts/sync-rates.sh --loop 3600 relance la synchro toutes les 3600 s (taux du pool en phase avec Etherfuse).
+#                                       PAS pendant une vidéo : un taux qui bouge change les chiffres de la démo.
+#                                       En arrière-plan : nohup ./scripts/sync-rates.sh --loop 3600 >> sync-rates.log 2>&1 &
 # Repli sur le taux de scripts/rates.snapshot si l'API ne répond pas, si la valeur manque, vaut 0 ou sort de ]0, 5000] bps.
 # Alias surchargeables : POOL=fx-pool ADMIN=fx-admin NET=testnet ETHERFUSE_URL=https://api.etherfuse.com/lookup/tokens/cost
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-usage() { sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; }
 
 say() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 warn() { printf '\033[33m   %s\033[0m\n' "$*"; }
@@ -20,15 +23,32 @@ DRY_RUN=0
 ALL=0
 SNAPSHOT=0
 SNAPSHOT_FILE=scripts/rates.snapshot
-for arg in "$@"; do
-  case "$arg" in
+LOOP=""
+ARGS=()
+while [ $# -gt 0 ]; do
+  case "$1" in
     -h|--help) usage; exit 0 ;;
-    --dry-run) DRY_RUN=1 ;;
-    --all) ALL=1 ;;
+    --dry-run) DRY_RUN=1; ARGS+=("$1") ;;
+    --all) ALL=1; ARGS+=("$1") ;;
     --snapshot) SNAPSHOT=1 ;;
-    *) die "option inconnue : $arg (voir --help)" ;;
+    --loop)
+      LOOP=${2:-}
+      [[ "$LOOP" =~ ^[0-9]+$ ]] && [ "$LOOP" -ge 60 ] || die "--loop attend une période en secondes, au moins 60 (ex. --loop 3600)"
+      shift ;;
+    *) die "option inconnue : $1 (voir --help)" ;;
   esac
+  shift
 done
+
+# ---- boucle : relance le script sans --loop ; un passage en échec n'arrête pas la boucle ----
+if [ -n "$LOOP" ]; then
+  [ "$SNAPSHOT" = 0 ] || die "--loop et --snapshot ne vont pas ensemble"
+  while :; do
+    echo "[$(date '+%F %T')] synchro des taux"
+    "$0" ${ARGS[@]+"${ARGS[@]}"} || warn "passage en échec, nouvel essai dans $LOOP s"
+    sleep "$LOOP"
+  done
+fi
 
 # .env.testnet est facultatif : il ne sert qu'au repli sur POOL_ID.
 # shellcheck disable=SC1091
@@ -78,7 +98,7 @@ done
 FETCHED=""
 if [ -z "$PY" ]; then
   warn "Python 3 introuvable (essayé : python3, python) : taux en dur conservés"
-elif ! BODY=$(curl -fsS -m 10 "$ETHERFUSE_URL" 2>&1); then
+elif ! BODY=$(curl -fsS -m 10 --retry 2 --retry-delay 3 "$ETHERFUSE_URL" 2>&1); then
   warn "API injoignable ($BODY)"
 else
   FETCHED=$(printf '%s' "$BODY" | "$PY" -I -c "

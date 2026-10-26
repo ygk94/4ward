@@ -42,7 +42,7 @@ Total : environ 340 mots, soit 2:15 de parole, plus le temps des actions à l'é
 |---|---|---|
 | « options cost a few percent » | ✅ prudent | Le modèle donne 2,6 % ; on ne cite pas de chiffre précis. |
 | « Reflector-compatible prices » | ✅ exact | La démo lit un oracle mock de même interface. Ne pas dire « live Reflector prices ». |
-| « Etherfuse rates inside the price » | ✅ exact | Ce sont des valeurs figées (snapshot du 25/10) poussées par l'admin. |
+| « Etherfuse rates inside the price » | ✅ exact | Lus en direct sur l'API Etherfuse et poussés dans le pool par l'admin (`sync-rates.sh`) ; la carte de devis affiche le taux Etherfuse live et celui du pool. Ne pas dire que le contrat lit Etherfuse lui-même. |
 | « never promises more than their capital covers » | ✅ exact | Règle de capacité : réservé ≤ capital Dynamic. |
 | « nobody can game the timing » | ✅ exact | Le règlement se fait au fixing à l'échéance. |
 | « 55,012.81 », « 11,002.56 », « 56,098.72 », « 61,600 » | ✅ mesurés | À condition de remettre le mock à 0,055 et l'offre DEX à 0,055 avant la prise, puis à 0,0616 après le crash. |
@@ -53,4 +53,4 @@ Total : environ 340 mots, soit 2:15 de parole, plus le temps des actions à l'é
 - **Signatures Freighter (3, toutes à faire par toi)** : Lock my price, Settle, Pay my supplier. Le script s'arrête et attend à chaque fois, et on coupe au montage.
 - **Attente de l'échéance** : 5 minutes réelles entre D3 et D5. On filme le compte à rebours, puis on coupe. Le crash (`crash.sh 12` puis l'offre DEX à 0,0616) se lance hors champ pendant ce temps, avant l'échéance.
 - **Avant chaque prise** : `crash.sh --demo MXN`, offre DEX à 0,055, clés `fx.*` vidées du localStorage, keepalive actif, Ne pas déranger.
-- **Après la vidéo** : `seed-testnet.sh`, puis keepalive avec `--keeper`, pour que les jurés trouvent un site plein.
+- **Après la vidéo** : `seed-testnet.sh`, puis keepalive avec `--live --keeper` (cours Reflector recopié dans le mock, offre DEX réalignée, couvertures échues réglées) et `VITE_LIVE_SPOT=1` sur Vercel, pour que les jurés trouvent un site plein, au cours du jour. Pour refaire une prise : arrêter le keepalive, puis `crash.sh --demo MXN` et `dex-align.sh`.
