@@ -1,237 +1,239 @@
 # 4ward
 
-> **Bloquez aujourd'hui le prix d'une facture fournisseur payable en devise dans 90 jours. Le jour J, votre fournisseur est payé dans sa monnaie, au taux promis.**
+🇫🇷 Version française : [README.fr.md](README.fr.md)
 
-**Démo en ligne : [4ward-fx.vercel.app](https://4ward-fx.vercel.app)** (testnet, wallet Freighter)
+> **Lock in today the price of a supplier invoice payable in foreign currency in 90 days. On the due date, your supplier is paid in their currency, at the promised rate.**
 
-Projet HackMeridian (Stellar, Lisbonne, 25-26/10/2026), parcours **Genesis**, tracks :
-- **Stellar Unlocked** : path payment *strict receive* USDC → MXN (le fournisseur reçoit le montant exact), USDC en SAC, événements Soroban, `require_auth`, TTL des entrées ;
-- **Stellar Composed** : oracle Reflector FX (SEP-40), Stellar Wallets Kit (Freighter et les autres wallets), taux Etherfuse (CETES, USTRY, TESOURO, EUROB) dans le prix à terme.
+**Live demo: [4ward-fx.vercel.app](https://4ward-fx.vercel.app)** (testnet, Freighter wallet)
 
-**En place sur testnet** ([contrat pool sur stellar.expert](https://stellar.expert/explorer/testnet/contract/CACSMEBQLBR73CH6BRPGY7LDDE2P63C6WPZEJPZNIP5DLT5IN6O5VWA4)) : devis à terme et ouverture de couverture (`quote`, `open_hedge`), règlement au fixing de l'échéance (`settle`), clôture anticipée au prix du marché (`close_early` : le perdant paie, frais de sortie = spread), paiement du fournisseur par path payment, vault LP à deux tranches avec règle de capacité, crash du peso sur l'oracle de démo, keeper de règlement. **Roadmap** : rémunération des tranches par la trésorerie, netting, couverture du pool, paiement atomique.
+HackMeridian project (Stellar, Lisbon, 25-26/10/2026), **Genesis** path, tracks:
+- **Stellar Unlocked**: *strict receive* path payment USDC → MXN (the supplier receives the exact amount), USDC as a SAC, Soroban events, `require_auth`, entry TTLs;
+- **Stellar Composed**: Reflector FX oracle (SEP-40), Stellar Wallets Kit (Freighter and other wallets), Etherfuse rates (CETES, USTRY, TESOURO, EUROB) in the forward price.
 
----
-
-## Le problème, en une histoire
-
-Lucía importe de la tequila à Lisbonne. Elle doit **1 000 000 de pesos** à son fournisseur de Guadalajara **dans 90 jours**. Si le peso monte de 10 % d'ici là, sa facture lui coûte 5 500 $ de plus, et c'est sa marge qui disparaît.
-
-Une grande entreprise appellerait sa banque pour bloquer le taux (un *forward de change*). Lucía n'a pas de ligne de crédit, et sa banque ne lui proposera jamais ce produit. Sur Stellar, elle sait payer à l'étranger en quelques secondes, mais **uniquement au comptant**. Rien ne lui permet de figer un taux pour un paiement futur.
-
-## La solution
-
-1. Lucía saisit sa facture : *1 000 000 MXN dans 90 jours*.
-2. L'app lui affiche un prix figé : *« vous paierez 55 013 USDC »*, tant que le peso bouge moins que la protection choisie (au-delà, elle ne supporte que la part du mouvement qui dépasse son plafond).
-3. Elle choisit sa protection (par ex. ±10 %), dépose la marge correspondante en USDC et signe avec son wallet (Freighter, via Stellar Wallets Kit).
-4. Le jour J, n'importe qui peut déclencher le règlement. Le contrat prend le cours **en vigueur à l'échéance** sur un oracle SEP-40 (`price(asset, timestamp)` ; Reflector FX en production, mock-oracle de même interface pour la démo), pas le cours du moment où l'on règle :
-   - le peso a monté → le pool lui verse la différence ;
-   - le peso a baissé → la différence est prise sur sa marge.
-5. Dans la foulée, un **path payment Stellar** convertit ses USDC en pesos et paie le fournisseur : **1 000 000 MXN pile**, pour un coût total égal au prix figé au jour 0.
-
-**Pourquoi Stellar :** la couverture et le paiement en devise du fournisseur passent par le même rail : USDC natif, oracle FX Reflector, path payment jusqu'au peso. Pas de banque, pas de ligne de crédit, et un règlement que n'importe qui peut déclencher.
+**Live on testnet** ([pool contract on stellar.expert](https://stellar.expert/explorer/testnet/contract/CACSMEBQLBR73CH6BRPGY7LDDE2P63C6WPZEJPZNIP5DLT5IN6O5VWA4)): forward quote and hedge opening (`quote`, `open_hedge`), settlement at the maturity fixing (`settle`), early close at market price (`close_early`: the losing side pays, exit fee = spread), supplier payment via path payment, two-tranche LP vault with capacity rule, peso crash on the demo oracle, settlement keeper. **Roadmap**: tranche yield from treasury, netting, pool hedging, atomic payment.
 
 ---
 
-## Comment ça marche
+## The problem, as a story
 
-### Les acteurs
+Lucía imports tequila in Lisbon. She owes **1,000,000 pesos** to her supplier in Guadalajara **in 90 days**. If the peso rises 10% by then, her invoice costs her $5,500 more, and her margin is gone.
 
-| Acteur | Rôle |
+A large company would call its bank to lock the rate (an *FX forward*). Lucía has no credit line, and her bank will never offer her this product. On Stellar, she can pay abroad in seconds, but **only at spot**. Nothing lets her lock a rate for a future payment.
+
+## The solution
+
+1. Lucía enters her invoice: *1,000,000 MXN in 90 days*.
+2. The app shows her a locked price: *"you will pay 55,013 USDC"*, as long as the peso moves less than the protection she chose (beyond that, she only bears the part of the move that exceeds her cap).
+3. She picks her protection (e.g. ±10%), deposits the matching margin in USDC and signs with her wallet (Freighter, via Stellar Wallets Kit).
+4. On the due date, anyone can trigger settlement. The contract takes the rate **in effect at maturity** from a SEP-40 oracle (`price(asset, timestamp)`; Reflector FX in production, a mock-oracle with the same interface for the demo), not the rate at the moment of settlement:
+   - the peso went up → the pool pays her the difference;
+   - the peso went down → the difference is taken from her margin.
+5. Right after, a **Stellar path payment** converts her USDC into pesos and pays the supplier: **exactly 1,000,000 MXN**, for a total cost equal to the price locked on day 0.
+
+**Why Stellar:** the hedge and the supplier's foreign-currency payment run on the same rail: native USDC, Reflector FX oracle, path payment all the way to the peso. No bank, no credit line, and a settlement anyone can trigger.
+
+---
+
+## How it works
+
+### The actors
+
+| Actor | Role |
 |---|---|
-| **PME** (Lucía) | Fige le prix d'une facture future, dépose une marge |
-| **LP** | Dépose des USDC dans le pool, sert de contrepartie, touche les spreads |
-| **Contrat pool** (Soroban) | Détient les fonds, enregistre les couvertures, applique la règle de capacité |
-| **Oracle Reflector** (SEP-40) | Cours de chaque devise contre USD |
-| **DEX Stellar / anchor** | Convertit les USDC en devise locale pour payer le fournisseur |
+| **SME** (Lucía) | Locks the price of a future invoice, deposits a margin |
+| **LP** | Deposits USDC into the pool, acts as counterparty, earns the spreads |
+| **Pool contract** (Soroban) | Holds the funds, records the hedges, enforces the capacity rule |
+| **Reflector oracle** (SEP-40) | Rate of each currency against USD |
+| **Stellar DEX / anchor** | Converts USDC into local currency to pay the supplier |
 
-### Le prix figé
+### The locked price
 
-Le prix bloqué n'est pas le cours du jour, mais le **taux forward** : le cours du jour ajusté de l'écart de taux d'intérêt entre les deux devises, plus le spread du pool.
+The locked price is not today's rate but the **forward rate**: today's rate adjusted for the interest-rate differential between the two currencies, plus the pool's spread.
 
 ```
-Spot et F en USD par unité de devise (convention de l'oracle Reflector) :
-F = Spot × (1 + r_USD × t) / (1 + r_devise × t)      prix proposé = F ± spread
+Spot and F in USD per unit of currency (Reflector oracle convention):
+F = Spot × (1 + r_USD × t) / (1 + r_currency × t)      quoted price = F ± spread
 ```
 
-Exemple : 1 MXN = 0,055 USD, r_MXN = 5,55 %, r_USD = 3,6 %, 90 jours → F ≈ 0,05474 USD (0,05501 spread inclus). Le peso, mieux rémunéré, cote moins cher à terme. Sans cet ajustement, des arbitragistes pourraient gagner sans risque contre le pool.
+Example: 1 MXN = 0.055 USD, r_MXN = 5.55%, r_USD = 3.6%, 90 days → F ≈ 0.05474 USD (0.05501 including spread). The peso, which pays a higher rate, trades cheaper forward. Without this adjustment, arbitrageurs could make risk-free profits against the pool.
 
-`r_USD` est le taux des bons du Trésor US tokenisés (3,6 % : USTRY d'Etherfuse) : c'est ce que rapporterait le capital du pool s'il ne servait pas à couvrir (voir *Où dort l'argent du pool*).
+`r_USD` is the rate of tokenized US Treasury bills (3.6%: Etherfuse USTRY): it is what the pool's capital would earn if it were not used for hedging (see *Where the pool's money sits*).
 
-Les taux sont **lus en direct sur l'API publique d'Etherfuse** (`current_basis_points` : USD ← USTRY, MXN ← CETES, BRL ← TESOURO, EUR ← EUROB ; ARS en dur) **et poussés dans le pool par l'admin** (`scripts/sync-rates.sh`, `--loop 3600` pour une synchro horaire). Le contrat ne lit pas Etherfuse lui-même. Sous chaque devis, l'app affiche les taux Etherfuse du moment et le taux réellement utilisé par le pool, retrouvé en inversant la formule sur le devis (pas de getter de taux) ; au-delà de 5 bps d'écart, elle affiche « pool rate out of sync ». `scripts/rates.snapshot` ne sert plus qu'au setup et de repli si l'API ne répond pas.
+Rates are **read live from the public Etherfuse API** (`current_basis_points`: USD ← USTRY, MXN ← CETES, BRL ← TESOURO, EUR ← EUROB; ARS hardcoded) **and pushed to the pool by the admin** (`scripts/sync-rates.sh`, `--loop 3600` for hourly sync). The contract does not read Etherfuse itself. Under each quote, the app shows the current Etherfuse rates and the rate actually used by the pool, recovered by inverting the formula on the quote (no rate getter); beyond a 5 bps gap, it shows "pool rate out of sync". `scripts/rates.snapshot` is now only used for setup and as a fallback if the API does not respond.
 
-En production, le spot vient de **Reflector FX**, l'oracle de change natif de Stellar (SEP-40, mise à jour toutes les 300 s). Sur testnet, la démo lit un mock-oracle de même interface, pour pouvoir provoquer le crash du peso (voir *Architecture*). Hors tournage, `scripts/keepalive.sh --live` recopie toutes les 10 min le cours Reflector FX testnet dans le mock et réaligne l'offre DEX MXN (`scripts/dex-align.sh`) : le site public cote au cours du jour. Le contrat lit toujours le mock, alimenté par notre script : ce n'est pas une lecture directe de Reflector. Sur mainnet (`CBKGPWGKSKZF52CFHMTRR23TBWTPMRDIYZ4O2P5VS65BMHYH4DXMCJZC`), il couvre **24 devises** (vérifié onchain le 25/10/2026) : EUR, GBP, CAD, JPY, CNY, HKD, KRW, INR, PHP, TRY, RUB, ZAR, MXN, BRL, ARS, COP, CLP, PEN, CRC, VES, NGN, KES, CDF, XAU.
+In production, the spot comes from **Reflector FX**, Stellar's native FX oracle (SEP-40, updated every 300 s). On testnet, the demo reads a mock-oracle with the same interface, so we can trigger the peso crash (see *Architecture*). Outside of filming, `scripts/keepalive.sh --live` copies the Reflector FX testnet rate into the mock every 10 min and realigns the MXN DEX offer (`scripts/dex-align.sh`): the public site quotes at today's rate. The contract always reads the mock, fed by our script: this is not a direct read of Reflector. On mainnet (`CBKGPWGKSKZF52CFHMTRR23TBWTPMRDIYZ4O2P5VS65BMHYH4DXMCJZC`), it covers **24 currencies** (verified onchain on 25/10/2026): EUR, GBP, CAD, JPY, CNY, HKD, KRW, INR, PHP, TRY, RUB, ZAR, MXN, BRL, ARS, COP, CLP, PEN, CRC, VES, NGN, KES, CDF, XAU.
 
-### Une protection plafonnée, sans risque de défaut
+### Capped protection, no default risk
 
-La marge choisie par la PME fixe à la fois **sa perte maximale** et **sa protection maximale** :
+The margin chosen by the SME sets both **its maximum loss** and **its maximum protection**:
 
-| Marge déposée | Protégée si la devise bouge de |
+| Margin deposited | Protected if the currency moves by |
 |---|---|
-| 5 % (minimum, plus élevé sur devises instables) | ±5 % |
-| 10 % | ±10 % |
-| 20 % | ±20 % |
+| 5% (minimum, higher on unstable currencies) | ±5% |
+| 10% | ±10% |
+| 20% | ±20% |
 
-Tout ce qui peut être perdu est **déjà déposé** dans le contrat : pas d'appel de marge, pas de liquidation, aucun risque de crédit. Techniquement, c'est un **tunnel de change** (collar) centré sur le taux forward : sa valeur est quasi nulle à l'ouverture, et le spread rémunère le pool.
+Everything that can be lost is **already deposited** in the contract: no margin call, no liquidation, no credit risk. Technically, it is an **FX collar** centered on the forward rate: its value is near zero at opening, and the spread pays the pool.
 
-> *« Mais la devise peut bouger de 15 % ? »* C'est la PME qui choisit son plafond. Et son alternative réelle n'est pas un forward bancaire gratuit, c'est **aucune couverture du tout** : la marge immobilisée est le prix d'une couverture sans banque.
+> *"But what if the currency moves 15%?"* The SME chooses its cap. And its real alternative is not a free bank forward, it is **no hedge at all**: the locked margin is the price of a hedge without a bank.
 
-### Ce que paie la PME
+### What the SME pays
 
-Pour 1 000 000 MXN à 90 jours, plafond 10 %, spread 0,5 % (≈ 55 013 USDC) :
+For 1,000,000 MXN at 90 days, 10% cap, 0.5% spread (≈ 55,013 USDC):
 
-| Coût | Montant | % de la facture |
+| Cost | Amount | % of invoice |
 |---|---|---|
-| Spread du pool | ~274 USDC | 0,50 % |
-| Rendement perdu sur la marge bloquée (5 501 USDC à ~3,6 %) | ~49 USDC | 0,09 % |
-| Écart forward / spot | — | pas un frais : c'est le juste prix (en faveur d'un importateur de pesos) |
-| Frais Stellar, oracle | ~0 | ~0 |
-| **Total** | **~323 USDC** | **~0,6 %** (≈ 2,4 %/an) |
+| Pool spread | ~274 USDC | 0.50% |
+| Yield forgone on the locked margin (5,501 USDC at ~3.6%) | ~49 USDC | 0.09% |
+| Forward / spot gap | — | not a fee: it is the fair price (in favor of a peso importer) |
+| Stellar fees, oracle | ~0 | ~0 |
+| **Total** | **~323 USDC** | **~0.6%** (≈ 2.4%/year) |
 
-La conversion USDC → MXN pour payer le fournisseur n'est pas comptée : elle est due avec ou sans couverture.
+The USDC → MXN conversion to pay the supplier is not counted: it is owed with or without a hedge.
 
-| Solution | Coût pour 90 jours | Accès pour une PME |
+| Solution | Cost for 90 days | Access for an SME |
 |---|---|---|
-| Aucune couverture | 0, mais un mouvement de 6,5 % (fréquent sur 90 j) coûte ~3 600 $ | — |
-| **4ward** | **~0,6 %** | sans banque ni ligne de crédit, marge de 5 à 20 % au choix |
-| Forward bancaire | ~0,5 à 2 % | ligne de crédit, rarement accordée à une petite PME |
-| Fintechs de change (Ebury, iBanFirst, Corpay) | ~0,5 à 1,5 % | dépôt initial de 5 à 10 %, KYC, devises limitées |
-| Option d'achat (protection non plafonnée) | ~2,6 % (prime à la monnaie, vol 13 %) | rare pour une PME |
+| No hedge | 0, but a 6.5% move (common over 90 d) costs ~$3,600 | — |
+| **4ward** | **~0.6%** | no bank or credit line, margin of 5 to 20% of your choice |
+| Bank forward | ~0.5 to 2% | credit line, rarely granted to a small SME |
+| FX fintechs (Ebury, iBanFirst, Corpay) | ~0.5 to 1.5% | 5 to 10% initial deposit, KYC, limited currencies |
+| Call option (uncapped protection) | ~2.6% (at-the-money premium, 13% vol) | rare for an SME |
 
-Environ **4 fois moins cher qu'une option**, parce que la protection est plafonnée dans les deux sens ; au prix d'un forward, mais sans banque. Contrepartie assumée : au-delà du plafond, la PME n'est plus protégée. *(Banques et fintechs : ordres de grandeur du marché, non vérifiés devise par devise.)*
+About **4 times cheaper than an option**, because the protection is capped in both directions; at the price of a forward, but without a bank. Accepted trade-off: beyond the cap, the SME is no longer protected. *(Banks and fintechs: market orders of magnitude, not verified currency by currency.)*
 
-### Le pool (vault)
+### The pool (vault)
 
-**Que des dollars.** Le pool ne détient que des USDC. Chaque couverture est une jambe « devise contre dollar » : le pool n'a jamais besoin de stocker des pesos.
+**Dollars only.** The pool holds only USDC. Each hedge is a "currency against dollar" leg: the pool never needs to store pesos.
 
-**Des parts, comme un fonds.** Un LP qui dépose des USDC reçoit des **parts**. Le premier dépôt se fait à 1 part = 1 USDC. Quand le pool gagne (le spread, ou une couverture qui tourne en sa faveur), chaque part vaut plus. Quand il perd, chaque part vaut moins. Personne n'a besoin de répartir les gains compte par compte.
+**Shares, like a fund.** An LP depositing USDC receives **shares**. The first deposit is at 1 share = 1 USDC. When the pool gains (the spread, or a hedge that turns in its favor), each share is worth more. When it loses, each share is worth less. Nobody needs to allocate gains account by account.
 
-**Deux prix pour une part :**
+**Two prices per share:**
 
-| Prix | Calcul | Sert à |
+| Price | Calculation | Used to |
 |---|---|---|
-| prix plein | valeur junior ÷ parts junior | entrer (dépôt) |
-| prix de sortie | (valeur junior − capital réservé) ÷ parts junior | sortir (retrait) |
+| full price | junior value ÷ junior shares | enter (deposit) |
+| exit price | (junior value − reserved capital) ÷ junior shares | exit (withdrawal) |
 
-Le capital réservé est la perte maximale des couvertures en cours. Il n'est pas versé à celui qui sort. Personne ne peut donc partir en laissant ses pertes possibles aux autres. Les retraits sont équitables par construction : chaque LP ne peut retirer que sa part du capital libre. Si la couverture se termine bien, la décote laissée par celui qui est parti profite aux LPs restants.
+Reserved capital is the maximum loss of open hedges. It is not paid out to whoever exits. So nobody can leave and dump their potential losses on the others. Withdrawals are fair by construction: each LP can only withdraw its share of the free capital. If the hedge ends well, the discount left by the departing LP benefits the remaining LPs.
 
-**Règle de capacité : le risque de change du pool est plafonné et couvert par le capital du junior.** La perte maximale de chaque couverture (sa marge) est connue dès l'ouverture :
+**Capacity rule: the pool's FX risk is capped and covered by junior capital.** The maximum loss of each hedge (its margin) is known at opening:
 
 ```
-capital réservé = Σ marges des couvertures ouvertes   ≤   capital de la tranche junior (Dynamic)
+reserved capital = Σ margins of open hedges   ≤   junior tranche capital (Dynamic)
 ```
 
-Le contrat **refuse toute couverture** qui ferait dépasser cette limite. Les marges des PME sont déposées dans le contrat mais n'appartiennent pas aux LPs. Les tests vérifient à chaque opération que `solde USDC du contrat = capital des LPs + marges des couvertures ouvertes`.
+The contract **rejects any hedge** that would exceed this limit. SME margins are deposited in the contract but do not belong to the LPs. Tests check on every operation that `contract USDC balance = LP capital + margins of open hedges`.
 
-**Exposition et limite par devise.** Le pool suit, pour chaque devise, le volume des acheteurs et celui des vendeurs (en USDC au taux bloqué), ainsi que leurs marges. L'admin peut plafonner une devise, par exemple « les marges en ARS ne dépassent pas 10 % du capital ». Une limite à 0 suspend les nouvelles couvertures sur cette devise.
+**Exposure and per-currency limit.** For each currency, the pool tracks buyer volume and seller volume (in USDC at the locked rate), as well as their margins. The admin can cap a currency, e.g. "ARS margins do not exceed 10% of capital". A limit of 0 suspends new hedges in that currency.
 
-**Robustesse.** Les entrées de stockage sont prolongées automatiquement (120 jours). Les dépôts, retraits, ouvertures, clôtures et changements de limite émettent des événements lisibles sur l'explorateur. Tous les calculs sont protégés contre les débordements et arrondis en faveur du pool.
+**Robustness.** Storage entries are extended automatically (120 days). Deposits, withdrawals, openings, closings and limit changes emit events readable on the explorer. All calculations are overflow-protected and rounded in the pool's favor.
 
-### Netting (calcul prêt, branchement en roadmap)
+### Netting (calculation ready, wiring on the roadmap)
 
-Lucía craint que le peso **monte**. Sa contrepartie naturelle craint qu'il **baisse** : un importateur mexicain qui paie ses fournisseurs en dollars, ou une entreprise payée en pesos. Quand l'une gagne, l'autre perd : en théorie, seule l'exposition nette devrait consommer du capital.
+Lucía fears the peso will **rise**. Her natural counterparty fears it will **fall**: a Mexican importer paying its suppliers in dollars, or a company paid in pesos. When one wins, the other loses: in theory, only the net exposure should consume capital.
 
-Le contrat contient déjà le **calcul exact** de la perte maximale d'un panier de couvertures, sur tous les cours possibles, même avec des plafonds et des taux bloqués différents. Il est prouvé par des tests de propriété (variations de −30 % à +30 %, 50 paniers aléatoires, contre-exemples). Un « net des marges » naïf serait faux : avec des plafonds différents, ou des taux bloqués à des dates différentes, il sous-estime la perte.
+The contract already contains the **exact calculation** of the maximum loss of a basket of hedges, over all possible rates, even with different caps and locked rates. It is proven by property tests (moves from −30% to +30%, 50 random baskets, counterexamples). A naive "net of margins" would be wrong: with different caps, or rates locked on different dates, it underestimates the loss.
 
-Le MVP garde la règle brute, plus prudente. Le netting sera branché quand trois conditions seront réunies :
-1. un fixing commun à l'échéance ;
-2. des échéances arrondies à des dates de fixing ;
-3. un règlement par panier, ou la comptabilisation de ce que doit la jambe opposée.
+The MVP keeps the gross rule, which is more conservative. Netting will be wired in once three conditions are met:
+1. a common fixing at maturity;
+2. maturities rounded to fixing dates;
+3. settlement per basket, or accounting for what the opposite leg owes.
 
-### Les LPs : tranche senior et tranche junior
+### LPs: senior tranche and junior tranche
 
-Les LPs déposent dans le même pool mais choisissent leur risque :
+LPs deposit into the same pool but choose their risk:
 
-| | **Senior** (prudent) | **Junior** (risque) |
+| | **Senior** (conservative) | **Junior** (risk) |
 |---|---|---|
-| Profil | Veut un rendement stable | Accepte de perdre pour gagner plus |
-| Son argent sert à | Couvrir l'exposition (CETES, EURC) + trésorerie (roadmap ; aujourd'hui il reste en USDC dans le contrat) | Absorber l'exposition non couverte |
-| Pertes | Protégé par le junior | Perd en premier |
-| Rendement | Taux cible payé en priorité (4,5 %, non garanti) | Tout le reste : spread, pertes des clients, trésorerie |
+| Profile | Wants a stable yield | Accepts losses to earn more |
+| Their money is used to | Hedge the exposure (CETES, EURC) + treasury (roadmap; today it stays as USDC in the contract) | Absorb the unhedged exposure |
+| Losses | Protected by the junior | Loses first |
+| Yield | Target rate paid first (4.5%, not guaranteed) | Everything else: spread, client losses, treasury |
 
-Règles du contrat :
-1. **Perte max non couverte ≤ capital junior** : la règle de capacité s'applique au seul junior. Chaque contrat étant plafonné, le senior ne peut pas perdre à cause du change (il reste exposé aux protocoles tiers et à l'USDC).
-2. **Cascade** : les pertes touchent le junior d'abord ; les gains paient d'abord le taux du senior, le junior prend le surplus.
-3. **La part couverte est un réglage** (roadmap, avec la couverture du pool) : plus de junior, moins de couverture et plus de levier.
-4. **Junior épuisé** : capacité nulle, toute nouvelle couverture est refusée (#101). En roadmap : n'accepter que des couvertures entièrement couvertes.
-5. **Ratio minimum** : tant qu'il y a des seniors, le junior reste ≥ 20 % du capital au moment de chaque dépôt senior ou retrait junior (refusés sinon) ; les intérêts senior peuvent le faire baisser ensuite.
+Contract rules:
+1. **Max unhedged loss ≤ junior capital**: the capacity rule applies to the junior only. Since each contract is capped, the senior cannot lose because of FX (it remains exposed to third-party protocols and to USDC).
+2. **Waterfall**: losses hit the junior first; gains first pay the senior rate, the junior takes the surplus.
+3. **The hedged share is a setting** (roadmap, with pool hedging): more junior, less hedging and more leverage.
+4. **Junior depleted**: zero capacity, every new hedge is rejected (#101). On the roadmap: only accept fully hedged hedges.
+5. **Minimum ratio**: as long as there are seniors, the junior stays ≥ 20% of capital at the time of each senior deposit or junior withdrawal (rejected otherwise); senior interest can push it lower afterwards.
 
-**Le 4,5 % du senior est un taux cible du contrat, pas un rendement gagné : il est payé par le junior tant que le capital libre n'est pas placé** (bons du Trésor, CETES) : le prix de la part senior progresse de 4,5 %/an, et cette progression est retirée de la valeur du junior. Le placement de la trésorerie est en roadmap ; d'ici là, le junior paie le senior avec ses spreads.
+**The senior's 4.5% is a target rate set by the contract, not an earned yield: it is paid by the junior as long as free capital is not invested** (Treasury bills, CETES): the senior share price grows by 4.5%/year, and this growth is deducted from the junior value. Treasury investment is on the roadmap; until then, the junior pays the senior out of its spreads.
 
-*Implémenté dans le contrat (`main`, déployé sur testnet)* : un seul vault, deux catégories de parts. `deposit_lp` / `withdraw` = junior (inchangés), `deposit_senior` / `withdraw_senior` / `senior_balance` / `tranche_values` en plus. Prix senior capitalisé à chaque opération senior, valeur junior = capital − valeur senior, capacité = junior − réservé.
+*Implemented in the contract (`main`, deployed on testnet)*: a single vault, two share classes. `deposit_lp` / `withdraw` = junior (unchanged), plus `deposit_senior` / `withdraw_senior` / `senior_balance` / `tranche_values`. Senior price compounded on each senior operation, junior value = capital − senior value, capacity = junior − reserved.
 
-Simulation d'un pool de démarrage : **500 k$** (400 k$ senior payé 4,5 %, 100 k$ junior utilisé à 15 % max), **contrats de 10 k$** à 90 jours dont le sens (importateur / exportateur) est tiré au hasard ; peso à 13 % de vol avec sauts de 15 % ; spread 0,4 % par 90 j (hypothèse prudente ; le contrat prend 0,5 %) dont 20 % pour le protocole ; 8 % en USDC, le reste en bons du Trésor à 4 % ; pas de Blend.
+Simulation of a starting pool: **$500k** ($400k senior paid 4.5%, $100k junior used at 15% max), **$10k contracts** at 90 days with a random direction (importer / exporter); peso at 13% vol with 15% jumps; spread 0.4% per 90 d (conservative assumption; the contract charges 0.5%) of which 20% goes to the protocol; 8% in USDC, the rest in Treasury bills at 4%; no Blend.
 
-| Contrats / trimestre | Volume / trimestre | Part d'importateurs | Volume compensé | Pool | **Junior (moyenne)** | Années perdantes | Pire année sur 20 |
+| Contracts / quarter | Volume / quarter | Share of importers | Volume netted | Pool | **Junior (average)** | Losing years | Worst year out of 20 |
 |---|---|---|---|---|---|---|---|
-| 20 | 200 k$ | 50 % | 82 % | 4,3 % | 3,7 % | 22 % | −5 % |
-| 20 | 200 k$ | 70 % | 59 % | 4,4 % | 3,8 % | 35 % | −13 % |
-| 40 | 400 k$ | 50 % | 87 % | 5,0 % | 7,1 % | 15 % | −5 % |
-| 40 | 400 k$ | 70 % | 60 % | 5,0 % | 6,9 % | 34 % | −19 % |
-| **80** | **800 k$** | 50 % | 91 % | 6,4 % | **13,8 %** | 7 % | −2 % |
-| **80** | **800 k$** | 60 % | 80 % | 6,3 % | **13,6 %** | 19 % | −11 % |
-| 80 | 800 k$ | 70 % | 60 % | 6,3 % | 13,3 % | 23 % | −16 % |
+| 20 | $200k | 50% | 82% | 4.3% | 3.7% | 22% | −5% |
+| 20 | $200k | 70% | 59% | 4.4% | 3.8% | 35% | −13% |
+| 40 | $400k | 50% | 87% | 5.0% | 7.1% | 15% | −5% |
+| 40 | $400k | 70% | 60% | 5.0% | 6.9% | 34% | −19% |
+| **80** | **$800k** | 50% | 91% | 6.4% | **13.8%** | 7% | −2% |
+| **80** | **$800k** | 60% | 80% | 6.3% | **13.6%** | 19% | −11% |
+| 80 | $800k | 70% | 60% | 6.3% | 13.3% | 23% | −16% |
 
-Référence : la trésorerie seule (92 % à 4 %) rapporte ~3,7 % ; le senior touche 4,5 %.
+Benchmark: treasury alone (92% at 4%) yields ~3.7%; the senior earns 4.5%.
 
-Ce qu'il faut retenir :
-- **Le rendement du junior vient du volume** (le spread est pris sur chaque contrat), son **risque vient du déséquilibre** importateurs / exportateurs. Avec des contrats de 10 k$, il faut **~80 contrats par trimestre** (≈ 27 par mois, 1,6 fois le pool tourné chaque trimestre) pour que le junior dépasse 13 %. À 20 contrats par trimestre, il gagne moins que les bons du Trésor.
-- **Des petits contrats nombreux compensent bien quand les deux sens existent** : à 50/50, 80 à 90 % du volume se compense tout seul. Mais avec 70 % d'importateurs, ~40 % du volume reste non compensé quel que soit le nombre de contrats : la taille ne remplace pas la demande dans les deux sens (skew de prix, distribution auprès des PME exportatrices).
-- L'utilisation du junior reste plafonnée à 15-20 % : au-delà, une perte quasi totale devient possible.
+Key takeaways:
+- **The junior's yield comes from volume** (the spread is taken on each contract), its **risk comes from imbalance** between importers and exporters. With $10k contracts, it takes **~80 contracts per quarter** (≈ 27 per month, 1.6 times the pool turned over each quarter) for the junior to exceed 13%. At 20 contracts per quarter, it earns less than Treasury bills.
+- **Many small contracts net well when both directions exist**: at 50/50, 80 to 90% of the volume nets out on its own. But with 70% importers, ~40% of the volume stays unnetted regardless of the number of contracts: size does not replace two-way demand (price skew, distribution to exporting SMEs).
+- Junior utilization stays capped at 15-20%: beyond that, a near-total loss becomes possible.
 
-### Où dort l'argent du pool (roadmap)
+### Where the pool's money sits (roadmap)
 
-Trois poches, dans l'ordre où le pool puise pour payer :
+Three buckets, in the order the pool draws on them to pay:
 
-| Poche | Taille | Rendement | Rôle |
+| Bucket | Size | Yield | Role |
 |---|---|---|---|
-| USDC dans le contrat | **8 % des dépôts** | 0 % | Règlements et retraits LP du jour, sans dépendre d'un tiers |
-| Bons du Trésor US tokenisés (BENJI, Etherfuse USTRY… à vérifier) | le reste | ~4 % | Rendement stable, rachat en un jour au plus |
-| CETES / EURC | selon l'exposition nette | taux `r_USD` du pricing | La couverture |
+| USDC in the contract | **8% of deposits** | 0% | Same-day settlements and LP withdrawals, without relying on a third party |
+| Tokenized US Treasury bills (BENJI, Etherfuse USTRY… to be verified) | the rest | ~4% | Stable yield, redemption within one day at most |
+| CETES / EURC | based on net exposure | pricing `r_USD` rate | The hedge |
 
-Exemple, pool de 500 k$ à 80 contrats par trimestre (60 % d'importateurs) : ~160 k$ d'exposition nette, dont 150 k$ portés par le junior et ~10 k$ couverts en CETES. Trésorerie : 40 k$ en USDC, ~530 k$ en bons du Trésor (dépôts LP + ~80 k$ de marges clients).
+Example, $500k pool at 80 contracts per quarter (60% importers): ~$160k net exposure, of which $150k carried by the junior and ~$10k hedged in CETES. Treasury: $40k in USDC, ~$530k in Treasury bills (LP deposits + ~$80k of client margins).
 
-**Pas de Blend dans le modèle de base** : il apporterait ~0,5 point de plus, mais ajoute un protocole tiers (liquidité limitée à ~14 M$ retirables, exploit d'oracle du 22/02/2026). Il reste une option en roadmap, plafonnée à 20 %. Une fonction `rebalance()` remet les poches à niveau : nouvelle couverture → achat de CETES ; échéance proche → retour vers la réserve d'USDC.
+**No Blend in the base model**: it would add ~0.5 point, but adds a third-party protocol (liquidity limited to ~$14M withdrawable, oracle exploit on 22/02/2026). It remains a roadmap option, capped at 20%. A `rebalance()` function brings the buckets back to target: new hedge → buy CETES; maturity approaching → move back to the USDC reserve.
 
-### Couverture du pool (roadmap)
+### Pool hedging (roadmap)
 
-Le plafond et la règle de capacité garantissent que les pertes de change du pool restent **plafonnées et couvertes par le capital du junior**, pas qu'il est rentable de façon régulière. Le pool ne parie pas sur la tendance (le taux forward l'intègre déjà), mais il reste exposé aux mouvements de la devise : environ 6,5 % en 90 jours sur le peso, contre un spread de 0,5 %. Sans couverture, il faudrait un spread de 3 à 5 % pour rémunérer les LPs, et aucune PME n'achèterait. Le pool se couvre donc en trois étages, comme une banque qui vend un forward.
+The cap and the capacity rule guarantee that the pool's FX losses stay **capped and covered by junior capital**, not that it is consistently profitable. The pool does not bet on the trend (the forward rate already prices it in), but it remains exposed to currency moves: about 6.5% over 90 days on the peso, against a 0.5% spread. Without hedging, a 3 to 5% spread would be needed to pay LPs, and no SME would buy. So the pool hedges in three layers, like a bank selling a forward.
 
 ```
-Exposition au peso
- ├─ 1. Netting : les clients en sens inverse se compensent        → gratuit
- ├─ 2. Le reste net : le pool détient la devise (≈ 88 % du net),
- │      placée en obligations d'État tokenisées                  → quasi gratuit
- └─ 3. Ce qui n'est pas couvrable : limites par devise + règle de capacité
+Peso exposure
+ ├─ 1. Netting: clients on opposite sides offset each other       → free
+ ├─ 2. The net remainder: the pool holds the currency (≈ 88% of net),
+ │      invested in tokenized government bonds                   → nearly free
+ └─ 3. What cannot be hedged: per-currency limits + capacity rule
 ```
 
-**1. Netting.** Lucía doit des pesos : elle craint que le peso **monte**. Sa contrepartie naturelle craint qu'il **baisse** : un **importateur mexicain** qui paie ses fournisseurs en dollars, ou un exportateur payé en pesos. Ce que le pool verse à l'un, il le reçoit de l'autre, et il garde les deux spreads. Seule l'exposition nette consomme du capital. Un **skew** de prix (le côté trop demandé paie plus cher, l'autre moins cher) attire le côté manquant. *Attention : un exportateur mexicain reçoit des dollars et craint lui aussi que le peso monte, il est du même côté que Lucía.*
+**1. Netting.** Lucía owes pesos: she fears the peso will **rise**. Her natural counterparty fears it will **fall**: a **Mexican importer** paying its suppliers in dollars, or an exporter paid in pesos. What the pool pays one, it receives from the other, and it keeps both spreads. Only the net exposure consumes capital. A price **skew** (the over-demanded side pays more, the other less) attracts the missing side. *Note: a Mexican exporter receives dollars and also fears the peso will rise, so it is on the same side as Lucía.*
 
-**2. Détenir la devise.** Si le pool doit payer quand le peso monte, il achète des pesos maintenant : s'ils montent, ils compensent ce qu'il doit verser. Ces pesos sont placés au taux local, en **CETES tokenisées** (obligations d'État mexicaines émises sur Stellar par Etherfuse, à vérifier). Ce rendement local paie exactement l'écart entre le taux forward et le spot (parité des taux d'intérêt) : la couverture ne coûte que les frais de conversion, et le pool garde le spread.
+**2. Holding the currency.** If the pool must pay when the peso rises, it buys pesos now: if they rise, they offset what it has to pay. These pesos are invested at the local rate, in **tokenized CETES** (Mexican government bonds issued on Stellar by Etherfuse, to be verified). This local yield pays exactly the gap between the forward rate and spot (interest rate parity): the hedge only costs conversion fees, and the pool keeps the spread.
 
-| Devise | Couverture | Faisabilité |
+| Currency | Hedge | Feasibility |
 |---|---|---|
-| EUR | EURC natif | ✅ |
-| MXN | CETES tokenisées (Etherfuse) | ✅ à vérifier (liquidité, accès) |
-| BRL, ARS, NGN… | Stablecoins des anchors | ⚠️ selon la liquidité |
-| Devises sans token | Teneur de marché partenaire, sinon limites serrées et plafond minimum plus haut | ⚠️ plus tard |
+| EUR | Native EURC | ✅ |
+| MXN | Tokenized CETES (Etherfuse) | ✅ to be verified (liquidity, access) |
+| BRL, ARS, NGN… | Anchor stablecoins | ⚠️ depending on liquidity |
+| Currencies without a token | Partner market maker, otherwise tight limits and a higher minimum cap | ⚠️ later |
 
-**3. Limiter le reste.** Plafond d'exposition nette par devise ; une devise n'est ouverte que si elle est couvrable ou si ses flux se compensent ; la règle de capacité reste le dernier filet.
+**3. Limiting the rest.** Net exposure cap per currency; a currency is only opened if it is hedgeable or if its flows offset; the capacity rule remains the last safety net.
 
-**La couverture n'est pas totale.** Elle neutralise l'essentiel du risque de change. Le reste est petit, mesurable, et payé par le spread :
-- **Protection plafonnée, couverture non plafonnée** : au-delà du plafond, la position en devise ne correspond plus (gain si le peso monte de 15 %, perte s'il baisse de 15 %). Il faut réduire la position quand le cours approche du plafond, et un saut brutal peut tomber entre deux ajustements.
-- **Obligations** : prix sensible aux taux si on les revend avant leur terme (d'où des CETES à 28 jours), risque de l'émetteur du token, liquidité au moment du règlement.
-- **Écarts de prix** : oracle au fixing vs prix d'exécution sur le DEX, taux codés en dur vs rendement réel des CETES, décalage entre l'ouverture du contrat et l'achat de la couverture.
+**The hedge is not complete.** It neutralizes most of the FX risk. The remainder is small, measurable, and paid for by the spread:
+- **Capped protection, uncapped hedge**: beyond the cap, the currency position no longer matches (gain if the peso rises 15%, loss if it falls 15%). The position must be reduced as the rate approaches the cap, and a sudden jump can fall between two adjustments.
+- **Bonds**: price sensitive to rates if sold before maturity (hence 28-day CETES), token issuer risk, liquidity at settlement time.
+- **Price gaps**: oracle at fixing vs execution price on the DEX, hardcoded rates vs actual CETES yield, lag between contract opening and hedge purchase.
 
-**Couvrir le portefeuille, pas chaque contrat.** Acheter et revendre des CETES à chaque couverture coûterait ~2 % par an en conversions et mangerait tout le spread. Le pool tient donc **une seule position par devise** :
-- la cible est calculée en continu (≈ 88 % de l'exposition nette sur toutes les couvertures ouvertes) ;
-- le pool n'échange que l'écart avec la cible, et seulement au-delà d'un seuil (par ex. 10 %, ou une fois par jour) ;
-- un contrat qui arrive à échéance remplacé par un nouveau, ou deux contrats en sens inverse, ne déclenchent **aucun échange** ;
-- les CETES sont renouvelés à leur échéance sans repasser par l'USDC ;
-- optimisation : à l'échéance, payer le fournisseur **directement en devise** depuis la couverture, ce qui économise deux conversions.
+**Hedge the portfolio, not each contract.** Buying and selling CETES on every hedge would cost ~2% per year in conversions and eat the entire spread. So the pool holds **a single position per currency**:
+- the target is computed continuously (≈ 88% of net exposure across all open hedges);
+- the pool only trades the gap with the target, and only beyond a threshold (e.g. 10%, or once a day);
+- a maturing contract replaced by a new one, or two contracts in opposite directions, trigger **no trade**;
+- CETES are rolled at maturity without going back through USDC;
+- optimization: at maturity, pay the supplier **directly in the currency** from the hedge, saving two conversions.
 
-Avec la couverture, le spread ne paie plus le risque, seulement les coûts : voir *Ce que paie la PME*. Le rendement des LPs dépend surtout du **volume compensé** : voir *Tranche senior et tranche junior*.
+With hedging, the spread no longer pays for risk, only for costs: see *What the SME pays*. LP yield depends mainly on **netted volume**: see *Senior tranche and junior tranche*.
 
-Le MVP montre le filet (plafond + règle de capacité brute, plus prudente) ; netting et couverture automatique sont la prochaine étape.
+The MVP shows the safety net (cap + gross capacity rule, more conservative); netting and automatic hedging are the next step.
 
 ---
 
@@ -239,42 +241,42 @@ Le MVP montre le filet (plafond + règle de capacité brute, plus prudente) ; ne
 
 ```
 ┌──────────────┐  Freighter  ┌──────────────────────────────────────┐
-│ Front (Vite) │────────────▶│      Contrat pool (Soroban, Rust)    │
-│  écran PME   │             │  deposit_lp / withdraw               │
-│  panneau LP  │             │  quote / open_hedge / settle         │
+│ Front (Vite) │────────────▶│      Pool contract (Soroban, Rust)   │
+│  SME screen  │             │  deposit_lp / withdraw               │
+│  LP panel    │             │  quote / open_hedge / settle         │
 └──────┬───────┘             │  capacity                            │
        │                     └──────────────┬───────────────────────┘
        │ path payment                       │ lastprice / price(ts) (SEP-40)
        ▼                                    ▼
 ┌──────────────┐             ┌──────────────────────────────────────┐
-│ DEX Stellar  │             │ Reflector FX (production)            │
-│ USDC → MXN   │             │ mock-oracle SEP-40 (démo : « crash ») │
+│ Stellar DEX  │             │ Reflector FX (production)            │
+│ USDC → MXN   │             │ mock-oracle SEP-40 (demo: "crash")   │
 └──────────────┘             └──────────────────────────────────────┘
 ```
 
-**Intégration Reflector.** Le contrat ne parle à l'oracle que par l'interface SEP-40 (`lastprice`, `price(asset, timestamp)`, `decimals`) et a été vérifié contre Reflector FX testnet (`CCSSOHTBL3LEWUCBBEB5NJFC2OKFRC74OWEIJIZLRJBGAAU4VMU5NV4W` : 14 décimales, base USD, historique et arrondi à la période de 300 s). Le pool de démo est construit avec un mock-oracle de même interface, piloté par l'admin, pour provoquer le crash du peso pendant la vidéo ; en production, on passe l'adresse de Reflector au constructeur, sans changer de code.
+**Reflector integration.** The contract only talks to the oracle through the SEP-40 interface (`lastprice`, `price(asset, timestamp)`, `decimals`) and has been verified against Reflector FX testnet (`CCSSOHTBL3LEWUCBBEB5NJFC2OKFRC74OWEIJIZLRJBGAAU4VMU5NV4W`: 14 decimals, USD base, history and rounding to the 300 s period). The demo pool is built with a mock-oracle with the same interface, controlled by the admin, to trigger the peso crash during the video; in production, Reflector's address is passed to the constructor, with no code change.
 
-Erreurs : Vault 100-112, Paiement 200-206, Pricing 300-312, token USDC #10 (solde insuffisant) ; table complète : `docs/payment-cli.md` (§ Erreurs à traduire).
+Errors: Vault 100-112, Payment 200-206, Pricing 300-312, USDC token #10 (insufficient balance); full table: `docs/payment-cli.md` (§ Erreurs à traduire).
 
-Une transaction Soroban ne peut pas contenir d'opération classique : le front enchaîne `settle()` puis le path payment, en deux transactions.
+A Soroban transaction cannot contain a classic operation: the front chains `settle()` then the path payment, in two transactions.
 
-### Interface du contrat
+### Contract interface
 
 ```rust
-// Vault (montants et parts en 7 décimales)
-fn deposit_lp(lp: Address, amount: i128) -> i128;        // USDC déposés → parts du LP
-fn withdraw(lp: Address, amount: i128) -> i128;          // parts brûlées → USDC versés (prix de sortie)
-fn lp_balance(lp: Address) -> i128;                      // valeur des parts au prix de sortie
+// Vault (amounts and shares in 7 decimals)
+fn deposit_lp(lp: Address, amount: i128) -> i128;        // USDC deposited → LP shares
+fn withdraw(lp: Address, amount: i128) -> i128;          // shares burned → USDC paid out (exit price)
+fn lp_balance(lp: Address) -> i128;                      // value of shares at exit price
 fn lp_shares(lp: Address) -> i128;
-fn share_price() -> i128;                                // prix plein, USDC par part
-fn exit_price() -> i128;                                 // prix de sortie, USDC par part
-fn total_assets() -> i128;                               // capital des LPs
-fn deposit_senior(lp: Address, amount: i128) -> i128;    // tranche senior : USDC déposés → parts senior
-fn withdraw_senior(lp: Address, shares: i128) -> i128;   // parts senior brûlées → USDC versés
-fn senior_balance(lp: Address) -> i128;                  // valeur des parts senior du LP
-fn tranche_values() -> TrancheValues;                    // senior, junior, prix de la part senior
-fn capacity() -> i128;                                   // capital non réservé
-fn exposure(currency: Symbol) -> Exposure;               // acheteurs / vendeurs / net, marges
+fn share_price() -> i128;                                // full price, USDC per share
+fn exit_price() -> i128;                                 // exit price, USDC per share
+fn total_assets() -> i128;                               // LP capital
+fn deposit_senior(lp: Address, amount: i128) -> i128;    // senior tranche: USDC deposited → senior shares
+fn withdraw_senior(lp: Address, shares: i128) -> i128;   // senior shares burned → USDC paid out
+fn senior_balance(lp: Address) -> i128;                  // value of the LP's senior shares
+fn tranche_values() -> TrancheValues;                    // senior, junior, senior share price
+fn capacity() -> i128;                                   // unreserved capital
+fn exposure(currency: Symbol) -> Exposure;               // buyers / sellers / net, margins
 fn currency_limit(currency: Symbol) -> Option<u32>;
 fn set_currency_limit(currency: Symbol, limit_bps: u32); // admin
 // Pricing
@@ -282,44 +284,44 @@ fn quote(currency: Symbol, side: Side, notional: i128, duration_secs: u64, cap_b
 fn set_rate(currency: Symbol, rate_bps: u32);            // admin
 fn set_min_cap(currency: Symbol, cap_bps: u32);          // admin
 fn set_spread(spread_bps: u32);                          // admin
-// Couvertures / paiement
+// Hedges / payment
 fn open_hedge(owner: Address, supplier: Address, currency: Symbol, side: Side,
               notional: i128, duration_secs: u64, cap_bps: u32) -> u64;
-fn settle(hedge_id: u64) -> i128;                        // permissionless après l'échéance
-fn close_early(hedge_id: u64) -> i128;                   // propriétaire seul, avant l'échéance : clôture au prix du marché
+fn settle(hedge_id: u64) -> i128;                        // permissionless after maturity
+fn close_early(hedge_id: u64) -> i128;                   // owner only, before maturity: close at market price
 fn get_hedge(hedge_id: u64) -> Option<Hedge>;
-fn time_factor() -> u32;                                 // 1 = temps réel
-fn set_time_factor(factor: u32);                         // admin, démo : 25 920 → 90 j en 5 min réelles
+fn time_factor() -> u32;                                 // 1 = real time
+fn set_time_factor(factor: u32);                         // admin, demo: 25,920 → 90 d in 5 real minutes
 ```
 
 ---
 
-## Déploiement testnet
+## Testnet deployment
 
-| Élément | ID |
+| Item | ID |
 |---|---|
-| Contrat pool | `CACSMEBQLBR73CH6BRPGY7LDDE2P63C6WPZEJPZNIP5DLT5IN6O5VWA4` |
+| Pool contract | `CACSMEBQLBR73CH6BRPGY7LDDE2P63C6WPZEJPZNIP5DLT5IN6O5VWA4` |
 | mock-oracle (SEP-40) | `CD2D3KQDUCE7SHQNT4XJUMQRHQNDNJUKE45TER2LSHAJPYCTRXX6NBVU` |
 | Reflector FX (testnet) | `CCSSOHTBL3LEWUCBBEB5NJFC2OKFRC74OWEIJIZLRJBGAAU4VMU5NV4W` |
-| USDC de test (SAC) | `CCLMFOUKC7ZQ5OPFE67F5XUGCOWTVCOOVTKTEPQGEYKWWRRKJGNVR2OC` |
-| MXN de test (SAC) | `CAFK4PTVDK6Y33HWTSUPH57JV3G4YZFS6PL77FNGWOOMHBJJESYBMVMS` |
+| Test USDC (SAC) | `CCLMFOUKC7ZQ5OPFE67F5XUGCOWTVCOOVTKTEPQGEYKWWRRKJGNVR2OC` |
+| Test MXN (SAC) | `CAFK4PTVDK6Y33HWTSUPH57JV3G4YZFS6PL77FNGWOOMHBJJESYBMVMS` |
 
-Reflector FX testnet couvre : EUR, GBP, CHF, CAD, **MXN, ARS, BRL**, THB, XAU (base USD, 14 décimales, résolution 300 s).
+Reflector FX testnet covers: EUR, GBP, CHF, CAD, **MXN, ARS, BRL**, THB, XAU (USD base, 14 decimals, 300 s resolution).
 
-Le pool est redéployé à chaque `./scripts/setup-testnet.sh`, qui fait aussi le dépôt du LP (1 000 000 USDC via `deposit_lp`). Les IDs à jour sont dans `.env.testnet`.
+The pool is redeployed on every `./scripts/setup-testnet.sh`, which also makes the LP deposit (1,000,000 USDC via `deposit_lp`). Current IDs are in `.env.testnet`.
 
-**Mode démo :** le setup pose `set_time_factor 25920` : le prix est calculé sur la durée annoncée (90 jours), mais l'échéance réelle tombe 5 minutes après l'ouverture. C'est ce qui permet de régler en direct, dans la vidéo, une couverture « à 90 jours ».
+**Demo mode:** setup sets `set_time_factor 25920`: the price is computed over the stated duration (90 days), but the actual maturity falls 5 minutes after opening. This is what lets us settle a "90-day" hedge live in the video.
 
-**Limites du MVP testnet :** paiement du fournisseur depuis l'app en MXN seulement (seule devise avec un actif de test et une offre DEX posée par le setup ; les couvertures BRL, ARS et EUR se règlent normalement) ; oracle de démo (mock-oracle SEP-40, pour le crash) à la place de Reflector, recopié de Reflector par `keepalive.sh --live` hors tournage ; USDC et MXN de test émis par le compte ISSUER, offre DEX MXN/USDC posée par nous ; règle de capacité brute (somme des marges, sans netting) ; taux d'intérêt lus sur l'API Etherfuse et poussés par l'admin (`scripts/sync-rates.sh`), pas lus par le contrat.
+**Testnet MVP limitations:** supplier payment from the app in MXN only (the only currency with a test asset and a DEX offer placed by the setup; BRL, ARS and EUR hedges settle normally); demo oracle (SEP-40 mock-oracle, for the crash) instead of Reflector, copied from Reflector by `keepalive.sh --live` outside of filming; test USDC and MXN issued by the ISSUER account, MXN/USDC DEX offer placed by us; gross capacity rule (sum of margins, no netting); interest rates read from the Etherfuse API and pushed by the admin (`scripts/sync-rates.sh`), not read by the contract.
 
-## Lancer le projet
+## Running the project
 
 ```sh
-# contrats
+# contracts
 stellar contract build
 cargo test
 
-# environnement testnet complet (comptes, actifs, offre DEX, contrats)
+# full testnet environment (accounts, assets, DEX offer, contracts)
 ./scripts/setup-testnet.sh
 
 # front
@@ -329,61 +331,61 @@ cd front && pnpm install && pnpm dev
 ## Structure
 
 ```
-contracts/pool         # vault.rs (capital, parts LP, exposition) · pricing.rs (spot, taux forward, plafonds) · hedge.rs (couvertures)
-contracts/mock-oracle  # oracle SEP-40 pilotable par l'admin (démo)
+contracts/pool         # vault.rs (capital, LP shares, exposure) · pricing.rs (spot, forward rate, caps) · hedge.rs (hedges)
+contracts/mock-oracle  # admin-controlled SEP-40 oracle (demo)
 front/                 # Vite + React + TS, stellar-sdk, Stellar Wallets Kit
-scripts/               # setup et peuplement du testnet, crash du peso, keeper de règlement, synchronisation des taux Etherfuse
-sim/                   # simulateur de pricing / risque (optionnel)
-docs/council/          # council du 25/10 : rapport + transcript
-TODO.md                # setup et chantiers
+scripts/               # testnet setup and seeding, peso crash, settlement keeper, Etherfuse rate sync
+sim/                   # pricing / risk simulator (optional)
+docs/council/          # 25/10 council: report + transcript
+TODO.md                # setup and work items
 ```
 
 ## Roadmap
 
-**Juste après le hackathon**
-- Paiement atomique : régler la couverture et payer le fournisseur dans une seule transaction (swap via un DEX Soroban)
-- Marge productive : la marge de la PME placée en bons du Trésor tokenisés pendant la couverture
-- Fixing robuste : TWAP, bornes de cohérence, plusieurs oracles
+**Right after the hackathon**
+- Atomic payment: settle the hedge and pay the supplier in a single transaction (swap via a Soroban DEX)
+- Productive margin: the SME's margin invested in tokenized Treasury bills during the hedge
+- Robust fixing: TWAP, consistency bounds, multiple oracles
 
-**Pool et risque**
-- Netting par devise et par échéance (PME qui paient en devise / PME qui en reçoivent)
-- Couverture automatique de l'exposition nette : détention de la devise placée en obligations d'État tokenisées (CETES) ou EURC ; une position par devise avec seuil de rééquilibrage
-- Rémunération de la tranche senior par la trésorerie placée, parts LP en token SEP-41
-- Gestion de trésorerie : USDC 8 %, bons du Trésor tokenisés pour le reste ; Blend en option (≤ 20 %, ~+0,5 pt)
-- Limites par devise, skew de prix, spread dynamique
-- Taux d'intérêt lus onchain, fixing sur les cotations SEP-38 des anchors
+**Pool and risk**
+- Netting per currency and per maturity (SMEs paying in a currency / SMEs receiving it)
+- Automatic hedging of net exposure: holding the currency invested in tokenized government bonds (CETES) or EURC; one position per currency with a rebalancing threshold
+- Senior tranche yield from invested treasury, LP shares as a SEP-41 token
+- Treasury management: 8% USDC, tokenized Treasury bills for the rest; Blend as an option (≤ 20%, ~+0.5 pt)
+- Per-currency limits, price skew, dynamic spread
+- Interest rates read onchain, fixing on anchors' SEP-38 quotes
 
-**Produit et distribution**
-- Livraison directe en devise au fournisseur depuis la couverture
-- Facture couverte transférable : vendre une créance déjà couverte à un financeur (affacturage)
-- SDK « Bloquer le taux » pour wallets et anchors
-- KYC via les anchors (SEP-12) pour le cadre réglementaire
-- Audit, puis mainnet
+**Product and distribution**
+- Direct delivery in the currency to the supplier from the hedge
+- Transferable hedged invoice: sell an already-hedged receivable to a financier (factoring)
+- "Lock the rate" SDK for wallets and anchors
+- KYC via anchors (SEP-12) for the regulatory framework
+- Audit, then mainnet
 
-## Risques connus
+## Known risks
 
-| Risque | Parade |
+| Risk | Mitigation |
 |---|---|
-| Défaut de la PME | Impossible : la perte max est déjà déposée |
-| Pertes de change du pool | Plafonnées : règle de capacité, couvertes par le capital du junior (le senior reste exposé à l'USDC, à l'oracle et à l'épuisement du junior) |
-| LPs exposés aux mouvements de la devise | Netting, puis couverture de l'exposition nette en devise (voir *Couverture du pool*) |
-| Flux tous dans le même sens (anti-sélection) | Limites par devise, skew de prix, spread dynamique |
-| Saut de cours entre deux rééquilibrages | Limites par devise, tranche junior en première perte |
-| LP qui retire avant un règlement perdant | Retraits différés à l'échéance suivante, ou prix des parts incluant les contrats ouverts |
-| Protocoles tiers (émetteurs des CETES et bons du Trésor, Blend si activé) | Plafond par protocole, réserve d'USDC dans le contrat |
-| Taux d'intérêt poussés par l'admin | Taux lus en direct sur l'API Etherfuse et poussés par l'admin (`scripts/sync-rates.sh --loop`), écart affiché dans l'app au-delà de 5 bps ; lecture onchain en roadmap |
-| Oracle manipulé au fixing | TWAP sur une fenêtre, bornes de cohérence, plusieurs oracles |
-| Écart oracle / cours réel du DEX ou de l'anchor | Résidu faible, affiché à l'utilisateur |
+| SME default | Impossible: the max loss is already deposited |
+| Pool FX losses | Capped: capacity rule, covered by junior capital (the senior remains exposed to USDC, the oracle and junior depletion) |
+| LPs exposed to currency moves | Netting, then hedging the net exposure in the currency (see *Pool hedging*) |
+| All flows in the same direction (adverse selection) | Per-currency limits, price skew, dynamic spread |
+| Rate jump between two rebalancings | Per-currency limits, junior tranche as first loss |
+| LP withdrawing before a losing settlement | Withdrawals deferred to the next maturity, or share price including open contracts |
+| Third-party protocols (CETES and Treasury bill issuers, Blend if enabled) | Per-protocol cap, USDC reserve in the contract |
+| Interest rates pushed by the admin | Rates read live from the Etherfuse API and pushed by the admin (`scripts/sync-rates.sh --loop`), gap shown in the app beyond 5 bps; onchain reading on the roadmap |
+| Oracle manipulated at fixing | TWAP over a window, consistency bounds, multiple oracles |
+| Gap between oracle and actual DEX or anchor rate | Small residual, shown to the user |
 
-### Limites connues du contrat (MVP)
+### Known contract limitations (MVP)
 
-Correctifs prévus après le hackathon ; détail dans `docs/points-a-trancher.md`.
+Fixes planned after the hackathon; details in `docs/points-a-trancher.md`.
 
-- **Fixing indisponible (302/312) = couverture irréglable.** `settle` règle au cours en vigueur à l'échéance (`pricing::fixing`). Si l'oracle n'a aucun prix de moins de 900 s avant l'échéance (302), ou si l'échéance dépasse son historique (312), la couverture ne peut plus être réglée : la marge de la PME et le capital réservé restent bloqués. Voie de secours `settle_fallback` (admin, après l'échéance + délai de grâce, P&L nul) en roadmap.
-- **Mode démo (`time_factor` > 1)** : le prix porte sur la durée annoncée et l'échéance est raccourcie, donc le carry n'est pas neutralisé (arbitrage possible contre le pool). `time_factor` doit valoir 1 en production (à terme : `set_time_factor` derrière une feature cargo).
-- **Dépôt juste avant un `settle` gagnant** : le fixing est connu dès l'échéance, un LP peut entrer au prix plein juste avant le règlement et ressortir juste après. À corriger par un délai d'entrée ou un blocage de `deposit_lp` tant qu'une couverture échue n'est pas réglée.
-- **Tranches** : les intérêts senior courus font baisser la valeur junior, qui peut passer sous le capital réservé (capacité négative) ou sous 20 % sans aucune opération ; `withdraw_senior` ne vérifie pas encore que le capital restant couvre le réservé.
+- **Fixing unavailable (302/312) = hedge cannot be settled.** `settle` settles at the rate in effect at maturity (`pricing::fixing`). If the oracle has no price less than 900 s before maturity (302), or if maturity is beyond its history (312), the hedge can no longer be settled: the SME's margin and the reserved capital stay locked. A `settle_fallback` escape path (admin, after maturity + grace period, zero P&L) is on the roadmap.
+- **Demo mode (`time_factor` > 1)**: the price covers the stated duration and maturity is shortened, so carry is not neutralized (arbitrage possible against the pool). `time_factor` must be 1 in production (eventually: `set_time_factor` behind a cargo feature).
+- **Deposit just before a winning `settle`**: the fixing is known at maturity, so an LP can enter at full price just before settlement and exit right after. To be fixed with an entry delay or by blocking `deposit_lp` while a matured hedge is unsettled.
+- **Tranches**: accrued senior interest lowers the junior value, which can fall below reserved capital (negative capacity) or below 20% without any operation; `withdraw_senior` does not yet check that the remaining capital covers the reserved amount.
 
-## Concurrence
+## Competition
 
-*FX Swap by Hedgehog* (SCF #21) propose des swaps de devises avec livraison physique (USDC/EURC/AUDD) pour des utilisateurs DeFi. 4ward vise les PME : une couverture sur n'importe quelle devise couverte par l'oracle, sans livraison physique obligatoire (le pool ne détient la devise que pour couvrir son exposition nette), reliée au paiement du fournisseur.
+*FX Swap by Hedgehog* (SCF #21) offers currency swaps with physical delivery (USDC/EURC/AUDD) for DeFi users. 4ward targets SMEs: a hedge on any currency covered by the oracle, without mandatory physical delivery (the pool only holds the currency to hedge its net exposure), tied to the supplier payment.
