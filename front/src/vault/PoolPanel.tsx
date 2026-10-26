@@ -1,8 +1,8 @@
 // [FRONT — Hugo] Panneau pool (2/3 gauche de la page vault), tout tient dans l'écran :
-// capital, usage (fournisseurs, PME, volume, encours), utilisation, exposition MXN, dernières couvertures.
+// capital, usage (fournisseurs, PME, volume, encours), utilisation, équilibre du pool par devise, dernières couvertures.
 import { useEffect, useState } from 'react'
 import { hedgeUsdc, type Activity } from '../shared/activity'
-import { fmtUsdc, fromUnits, pool, read, type PoolStats } from '../shared/contract'
+import { fmtUsdc, fromUnits, pool, read, type Exposure, type PoolStats } from '../shared/contract'
 import { shortAddress, useWallet } from '../shared/wallet'
 import { InkVault } from '../visual/InkVault'
 import { readSplit } from './poolApi'
@@ -44,7 +44,6 @@ export function PoolPanel({ stats, demo, activity }: { stats: PoolStats | null; 
   const raw = stats ? (fromUnits(stats.sharePrice) - 1) * 100 : 0
   // Arrondi d'affichage : un écart sous 0,005 % s'affiche +0%, pas -0%.
   const lpReturn = Math.abs(raw) < 0.005 ? 0 : raw
-  const exp = stats?.exposure
   const a = activity
   const pct = (n: number, digits = 1) => n.toLocaleString('en-US', { maximumFractionDigits: digits })
 
@@ -53,7 +52,7 @@ export function PoolPanel({ stats, demo, activity }: { stats: PoolStats | null; 
       <header className="pool-head">
         <div className="pool-title">
           <p className="eyebrow">
-            USDC vault · MXN hedges {demo && <span className="chip">demo</span>}
+            USDC vault · FX hedges {demo && <span className="chip">demo</span>}
           </p>
           <h1 className="pool-tvl">
             {stats ? fmtUsdc(stats.totalAssets) : '—'} <span>USDC</span>
@@ -97,12 +96,7 @@ export function PoolPanel({ stats, demo, activity }: { stats: PoolStats | null; 
       </div>
 
       <div className="pool-bottom">
-        <div className="mini-card">
-          <h3>MXN exposure</h3>
-          <Row label="SMEs buying pesos" value={exp ? `${fmtUsdc(exp.buy_notional)} USDC` : '—'} />
-          <Row label="SMEs selling pesos" value={exp ? `${fmtUsdc(exp.sell_notional)} USDC` : '—'} />
-          <Row label="Net (pool loses if MXN rises)" value={exp ? `${fmtUsdc(exp.net_notional)} USDC` : '—'} strong />
-        </div>
+        <PoolBalance stats={stats} />
         <div className="mini-card">
           <h3>Recent hedges</h3>
           {!a && <p className="muted small">Loading…</p>}
@@ -120,6 +114,65 @@ export function PoolPanel({ stats, demo, activity }: { stats: PoolStats | null; 
     </section>
   )
 }
+
+/**
+ * Équilibre du pool, devise par devise : PME qui paient dans la devise (USDC → devise, le pool perd si elle monte)
+ * contre PME payées dans la devise (devise → USDC, le pool perd si elle baisse). Ce qui se compense ne coûte
+ * rien au pool : seul le net est un vrai risque. « Offset » = part du volume ouvert qui s'annule.
+ */
+function PoolBalance({ stats }: { stats: PoolStats | null }) {
+  const rows = stats?.exposures ?? []
+  const gross = rows.reduce((t, { exp }) => t + exp.buy_notional + exp.sell_notional, 0n)
+  const matched = rows.reduce((t, { exp }) => t + 2n * min(exp.buy_notional, exp.sell_notional), 0n)
+  const offset = gross > 0n ? Number((matched * 1000n) / gross) / 10 : null
+
+  return (
+    <div className="mini-card balance">
+      <div className="balance-head">
+        <h3>Pool balance</h3>
+        <p className="small muted">
+          {offset === null ? 'no open hedges' : (
+            <>
+              <b>{offset.toLocaleString('en-US', { maximumFractionDigits: 1 })}%</b> offset
+            </>
+          )}
+        </p>
+      </div>
+      {rows.map(({ currency, exp }) => (
+        <BalanceRow key={currency} currency={currency} exp={exp} />
+      ))}
+      <p className="balance-key tiny muted">
+        <i className="pay" /> SMEs pay in it · <i className="get" /> SMEs get paid in it
+      </p>
+    </div>
+  )
+}
+
+function BalanceRow({ currency, exp }: { currency: string; exp: Exposure }) {
+  const total = exp.buy_notional + exp.sell_notional
+  const buy = total > 0n ? Number((exp.buy_notional * 1000n) / total) / 10 : 0
+  const net = exp.net_notional
+  const title =
+    total === 0n
+      ? `No open ${currency} hedge`
+      : `USDC → ${currency}: ${fmtUsdc(exp.buy_notional)} USDC · ${currency} → USDC: ${fmtUsdc(exp.sell_notional)} USDC · net ${fmtUsdc(net < 0n ? -net : net)} USDC, pool loses if ${currency} ${net >= 0n ? 'rises' : 'falls'}`
+  return (
+    <div className="balance-row" title={title}>
+      <span className="balance-cur">{currency}</span>
+      <div className={`balance-bar ${total === 0n ? 'empty' : ''}`}>
+        {total > 0n && (
+          <>
+            <div className="pay" style={{ width: `${buy}%` }} />
+            <div className="get" style={{ width: `${100 - buy}%` }} />
+          </>
+        )}
+      </div>
+      <b>{total === 0n ? '—' : `${Math.round(buy)} / ${Math.round(100 - buy)}`}</b>
+    </div>
+  )
+}
+
+const min = (a: bigint, b: bigint) => (a < b ? a : b)
 
 function Kpi({ label, value, unit, hint, bar }: { label: string; value: string; unit?: string; hint: string; bar?: number }) {
   return (

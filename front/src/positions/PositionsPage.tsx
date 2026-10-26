@@ -7,6 +7,7 @@ import { useTx } from '../shared/useTx'
 import { WalletButton } from '../shared/TopBar'
 import { useWallet } from '../shared/wallet'
 import { readMine, type Mine } from '../vault/poolApi'
+import { ProtectedBadge } from '../visual/Shield'
 
 type Filter = 'all' | 'open' | 'closed'
 type Status = 'open' | 'due' | 'closed'
@@ -140,7 +141,10 @@ function HedgeRow({ id, hedge, status, now, onSettled }: { id: bigint; hedge: He
 
   return (
     <article className={`pos-card st-${status}`}>
-      <span className={`status status-${status}`}>{STATUS_LABEL[status]}</span>
+      <div className="pos-tags">
+        <span className={`status status-${status}`}>{STATUS_LABEL[status]}</span>
+        {status !== 'closed' && <ProtectedBadge capBps={hedge.cap_bps} />}
+      </div>
       <div className="pos-main">
         <p className="pos-big">
           {fmtUsdc(hedge.notional)} {hedge.currency}

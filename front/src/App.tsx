@@ -3,6 +3,7 @@ import { useEffect } from 'react'
 import { About } from './home/About'
 import { Home } from './home/Home'
 import { PositionsPage } from './positions/PositionsPage'
+import { RiskPage } from './risk/RiskPage'
 import { useRoute } from './shared/router'
 import { TopBar } from './shared/TopBar'
 import { VaultPage } from './vault/VaultPage'
@@ -22,6 +23,7 @@ function App() {
         {route === '/about' && <About />}
         {route === '/vault' && <VaultPage />}
         {route === '/positions' && <PositionsPage />}
+        {route === '/risk' && <RiskPage />}
       </main>
     </>
   )

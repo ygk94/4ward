@@ -2,9 +2,10 @@
 import Lenis from 'lenis'
 import { useEffect, useRef } from 'react'
 import { fmtUsdc } from '../shared/contract'
-import { BRAND } from '../shared/config'
-import { go } from '../shared/router'
+import { BRAND, TRADABLE } from '../shared/config'
 import { usePoolStats } from '../shared/usePool'
+import { openVault } from '../vault/entry'
+import { Shield } from '../visual/Shield'
 
 const CURRENCIES = ['MXN', 'BRL', 'ARS', 'EUR', 'COP', 'CLP', 'PEN', 'PHP', 'INR', 'NGN', 'KES', 'ZAR', 'TRY', 'GBP', 'JPY']
 
@@ -50,14 +51,13 @@ export function About() {
       <section className="about-hero">
         <p className="eyebrow reveal">{BRAND} — FX hedging for SMEs</p>
         <h1 className="mega">
-          <span className="reveal">Pay your</span>
-          <span className="reveal indent">suppliers in pesos,</span>
-          <span className="reveal">at today’s</span>
+          <span className="reveal">Pay later.</span>
+          <span className="reveal indent">At today’s</span>
           <span className="reveal indent accent">price.</span>
         </h1>
         <p className="lede reveal">
-          A 1,000,000 MXN invoice due in 90 days? Lock its price in USDC now. On the due date, your supplier is paid in
-          their own currency, at the promised rate. No bank, no credit line.
+          Lock the exchange rate of a future payment now, in USDC. On the due date, your supplier is paid in their own
+          currency, at the promised rate. No bank, no credit line.
         </p>
         <p className="scroll-hint reveal">Scroll ↓</p>
       </section>
@@ -69,16 +69,18 @@ export function About() {
           ))}
         </div>
       </div>
+      <p className="marquee-legend">
+        Tradable today: {TRADABLE.join(', ')} · the others are on the roadmap
+      </p>
 
       {/* 01 — le problème */}
       <section className="about-block">
         <p className="section-num reveal">01 — The problem</p>
         <h2 className="big reveal">
-          If the peso rises 10%, her invoice costs <span className="accent-pink">$5,500</span> more.
+          Between the invoice and the payment, the <span className="accent-pink">rate moves</span>.
         </h2>
         <p className="lede reveal">
-          Lucía imports tequila into Lisbon. A large company would call its bank to lock the exchange rate. Lucía has no credit
-          line: her bank will never offer her that product.
+          Large companies call their bank to lock it. SMEs can’t: no credit line, no FX desk. The swing eats their margin.
         </p>
       </section>
 
@@ -86,7 +88,9 @@ export function About() {
       <section className="about-split">
         <div className="split-head">
           <p className="section-num reveal">02 — For SMEs</p>
-          <h2 className="big reveal">A locked price, with the protection you choose.</h2>
+          <Shield className="shield-xl reveal" />
+          <h2 className="big reveal">Lock it. Cap it. Forget it.</h2>
+          <p className="lede reveal">A locked price, with the protection you choose.</p>
         </div>
         <div className="cards">
           <article className="card reveal">
@@ -102,16 +106,20 @@ export function About() {
           <article className="card reveal">
             <p className="card-k">5 s</p>
             <p className="card-l">to pay the supplier in their currency</p>
-            <p className="muted small">Stellar path payment USDC → MXN</p>
+            <p className="muted small">Stellar path payment</p>
           </article>
         </div>
+        <button className="btn btn-ghost btn-enter reveal" onClick={() => openVault('sme')}>
+          Hedge an invoice <span aria-hidden>→</span>
+        </button>
       </section>
 
       {/* 03 — LP */}
       <section className="about-split alt">
         <div className="split-head">
           <p className="section-num reveal">03 — For liquidity providers</p>
-          <h2 className="big reveal">Your USDC is the counterparty. You earn the spreads.</h2>
+          <h2 className="big reveal">Be the shield. Keep the fees.</h2>
+          <p className="lede reveal">Your USDC backs every hedge, and earns a fee on each one.</p>
         </div>
         <div className="cards">
           <article className="card reveal">
@@ -130,6 +138,14 @@ export function About() {
             <p className="muted small">Reserved capital ≤ pool capital, enforced by the contract</p>
           </article>
         </div>
+        <div className="lp-cta reveal">
+          <button className="btn btn-primary btn-enter" onClick={() => openVault('lp')}>
+            Supply USDC <span aria-hidden>→</span>
+          </button>
+          <p className="muted small">
+            {stats ? `${fmtUsdc(stats.totalAssets)} USDC already in the vault` : 'Deposit and withdraw anytime'}
+          </p>
+        </div>
       </section>
 
       {/* 04 — comment */}
@@ -147,7 +163,7 @@ export function About() {
             <span>02</span>
             <div>
               <h3>Get a locked price</h3>
-              <p className="muted">Today’s rate, adjusted for 90 days: “you’ll pay 55,013 USDC, no matter what”.</p>
+              <p className="muted">Today’s rate, adjusted for 90 days: “this is what you’ll pay, no matter what”.</p>
             </div>
           </li>
           <li className="reveal">
@@ -172,7 +188,7 @@ export function About() {
         <p className="section-num reveal">05 — The vault, live</p>
         <p className="mega-num reveal">{stats ? fmtUsdc(stats.totalAssets) : '—'}</p>
         <p className="lede reveal">USDC deposited on testnet, ready to hedge invoices.</p>
-        <button className="btn btn-primary btn-enter reveal" onClick={() => go('/vault')}>
+        <button className="btn btn-primary btn-enter reveal" onClick={() => openVault(null)}>
           Go to vaults <span aria-hidden>→</span>
         </button>
       </section>

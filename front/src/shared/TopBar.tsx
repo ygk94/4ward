@@ -22,6 +22,9 @@ export function TopBar() {
             <button className={`nav-pill ${route === '/positions' ? 'active' : ''}`} onClick={() => go('/positions')}>
               My positions
             </button>
+            <button className={`nav-pill ${route === '/risk' ? 'active' : ''}`} onClick={() => go('/risk')}>
+              Risk lab
+            </button>
           </>
         )}
       </nav>

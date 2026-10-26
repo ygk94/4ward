@@ -2,13 +2,13 @@
 // Le règlement (settle) + path payment au fournisseur se font depuis « Mes positions ».
 import { useEffect, useState } from 'react'
 import { QuoteCard } from '../pricing/QuoteCard'
-import { config } from '../shared/config'
+import { config, TRADABLE } from '../shared/config'
 import { explainError, pool, read, toUnits, type Quote, type SideTag } from '../shared/contract'
 import { go } from '../shared/router'
 import { TxStatus } from '../shared/TxStatus'
 import { useTx } from '../shared/useTx'
 
-const CURRENCIES = ['MXN', 'BRL', 'ARS', 'EUR']
+const CURRENCIES = TRADABLE
 const DURATIONS = [
   { label: '30 days', secs: 30 * 86_400 },
   { label: '90 days', secs: 90 * 86_400 },

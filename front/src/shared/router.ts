@@ -1,8 +1,8 @@
-// [FRONT — Hugo] Routage par hash (#/, #/about, #/vault, #/positions) : pas de config serveur pour le déploiement statique.
+// [FRONT — Hugo] Routage par hash (#/, #/about, #/vault, #/positions, #/risk) : pas de config serveur pour le déploiement statique.
 import { useSyncExternalStore } from 'react'
 
-export type Route = '/' | '/about' | '/vault' | '/positions'
-const ROUTES: Route[] = ['/', '/about', '/vault', '/positions']
+export type Route = '/' | '/about' | '/vault' | '/positions' | '/risk'
+const ROUTES: Route[] = ['/', '/about', '/vault', '/positions', '/risk']
 
 function current(): Route {
   const r = window.location.hash.replace(/^#/, '') || '/'

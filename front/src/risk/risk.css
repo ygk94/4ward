@@ -1,0 +1,353 @@
+/* [FRONT — Hugo] Risk lab : cartes Safe / Dynamic, histogramme Monte-Carlo (grammaire data.morpho.org : grille de
+   points, entrée animée, infobulle, tirage précédent en fantôme) et panneau « Advanced ». */
+/* Pas de grand panneau opaque : les cartes flottent sur le fond, comme sur l'accueil et la page About. */
+.risk-page {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: clamp(14px, 2vw, 24px);
+  padding: 76px var(--gutter) 20px;
+  max-width: 1300px;
+  margin: 0 auto;
+  height: 100svh;
+  min-height: 600px;
+}
+.risk-page.with-advanced {
+  grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+  max-width: 1500px;
+}
+.risk-main {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: clamp(10px, 1.8vh, 18px);
+  min-height: 0;
+}
+.risk-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 16px;
+}
+.risk-title {
+  font-weight: 700;
+  font-size: clamp(34px, 4.6vw, 64px);
+  line-height: 1;
+  letter-spacing: -0.045em;
+  color: var(--ink);
+  margin-top: 6px;
+}
+.risk-adv-toggle.on {
+  border-color: var(--blue);
+  color: var(--blue);
+}
+/* verre dépoli léger : on voit encore les carreaux du fond derrière */
+.tranche-card,
+.moods,
+.risk-chart,
+.risk-side {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(251, 248, 241, 0.42);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.tranches {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(170px, auto);
+  gap: 12px;
+}
+.tranche-card {
+  padding: clamp(10px, 1.8vh, 18px) 18px;
+  display: grid;
+  gap: 2px;
+  align-content: start;
+}
+.tranche-card .small {
+  color: var(--text);
+}
+.tranche-big {
+  font-weight: 700;
+  font-size: clamp(32px, 4vw, 54px);
+  line-height: 1.05;
+  letter-spacing: -0.05em;
+}
+.tranche-card.safe .tranche-big {
+  color: var(--mint-ink);
+}
+.tranche-card.dynamic .tranche-big {
+  color: var(--blue);
+}
+.moods {
+  padding: 12px;
+  display: grid;
+  gap: 6px;
+  align-content: start;
+}
+.moods .eyebrow {
+  margin-bottom: 2px;
+}
+.moods button {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line-2);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  text-align: left;
+}
+.moods button span {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted);
+}
+.moods button.on {
+  border-color: var(--blue);
+  background: var(--blue);
+  color: #fff;
+}
+.moods button.on span {
+  color: rgba(255, 255, 255, 0.8);
+}
+.risk-chart {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  padding: 14px 16px 10px;
+}
+.risk-foot {
+  margin: 0;
+}
+.histo-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px 16px;
+}
+.histo-head .eyebrow {
+  margin: 0;
+}
+.histo-legend {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+}
+.histo-legend .safe {
+  color: var(--mint-ink);
+}
+.histo-legend .mean {
+  color: var(--ink);
+}
+.histo-legend .prev {
+  color: var(--muted);
+  font-weight: 500;
+}
+.histo-legend .chip {
+  cursor: pointer;
+  font-family: var(--mono);
+  font-weight: 500;
+  border-color: var(--line-2);
+  color: var(--muted);
+  background: none;
+}
+.histo-legend .chip:hover {
+  color: var(--ink);
+}
+.histo-wrap {
+  position: relative;
+  min-height: 0;
+  height: 100%;
+}
+.histo {
+  width: 100%;
+  height: 100%;
+  max-height: 100%;
+  display: block;
+}
+.histo .bar {
+  transition:
+    y 0.45s cubic-bezier(0.2, 0.7, 0.2, 1),
+    height 0.45s cubic-bezier(0.2, 0.7, 0.2, 1),
+    opacity 0.2s;
+}
+.histo .bar.gain {
+  fill: var(--blue);
+  opacity: 0.8;
+}
+.histo .bar.loss {
+  fill: var(--violet);
+  opacity: 0.75;
+}
+/* survol : la barre visée ressort, les autres s'effacent un peu */
+.histo.hovering .bar {
+  opacity: 0.45;
+}
+.histo.hovering .bar.on {
+  opacity: 1;
+}
+.histo .dot {
+  fill: var(--line-2);
+}
+.histo .ghost {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.2;
+  opacity: 0.35;
+}
+.histo .cursor {
+  stroke: var(--line-2);
+  stroke-width: 1;
+}
+.histo .hit {
+  fill: transparent;
+}
+.histo .axis {
+  stroke: var(--line-2);
+}
+.histo .tick {
+  font-family: var(--mono);
+  font-size: 12px;
+  fill: var(--muted);
+}
+.histo .marker {
+  stroke-width: 2;
+  stroke-dasharray: 5 4;
+}
+.histo .marker.safe {
+  stroke: var(--mint-ink);
+}
+.histo .marker.mean {
+  stroke: var(--ink);
+}
+/* entrée : chaque barre monte depuis la ligne de base, en décalé de gauche à droite */
+.histo.intro .bar {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: bar-in 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  animation-delay: calc(var(--i) * 15ms);
+}
+@keyframes bar-in {
+  from {
+    transform: scaleY(0);
+  }
+}
+.histo-tip {
+  position: absolute;
+  z-index: 2;
+  transform: translate(10px, 0);
+  pointer-events: none;
+  min-width: 190px;
+  padding: 10px 12px;
+  display: grid;
+  gap: 4px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(35, 37, 46, 0.1);
+  backdrop-filter: blur(8px);
+  font-size: 13px;
+  color: var(--text);
+}
+.histo-tip.flip {
+  transform: translate(calc(-100% - 10px), 0);
+}
+.histo-tip p {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.histo-tip .mono {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink);
+  font-weight: 600;
+}
+.histo-tip i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+.histo-tip i.gain {
+  background: var(--blue);
+}
+.histo-tip i.loss {
+  background: var(--violet);
+}
+.histo-tip i.muted-dot {
+  background: var(--muted);
+}
+.risk-side {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 18px;
+}
+.risk-kpis {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.risk-actions {
+  display: flex;
+  gap: 8px;
+}
+.risk-notes summary {
+  cursor: pointer;
+  color: var(--ink);
+  font-weight: 500;
+}
+.risk-notes ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+}
+.risk-notes .mono {
+  word-break: normal;
+}
+@media (max-width: 900px) {
+  .risk-page,
+  .risk-page.with-advanced {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+  }
+  .risk-chart {
+    min-height: 300px;
+  }
+  .tranches {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .moods {
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .moods .eyebrow {
+    grid-column: 1 / -1;
+  }
+}
+/* le SVG garde son viewBox : sur téléphone il est réduit à ~35 %, on grossit les graduations en unités SVG */
+@media (max-width: 600px) {
+  .histo .tick {
+    font-size: 26px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .histo .bar {
+    transition: none;
+  }
+  .histo.intro .bar {
+    animation: none;
+  }
+}

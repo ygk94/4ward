@@ -2,7 +2,7 @@
 // Le client est construit à partir de la spec lue on-chain (contract.Client.from) : pas besoin de régénérer
 // les bindings à chaque redéploiement. Les types ci-dessous reprennent ceux de contracts/pool/src/lib.rs.
 import { contract } from '@stellar/stellar-sdk'
-import { config } from './config'
+import { config, TRADABLE } from './config'
 import { signTransaction } from './wallet'
 
 export type SideTag = 'BuyCurrency' | 'SellCurrency'
@@ -40,7 +40,8 @@ export interface PoolStats {
   capacity: bigint
   sharePrice: bigint
   exitPrice: bigint
-  exposure: Exposure
+  /** Exposition ouverte par devise cotable (même ordre que TRADABLE). */
+  exposures: { currency: string; exp: Exposure }[]
 }
 
 type Tx<T> = contract.AssembledTransaction<T>
@@ -123,16 +124,14 @@ export async function read<T>(tx: Promise<Tx<T>>): Promise<T> {
   return unwrap((await tx).result)
 }
 
-export async function readStats(currency = 'MXN'): Promise<PoolStats> {
+export async function readStats(currencies = TRADABLE): Promise<PoolStats> {
   const p = await pool()
-  const [totalAssets, capacity, sharePrice, exitPrice, exposure] = await Promise.all([
-    read(p.total_assets()),
-    read(p.capacity()),
-    read(p.share_price()),
-    read(p.exit_price()),
-    read(p.exposure({ currency })),
+  const [[totalAssets, capacity, sharePrice, exitPrice], exps] = await Promise.all([
+    Promise.all([read(p.total_assets()), read(p.capacity()), read(p.share_price()), read(p.exit_price())]),
+    Promise.all(currencies.map((currency) => read(p.exposure({ currency })))),
   ])
-  return { totalAssets, capacity, sharePrice, exitPrice, exposure }
+  const exposures = currencies.map((currency, i) => ({ currency, exp: exps[i] }))
+  return { totalAssets, capacity, sharePrice, exitPrice, exposures }
 }
 
 /** Couvertures d'un propriétaire. Le contrat n'indexe pas par owner : on parcourt les ids jusqu'au premier vide. */

@@ -9,13 +9,9 @@ const DEMO: PoolStats = {
   capacity: toUnits(944_987),
   sharePrice: toUnits(1.0042),
   exitPrice: toUnits(0.9493),
-  exposure: {
-    buy_notional: toUnits(550_128),
-    sell_notional: toUnits(0),
-    net_notional: toUnits(550_128),
-    buy_margin: toUnits(55_013),
-    sell_margin: 0n,
-  },
+  exposures: [
+    { currency: 'MXN', exp: { buy_notional: toUnits(550_128), sell_notional: toUnits(0), net_notional: toUnits(550_128), buy_margin: toUnits(55_013), sell_margin: 0n } },
+  ],
 }
 
 export function usePoolStats() {

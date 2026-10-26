@@ -1,16 +1,19 @@
 // [FRONT — Hugo] Page vault : infos du pool à gauche (2/3), choix du rôle et formulaire à droite (1/3).
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { HedgeScreen } from '../payment/HedgeScreen'
 import { useActivity, usePoolStats } from '../shared/usePool'
+import { clearPendingRole, pendingRole, type Role } from './entry'
 import { LpForm } from './LpForm'
 import { PoolPanel } from './PoolPanel'
-
-type Role = 'lp' | 'sme' | null
 
 export function VaultPage() {
   const { stats, demo, refresh } = usePoolStats()
   const { activity, refresh: refreshActivity } = useActivity()
-  const [role, setRole] = useState<Role>(null)
+  const [role, setRole] = useState<Role>(pendingRole)
+  // Le rôle venu d'un lien ne vaut que pour cette ouverture ; « Vaults » dans la barre repart du choix.
+  useEffect(() => {
+    clearPendingRole()
+  }, [])
   const onDone = () => {
     refresh()
     refreshActivity()
