@@ -137,7 +137,7 @@ Commencer avec des données factices, brancher le contrat après le merge.
 2. ⬜ **Garder les clés de démo** (`fx-admin`, `fx-lp`, `fx-lucia`, `fx-supplier`) : pas de partage pour l'instant. La démo et la vidéo se font depuis la machine d'Hugo ; tout ce qui demande `fx-admin` sur le déploiement officiel (crash, prix du mock, offre DEX, `set_rate`) passe par Hugo. Partage éventuel plus tard (pitch live du 28/10), en privé, jamais dans le repo
 3. ✅ Merge des 3 branches dans `main`, redéploiement et parcours complet vérifié sur testnet (25/10 soir, en avance)
 3bis. ⬜ Régénérer les bindings TS pour le front après chaque redéploiement (`stellar contract bindings typescript`), et refaire un merge final lundi matin si Paiement ou Pricing poussent encore
-4. ⬜ (option) Déployer le front (Vercel / Netlify) pour mettre un lien dans le README
+4. ⬜ Déployer le front sur Vercel (prêt : `front/vercel.json`, variables dans `front/.env.example`, marche à suivre dans `front/README.md`) et mettre le lien dans le README
 
 ### Pitch et soumission
 1. ⬜ 🔴 Nom du projet → remplacer `<NOM>` partout (README, front, deck)
