@@ -101,6 +101,7 @@ mod pricing_tests {
     /// 90 jours.
     const D90: u64 = 7_776_000;
     /// F = S × 318_470_400_000 / 320_803_200_000 (r_USD 400 bps, r_MXN 700 bps, 90 j), floor.
+    /// Taux de test arbitraires (≠ snapshot 360/555 de la démo, vérifiés par `demo_figures`).
     /// Valeurs calculées indépendamment (Python, entiers exacts).
     const MXN_F90: i128 = 5_460_005_386_479;
     const MXN_F90_BUY_50: i128 = 5_487_305_413_412;
@@ -541,7 +542,8 @@ fn setup<'a>() -> Setup<'a> {
 
     let pool_id = env.register(Pool, (&admin, &usdc_id, &oracle_id, 50u32));
     let pool = PoolClient::new(&env, &pool_id);
-    // paramètres Pricing du setup testnet : taux annuels et MXN ouverte (plafond minimum 5 %)
+    // taux de test arbitraires (anciens taux 400/700, ≠ snapshot 360/555 : voir `demo_figures`)
+    // et MXN ouverte (plafond minimum 5 %)
     pool.set_rate(&Symbol::new(&env, "USD"), &400);
     pool.set_rate(&Symbol::new(&env, "MXN"), &700);
     pool.set_min_cap(&Symbol::new(&env, "MXN"), &500);
@@ -976,6 +978,36 @@ fn accelerated_hedge_settles_after_real_maturity() {
     s.env.ledger().set_timestamp(now + 300);
     set_spot(&s, 6_160_000_000_000);
     assert_eq!(s.pool.settle(&id), 109_746_108_270);
+}
+
+/// Chiffres exacts de la vidéo et du README : taux de `scripts/rates.snapshot` (USD 360, MXN 555),
+/// spot 0,055, 1 000 000 MXN à 90 jours, plafond 10 %, mode démo, crash +12 % avant l'échéance.
+/// Mêmes valeurs que `sim/contract.py` (auto-test) et `docs/points-a-trancher.md`.
+#[test]
+fn demo_figures() {
+    let s = setup();
+    fund_pool(&s);
+    let mxn = Symbol::new(&s.env, "MXN");
+    s.pool.set_rate(&Symbol::new(&s.env, "USD"), &360);
+    s.pool.set_rate(&mxn, &555);
+    s.pool.set_time_factor(&DEMO_FACTOR);
+    let now = s.env.ledger().timestamp();
+
+    // prix figé 55 012,81 USDC, dépôt 5 501,28 USDC
+    let q = s.pool.quote(&mxn, &Side::BuyCurrency, &NOTIONAL, &DAYS_90, &1000);
+    assert_eq!(q.forward_rate, 5_501_281_368_668);
+    assert_eq!(q.usdc_cost, 550_128_136_866);
+    assert_eq!(q.margin, 55_012_813_687);
+
+    let id = s.pool.open_hedge(&s.lucia, &s.supplier, &mxn, &Side::BuyCurrency, &NOTIONAL, &DAYS_90, &1000);
+    let h = s.pool.get_hedge(&id).unwrap();
+    assert_eq!(h.locked_rate, q.forward_rate);
+    assert_eq!(h.margin, q.margin);
+
+    // +12 % (0,0616) : protection plafonnée, 11 002,56 USDC versés ; coût total 61 600 − 11 002,56 + 5 501,28 = 56 098,72
+    s.env.ledger().set_timestamp(now + 300);
+    set_spot(&s, 6_160_000_000_000);
+    assert_eq!(s.pool.settle(&id), 110_025_627_374);
 }
 
 #[test]

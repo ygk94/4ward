@@ -196,7 +196,8 @@ pub(crate) fn fixing(env: &Env, currency: &Symbol, maturity: u64) -> i128 {
 /// S × num = 1e14 × 6,3e11 = 6,3e25. Le spread ensuite : F ≤ 2 × S = 2e14, × (BPS + spread) ≤ 10_500
 /// → 2,1e18. Tout reste très loin de i128::MAX ≈ 1,7e38.
 ///
-/// Arrondis : toujours du côté du pool. F sans spread est tronqué (floor) ; le spread arrondit
+/// Arrondis : le spread arrondit du côté du pool ; la troncature de F (floor) peut avantager
+/// l'acheteur de moins de 1e-14 USD par unité, sans effet mesurable. Le spread arrondit
 /// `BuyCurrency` vers le haut (l'utilisateur paie un peu plus) et `SellCurrency` vers le bas
 /// (il reçoit un peu moins). Arrondir dans l'autre sens laisserait une fraction d'unité par
 /// couverture à l'utilisateur, exploitable en répétant de petites couvertures.

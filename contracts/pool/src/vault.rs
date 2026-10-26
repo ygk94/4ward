@@ -32,12 +32,13 @@
 //! - Le rendement senior est payé par le junior : tant que le capital libre n'est pas placé,
 //!   il sort du capital junior.
 //! - Ratio minimum : tant qu'il y a des parts senior, junior ≥ `MIN_JUNIOR_BPS` du capital ;
-//!   un dépôt senior ou un retrait junior qui passerait dessous est refusé.
+//!   un dépôt senior ou un retrait junior qui passerait dessous est refusé (contrôlé à ces
+//!   opérations seulement : les intérêts senior courus peuvent faire baisser le junior ensuite).
 //!
 //! Netting : `basket_max_loss` calcule la perte maximale exacte d'un panier de couvertures,
 //! mais n'est PAS branché sur la réserve. Conditions pour le brancher :
-//! 1. fixing commun à l'échéance : toutes les couvertures d'un panier réglées au même cours
-//!    (aujourd'hui `settle` lit le cours au moment de l'appel) ;
+//! 1. fixing commun : déjà fait (`settle` lit le cours à l'échéance via `pricing::fixing`) ;
+//!    reste à aligner les échéances (point 2) ;
 //! 2. échéances arrondies à des dates de fixing (aujourd'hui `now + duration` à la seconde :
 //!    deux couvertures n'ont jamais la même échéance, les paniers sont de taille 1) ;
 //! 3. règlement par panier (toutes les jambes dans la même transaction) ou comptabilisation
@@ -287,8 +288,9 @@ fn set_lp_shares(env: &Env, lp: &Address, value: i128) {
     }
 }
 
-/// Capital libre, jamais négatif. Il ne peut l'être que par un mauvais usage
-/// (`book_loss` sans `release`) ; on ne verse ni n'affiche alors rien.
+/// Capital libre, jamais négatif. La capacité peut devenir négative quand les intérêts senior
+/// courus font passer le junior sous Reserved (aucun retrait junior alors), ou par un mauvais
+/// usage (`book_loss` sans `release`) ; on ne verse ni n'affiche alors rien.
 fn free_capital(env: &Env) -> i128 {
     capacity(env).max(0)
 }
@@ -363,6 +365,10 @@ fn check_junior_ratio(env: &Env, junior: i128, total: i128) {
 
 /// Dépose `amount` USDC contre des parts junior au prix plein (valeur junior / parts junior),
 /// arrondi vers le bas. Retourne les parts du LP après le dépôt.
+/// Limite connue : si toutes les parts junior ont été brûlées avec du capital restant
+/// (Reserved laissé par le dernier LP sorti), le déposant suivant reçoit des parts à 1:1 et
+/// hérite de ce capital (et des pertes des couvertures encore ouvertes). À terme : refuser
+/// dans `withdraw` de brûler la dernière part tant que `reserved > 0`.
 /// Erreurs : `InvalidAmount`, `PoolDepleted`, `DepositTooSmall`, `Overflow`.
 pub(crate) fn deposit(env: &Env, lp: &Address, amount: i128) -> i128 {
     lp.require_auth();
@@ -481,7 +487,8 @@ fn usdc(env: &Env) -> token::Client<'_> {
 }
 
 /// Valeur junior − Reserved : seul le junior porte les couvertures. Sans senior,
-/// TotalDeposits − Reserved. Négatif seulement en cas de mauvais usage (voir `free_capital`).
+/// TotalDeposits − Reserved. Peut devenir négatif quand les intérêts senior courus font passer
+/// le junior sous Reserved (aucun retrait junior alors), voir `free_capital`.
 pub(crate) fn capacity(env: &Env) -> i128 {
     bump_instance(env);
     junior_value(env) - reserved(env)
@@ -518,7 +525,11 @@ pub(crate) fn deposit_senior(env: &Env, lp: &Address, amount: i128) -> i128 {
 
 /// Brûle `shares` parts senior du LP et lui verse leur valeur (valeur senior × parts / parts
 /// senior totales), arrondi vers le bas. Le retrait senior ne touche pas la valeur junior,
-/// donc ni la capacité ni le ratio ne bougent. Retourne l'USDC versé.
+/// donc ni la capacité ni le ratio ne bougent, SAUF si le junior est déjà passé sous Reserved
+/// (intérêts senior courus) : le retrait peut alors laisser TotalDeposits < Reserved, et un
+/// `settle` perdant pour le pool échouerait en `LossExceedsCapital` tant qu'un LP ne redépose
+/// pas. Limite connue, à corriger après le hackathon (refus si TotalDeposits − amount < Reserved,
+/// nouveau code 113). Retourne l'USDC versé.
 /// Erreurs : `InvalidAmount`, `InsufficientSeniorShares`, `WithdrawTooSmall`, `Overflow`.
 pub(crate) fn withdraw_senior(env: &Env, lp: &Address, shares: i128) -> i128 {
     lp.require_auth();
