@@ -1,6 +1,6 @@
 // [FRONT — Hugo] Mes positions : protections (en cours / à régler / fermées) et position LP.
 import { useCallback, useEffect, useState } from 'react'
-import { fmtRate, fmtUsdc, readHedges, type Hedge } from '../shared/contract'
+import { explainError, fmtRate, fmtUsdc, pool, read, readHedges, type Hedge } from '../shared/contract'
 import { go } from '../shared/router'
 import { TxStatus } from '../shared/TxStatus'
 import { useTx } from '../shared/useTx'
@@ -123,8 +123,20 @@ export function PositionsPage() {
 
 function HedgeRow({ id, hedge, status, now, onSettled }: { id: bigint; hedge: Hedge; status: Status; now: number; onSettled: () => void }) {
   const { state, run } = useTx()
+  const { address } = useWallet()
   const left = Number(hedge.maturity) - now
   const pay = hedge.side.tag === 'BuyCurrency'
+  // Clôture anticipée : on simule d'abord close_early pour montrer ce que la PME récupérerait, puis on confirme.
+  const [preview, setPreview] = useState<{ payout: bigint } | { error: string } | null>(null)
+
+  async function previewClose() {
+    if (!address) return
+    try {
+      setPreview({ payout: await read((await pool(address)).close_early({ hedge_id: id })) })
+    } catch (e) {
+      setPreview({ error: explainError(e) })
+    }
+  }
 
   return (
     <article className={`pos-card st-${status}`}>
@@ -156,6 +168,42 @@ function HedgeRow({ id, hedge, status, now, onSettled }: { id: bigint; hedge: He
             {state.step === 'signing' ? 'Waiting…' : 'Settle'}
           </button>
           <TxStatus state={state} success={(r) => `Settled: ${fmtUsdc(r as bigint, 2)} USDC paid out.`} />
+        </div>
+      )}
+      {status === 'open' && (
+        <div className="pos-action">
+          {!preview && state.step !== 'done' && (
+            <button className="btn btn-ghost" onClick={previewClose}>
+              Close early
+            </button>
+          )}
+          {preview && 'error' in preview && <p className="tx tx-err">{preview.error}</p>}
+          {preview && 'payout' in preview && state.step !== 'done' && (
+            <>
+              <p className="small">
+                Close now at today’s forward rate: you get back <b>{fmtUsdc(preview.payout, 2)} USDC</b> of your{' '}
+                {fmtUsdc(hedge.margin, 2)} USDC margin
+                {preview.payout >= hedge.margin
+                  ? ' (the rate moved your way).'
+                  : ' (the difference covers the market move and the exit spread, and goes to the pool).'}
+              </p>
+              <button
+                className="btn btn-primary"
+                disabled={state.step === 'signing'}
+                onClick={async () => {
+                  await run((p) => p.close_early({ hedge_id: id }))
+                  setPreview(null)
+                  onSettled()
+                }}
+              >
+                {state.step === 'signing' ? 'Waiting…' : 'Confirm close'}
+              </button>
+              <button className="btn btn-ghost" disabled={state.step === 'signing'} onClick={() => setPreview(null)}>
+                Keep it
+              </button>
+            </>
+          )}
+          <TxStatus state={state} success={(r) => `Closed early: ${fmtUsdc(r as bigint, 2)} USDC paid out.`} />
         </div>
       )}
     </article>

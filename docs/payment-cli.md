@@ -64,6 +64,15 @@ stellar contract invoke --id fx-pool --source-account fx-supplier --network test
 Retour : l'USDC versé à Lucía (marge ± P&L, entre 0 et 2 × marge). Effets : transfert USDC pool → Lucía, événement `hedge_settled` (spot de fixing, P&L, versement).
 Le cours utilisé est celui **en vigueur à l'échéance**, quel que soit le moment de l'appel : un prix posé après l'échéance ne compte pas. Régler peu après l'échéance : l'historique de Reflector ne remonte qu'à ~12 h, celui du mock à 64 prix (au-delà : #312).
 
+### Clôture anticipée (avant l'échéance)
+
+La PME peut sortir avant l'échéance (facture annulée, payée plus tôt) : `close_early`, signé par le propriétaire seul.
+```sh
+stellar contract invoke --id fx-pool --source-account fx-lucia --network testnet -- \
+  close_early --hedge_id 0
+```
+Clôture au prix du marché : taux de sortie = forward du jour pour la durée restante, dans le sens inverse (spread de 0,5 % contre la PME, comme à l'ouverture : c'est le frais de sortie). Même P&L borné et même versement que `settle` : le perdant paie, le pool libère sa réserve. Événement `hedge_closed_early` (taux de sortie, P&L, versement). Avec `--send=no`, la simulation donne le montant que la PME récupérerait (le front l'affiche avant de confirmer). À l'échéance ou après : `#206`, utiliser `settle`. Testé sur le testnet le 26/10 : cours inchangé, la PME récupère 4 958,16 sur 5 501,28 USDC (aller-retour des spreads ≈ 1 % du montant).
+
 ### Règlement automatique : le keeper
 
 Au lieu d'appeler `settle` à la main, `scripts/keeper.sh` surveille les couvertures et règle chacune dès son échéance (n'importe quel compte peut payer les frais, `fx-admin` par défaut) :
@@ -153,6 +162,7 @@ Les textes de `panic!` sont effacés dans le WASM déployé : le front ne reçoi
 | #202 `NotMatured` | Paiement | L'échéance n'est pas encore atteinte (afficher le compte à rebours sur `maturity`) |
 | #203 `InvalidNotional` | Paiement | Montant de facture invalide |
 | #204 `InvalidDuration` | Paiement | Échéance invalide |
+| #206 `AlreadyMatured` | Paiement | Échéance atteinte : régler (`settle`) au lieu de clôturer |
 | #100 `InvalidAmount` | Vault | Montant invalide |
 | #101 `InsufficientCapacity` | Vault | Le pool n'a pas assez de capital pour cette protection |
 | #102 `ReleaseExceedsReserved` | Vault | Erreur interne (libération au-delà du capital réservé) |

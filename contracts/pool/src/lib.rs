@@ -229,6 +229,12 @@ impl Pool {
         hedge::settle(&env, hedge_id)
     }
 
+    /// Propriétaire seul, avant l'échéance : clôture au prix du marché (forward du jour pour la durée restante,
+    /// spread inclus). Le perdant paie. Retourne le montant USDC versé au propriétaire.
+    pub fn close_early(env: Env, hedge_id: u64) -> i128 {
+        hedge::close_early(&env, hedge_id)
+    }
+
     pub fn get_hedge(env: Env, hedge_id: u64) -> Option<Hedge> {
         hedge::get(&env, hedge_id)
     }

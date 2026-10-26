@@ -125,7 +125,7 @@ Le vault expose `capacity()` et `total_assets()` ; si Lancelot ajoute le placeme
    - coût total réel de Lucía = prix figé, liens stellar.expert pour les deux transactions
    - comparaison « sans protection / avec protection » après le crash
    - compte à rebours jusqu'à `maturity` ; bouton « Régler » activé seulement après (sinon erreur #202 NotMatured)
-   - traduire les codes d'erreur : vault 100-112, paiement 200-205, pricing 300-312, token USDC #10 (solde insuffisant) (tables dans `docs/payment-cli.md` et `docs/todo-pricing.md`)
+   - traduire les codes d'erreur : vault 100-112, paiement 200-206, pricing 300-312, token USDC #10 (solde insuffisant) (tables dans `docs/payment-cli.md` et `docs/todo-pricing.md`)
 5. ⬜ `pricing/QuoteCard.tsx` : spot réel Reflector, prix figé, marge à déposer (appel `quote`)
 6. ⬜ `pricing/CrashButton.tsx` : `set_price` sur le mock (compte admin), le peso monte de 12 %
 7. ⬜ `vault/PoolPanel.tsx` : capital total, réservé, libre, prix de la part, position du LP, **exposition nette par devise** (graphique), indicateur « solvable », déposer / retirer (compte `fx-lp`)
@@ -154,6 +154,7 @@ Commencer avec des données factices, brancher le contrat après le merge.
 2. ✅ `open` : `require_auth(owner)`, `pricing::check_cap`, `locked_rate = pricing::forward_rate`, marge = `to_usdc(notional, locked_rate) × cap_bps / BPS`, transfert de la marge, `vault::reserve(marge)`, stockage + `extend_ttl`
 3. ✅ Événements `open` / `settle` (pour le front et l'explorateur)
 5. ✅ Branché sur le vault (`open_position` / `close_position`), codes `HedgeError` 200-205
+6. ✅ Clôture anticipée `close_early` (26/10) : propriétaire seul, avant l'échéance, au forward du jour pour la durée restante côté inverse (frais de sortie = spread) ; bouton « Close early » avec aperçu du montant dans Mes positions ; 8 tests, testé sur le testnet, pool redéployé
 6. ✅ Retirer les `#[ignore]` des 13 tests d'intégration : ajouter `set_rate` / `set_min_cap` dans leur préparation (liste blanche du Pricing)
 7. ✅ Régler au **cours de fixing à l'échéance** (`pricing::fixing(currency, maturity)` de Lancelot) au lieu du spot au moment de l'appel : sinon option gratuite pour qui choisit quand régler
 4. ✅ (obsolète) Tant que Vault et Pricing ne sont pas prêts : remplacer leurs `panic!("TODO")` par des valeurs en dur en local, **sans les committer**

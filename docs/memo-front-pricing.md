@@ -7,8 +7,8 @@ Tout le code ci-dessous est **un seul fichier prêt à copier** dans `front/src/
 
 | | ID |
 |---|---|
-| pool | `CAXH7TE6BA3LI237FIBK5AWDQ335JKY3KKAGQYRVAVQOIOK4VL64YPXC` (déploiement actuel ; référence : `.env.testnet`) |
-| mock-oracle | `CBBNIAYYP6GBS25HE3DJ46X5VINNV4R2GHR4XBROARAW4EYV6APYEPKK` (idem) |
+| pool | `CACSMEBQLBR73CH6BRPGY7LDDE2P63C6WPZEJPZNIP5DLT5IN6O5VWA4` (déploiement actuel ; référence : `.env.testnet`) |
+| mock-oracle | `CD2D3KQDUCE7SHQNT4XJUMQRHQNDNJUKE45TER2LSHAJPYCTRXX6NBVU` (idem) |
 | Reflector FX (testnet) | `CCSSOHTBL3LEWUCBBEB5NJFC2OKFRC74OWEIJIZLRJBGAAU4VMU5NV4W` |
 
 Les IDs vérifiés le 25/10 à 21:59 étaient ceux d'un déploiement antérieur ; à chaque redéploiement, **seuls les IDs de `.env.testnet` / `front/.env.local` changent** : les noms de fonctions, l'encodage et les décimales restent les mêmes.
@@ -88,7 +88,7 @@ Une simulation qui échoue renvoie un texte qui contient `Error(Contract, #302)`
 | 111 | Vault (tranches) : dépôt senior / retrait junior qui ferait passer le junior sous son minimum | Dépôt impossible pour l'instant : la part junior du pool est trop faible |
 | 112 | Vault (tranches) : retrait de plus de parts senior que détenues | Vous n'avez pas assez de parts senior |
 
-Codes 100-112 (Vault), 200-205 (Paiement ; 205 = `set_time_factor` à 0, admin) et #10 (token USDC : solde insuffisant) : table complète dans `docs/payment-cli.md` § « Erreurs à traduire » ; les ajouter au même `ERROR_MESSAGES`.
+Codes 100-112 (Vault), 200-206 (Paiement ; 205 = `set_time_factor` à 0, admin ; 206 = `close_early` après l’échéance) et #10 (token USDC : solde insuffisant) : table complète dans `docs/payment-cli.md` § « Erreurs à traduire » ; les ajouter au même `ERROR_MESSAGES`.
 Contrôle de l'ordre : `quote` vérifie montant et plafond **avant** de lire l'oracle, donc 305 / 306 / 307 / 308 sortent même si le cours est périmé (vérifié en § 8).
 
 ## 5. `CrashButton`

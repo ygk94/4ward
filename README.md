@@ -6,7 +6,7 @@ Projet HackMeridian (Stellar, Lisbonne, 25-26/10/2026), parcours **Genesis**, tr
 - **Stellar Unlocked** : path payment *strict receive* USDC → MXN (le fournisseur reçoit le montant exact), USDC en SAC, événements Soroban, `require_auth`, TTL des entrées ;
 - **Stellar Composed** : oracle Reflector FX (SEP-40), Stellar Wallets Kit (Freighter et les autres wallets), taux Etherfuse (CETES, USTRY, TESOURO, EUROB) dans le prix à terme.
 
-**En place sur testnet** ([contrat pool sur stellar.expert](https://stellar.expert/explorer/testnet/contract/CAXH7TE6BA3LI237FIBK5AWDQ335JKY3KKAGQYRVAVQOIOK4VL64YPXC)) : devis à terme et ouverture de couverture (`quote`, `open_hedge`), règlement au fixing de l'échéance (`settle`), paiement du fournisseur par path payment, vault LP à deux tranches avec règle de capacité, crash du peso sur l'oracle de démo, keeper de règlement. **Roadmap** : rémunération des tranches par la trésorerie, netting, couverture du pool, paiement atomique.
+**En place sur testnet** ([contrat pool sur stellar.expert](https://stellar.expert/explorer/testnet/contract/CACSMEBQLBR73CH6BRPGY7LDDE2P63C6WPZEJPZNIP5DLT5IN6O5VWA4)) : devis à terme et ouverture de couverture (`quote`, `open_hedge`), règlement au fixing de l'échéance (`settle`), clôture anticipée au prix du marché (`close_early` : le perdant paie, frais de sortie = spread), paiement du fournisseur par path payment, vault LP à deux tranches avec règle de capacité, crash du peso sur l'oracle de démo, keeper de règlement. **Roadmap** : rémunération des tranches par la trésorerie, netting, couverture du pool, paiement atomique.
 
 ---
 
@@ -250,7 +250,7 @@ Le MVP montre le filet (plafond + règle de capacité brute, plus prudente) ; ne
 
 **Intégration Reflector.** Le contrat ne parle à l'oracle que par l'interface SEP-40 (`lastprice`, `price(asset, timestamp)`, `decimals`) et a été vérifié contre Reflector FX testnet (`CCSSOHTBL3LEWUCBBEB5NJFC2OKFRC74OWEIJIZLRJBGAAU4VMU5NV4W` : 14 décimales, base USD, historique et arrondi à la période de 300 s). Le pool de démo est construit avec un mock-oracle de même interface, piloté par l'admin, pour provoquer le crash du peso pendant la vidéo ; en production, on passe l'adresse de Reflector au constructeur, sans changer de code.
 
-Erreurs : Vault 100-112, Paiement 200-205, Pricing 300-312, token USDC #10 (solde insuffisant) ; table complète : `docs/payment-cli.md` (§ Erreurs à traduire).
+Erreurs : Vault 100-112, Paiement 200-206, Pricing 300-312, token USDC #10 (solde insuffisant) ; table complète : `docs/payment-cli.md` (§ Erreurs à traduire).
 
 Une transaction Soroban ne peut pas contenir d'opération classique : le front enchaîne `settle()` puis le path payment, en deux transactions.
 
@@ -282,6 +282,7 @@ fn set_spread(spread_bps: u32);                          // admin
 fn open_hedge(owner: Address, supplier: Address, currency: Symbol, side: Side,
               notional: i128, duration_secs: u64, cap_bps: u32) -> u64;
 fn settle(hedge_id: u64) -> i128;                        // permissionless après l'échéance
+fn close_early(hedge_id: u64) -> i128;                   // propriétaire seul, avant l'échéance : clôture au prix du marché
 fn get_hedge(hedge_id: u64) -> Option<Hedge>;
 fn time_factor() -> u32;                                 // 1 = temps réel
 fn set_time_factor(factor: u32);                         // admin, démo : 25 920 → 90 j en 5 min réelles
@@ -293,8 +294,8 @@ fn set_time_factor(factor: u32);                         // admin, démo : 25 92
 
 | Élément | ID |
 |---|---|
-| Contrat pool | `CAXH7TE6BA3LI237FIBK5AWDQ335JKY3KKAGQYRVAVQOIOK4VL64YPXC` |
-| mock-oracle (SEP-40) | `CBBNIAYYP6GBS25HE3DJ46X5VINNV4R2GHR4XBROARAW4EYV6APYEPKK` |
+| Contrat pool | `CACSMEBQLBR73CH6BRPGY7LDDE2P63C6WPZEJPZNIP5DLT5IN6O5VWA4` |
+| mock-oracle (SEP-40) | `CD2D3KQDUCE7SHQNT4XJUMQRHQNDNJUKE45TER2LSHAJPYCTRXX6NBVU` |
 | Reflector FX (testnet) | `CCSSOHTBL3LEWUCBBEB5NJFC2OKFRC74OWEIJIZLRJBGAAU4VMU5NV4W` |
 | USDC de test (SAC) | `CCLMFOUKC7ZQ5OPFE67F5XUGCOWTVCOOVTKTEPQGEYKWWRRKJGNVR2OC` |
 | MXN de test (SAC) | `CAFK4PTVDK6Y33HWTSUPH57JV3G4YZFS6PL77FNGWOOMHBJJESYBMVMS` |

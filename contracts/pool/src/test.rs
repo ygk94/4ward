@@ -1147,3 +1147,122 @@ fn settle_refused_when_no_rate_at_maturity() {
     }
     assert_eq!(s.pool.try_settle(&id), Err(Ok(contract_err(PricingError::NoFixing as u32))));
 }
+
+// ---- Clôture anticipée ----
+
+/// Taux de sortie attendu : forward du jour pour `remaining` secondes, sens inverse de `side`.
+fn exit_rate(s: &Setup, side: Side, remaining: u64) -> i128 {
+    let exit = match side {
+        Side::BuyCurrency => Side::SellCurrency,
+        Side::SellCurrency => Side::BuyCurrency,
+    };
+    s.env.as_contract(&s.pool.address, || crate::pricing::forward_rate(&s.env, &Symbol::new(&s.env, "MXN"), exit, remaining))
+}
+
+#[test]
+fn close_early_unchanged_market_costs_the_spreads() {
+    let s = setup();
+    let id = open_funded(&s, Side::BuyCurrency);
+    s.env.ledger().set_timestamp(s.env.ledger().timestamp() + MATURITY_IN / 2);
+    set_spot(&s, SPOT_0);
+
+    // cours inchangé : Lucía perd l'aller-retour des spreads (≈ 1 %), rien de plus
+    let rate = exit_rate(&s, Side::BuyCurrency, MATURITY_IN / 2);
+    let pnl = hedge::pnl(Side::BuyCurrency, NOTIONAL, HEDGE_LOCKED, rate, HEDGE_MARGIN);
+    assert!(pnl < 0 && pnl > -HEDGE_COST / 90);
+    let paid = s.pool.close_early(&id);
+    assert_settled(&s, id, paid, HEDGE_MARGIN + pnl, -pnl);
+}
+
+#[test]
+fn close_early_currency_up_user_gains() {
+    let s = setup();
+    let id = open_funded(&s, Side::BuyCurrency);
+    s.env.ledger().set_timestamp(s.env.ledger().timestamp() + 10);
+    set_spot(&s, 5_940_000_000_000); // +8 % : le pool perd, la PME sort avec son gain moins le spread
+
+    let rate = exit_rate(&s, Side::BuyCurrency, MATURITY_IN - 10);
+    let pnl = hedge::pnl(Side::BuyCurrency, NOTIONAL, HEDGE_LOCKED, rate, HEDGE_MARGIN);
+    assert!(pnl > 0);
+    let paid = s.pool.close_early(&id);
+    assert_settled(&s, id, paid, HEDGE_MARGIN + pnl, -pnl);
+}
+
+#[test]
+fn close_early_currency_down_user_pays_capped() {
+    let s = setup();
+    let id = open_funded(&s, Side::BuyCurrency);
+    s.env.ledger().set_timestamp(s.env.ledger().timestamp() + 10);
+    set_spot(&s, 4_675_000_000_000); // −15 % : perte bornée à la marge, toute la marge va au pool
+
+    let paid = s.pool.close_early(&id);
+    assert_settled(&s, id, paid, 0, HEDGE_MARGIN);
+}
+
+#[test]
+fn close_early_sell_side_buys_back() {
+    let s = setup();
+    let id = open_funded(&s, Side::SellCurrency);
+    s.env.ledger().set_timestamp(s.env.ledger().timestamp() + 10);
+    set_spot(&s, 5_060_000_000_000); // −8 % : l'exportateur gagne
+
+    let rate = exit_rate(&s, Side::SellCurrency, MATURITY_IN - 10);
+    let pnl = hedge::pnl(Side::SellCurrency, NOTIONAL, s.pool.get_hedge(&id).unwrap().locked_rate, rate, s.pool.get_hedge(&id).unwrap().margin);
+    assert!(pnl > 0);
+    let margin = s.pool.get_hedge(&id).unwrap().margin;
+    let paid = s.pool.close_early(&id);
+    assert_settled(&s, id, paid, margin + pnl, -pnl);
+}
+
+#[test]
+fn close_early_guards() {
+    let s = setup();
+    let id = open_funded(&s, Side::BuyCurrency);
+
+    // à l'échéance : il faut passer par settle
+    s.env.ledger().set_timestamp(s.env.ledger().timestamp() + MATURITY_IN);
+    set_spot(&s, SPOT_0);
+    assert_eq!(s.pool.try_close_early(&id), Err(Ok(contract_err(HedgeError::AlreadyMatured as u32))));
+    assert_eq!(s.pool.try_close_early(&42), Err(Ok(contract_err(HedgeError::UnknownHedge as u32))));
+
+    // après settle : déjà réglée
+    s.pool.settle(&id);
+    assert_eq!(s.pool.try_close_early(&id), Err(Ok(contract_err(HedgeError::AlreadySettled as u32))));
+}
+
+#[test]
+fn close_early_refuses_stale_price() {
+    let s = setup();
+    fund_pool(&s);
+    let id = s.pool.open_hedge(&s.lucia, &s.supplier, &Symbol::new(&s.env, "MXN"), &Side::BuyCurrency, &NOTIONAL, &86_400, &1000);
+    // pas de nouveau prix depuis l'ouverture, plus de 900 s plus tard : refusé comme un devis
+    s.env.ledger().set_timestamp(s.env.ledger().timestamp() + 901);
+    assert_eq!(s.pool.try_close_early(&id), Err(Ok(contract_err(PricingError::StalePrice as u32))));
+}
+
+#[test]
+fn close_early_requires_owner() {
+    let s = setup();
+    let id = open_funded(&s, Side::BuyCurrency);
+    s.env.ledger().set_timestamp(s.env.ledger().timestamp() + 10);
+    set_spot(&s, SPOT_0);
+    s.pool.close_early(&id);
+    let auths = s.env.auths();
+    assert_eq!(auths.len(), 1);
+    assert_eq!(auths[0].0, s.lucia);
+}
+
+#[test]
+fn close_early_emits_event() {
+    let s = setup();
+    let id = open_funded(&s, Side::BuyCurrency);
+    s.env.ledger().set_timestamp(s.env.ledger().timestamp() + 10);
+    set_spot(&s, 5_940_000_000_000);
+    let rate = exit_rate(&s, Side::BuyCurrency, MATURITY_IN - 10);
+    let pnl = hedge::pnl(Side::BuyCurrency, NOTIONAL, HEDGE_LOCKED, rate, HEDGE_MARGIN);
+    s.pool.close_early(&id);
+
+    let expected = hedge::HedgeClosedEarly { hedge_id: id, owner: s.lucia.clone(), close_rate: rate, pnl, payout: HEDGE_MARGIN + pnl };
+    let events = s.env.events().all().filter_by_contract(&s.pool.address);
+    assert_eq!(events.events().last(), Some(&expected.to_xdr(&s.env, &s.pool.address)));
+}

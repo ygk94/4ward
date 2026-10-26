@@ -68,6 +68,7 @@ interface PoolMethods {
     cap_bps: number
   }): Promise<Tx<bigint>>
   settle(a: { hedge_id: bigint }): Promise<Tx<bigint>>
+  close_early(a: { hedge_id: bigint }): Promise<Tx<bigint>>
   get_hedge(a: { hedge_id: bigint }): Promise<Tx<Hedge | undefined>>
 }
 export type PoolClient = contract.Client & PoolMethods
@@ -198,6 +199,7 @@ const ERRORS: Record<number, string> = {
   203: 'Invalid invoice amount.',
   204: 'Invalid maturity.',
   205: 'Invalid demo time factor.',
+  206: 'Maturity reached: settle this hedge instead.',
   300: 'No price available for this currency.',
   301: 'Invalid oracle price.',
   302: 'Oracle price is stale, try again in a moment.',
@@ -245,6 +247,7 @@ const DOC_CODES: [string, number][] = [
   ['`open` avec un notionnel', 203],
   ['`open` avec une durée', 204],
   ['`set_time_factor` à 0', 205],
+  ['`close_early` à l', 206],
   ['aucun prix pour la devise', 300],
   ["Prix de l'oracle nul", 301],
   ['MAX_PRICE_AGE_SECS', 302],
