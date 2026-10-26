@@ -8,6 +8,9 @@ import { go } from '../shared/router'
 import { TxStatus } from '../shared/TxStatus'
 import { useTx } from '../shared/useTx'
 
+/** Protection minimale par devise, en % (miroir de set_min_cap du setup testnet). */
+const MIN_CAP: Record<string, number> = { MXN: 5, BRL: 7, ARS: 15, EUR: 3 }
+
 const CURRENCIES = TRADABLE
 const DURATIONS = [
   { label: '30 days', secs: 30 * 86_400 },
@@ -20,6 +23,9 @@ export function HedgeScreen({ onDone, onPick }: { onDone: () => void; onPick?: (
   const [side, setSide] = useState<SideTag>('BuyCurrency')
   const [duration, setDuration] = useState(DURATIONS[1].secs)
   const [cap, setCap] = useState(10)
+  // Protection minimale par devise (set_min_cap dans scripts/setup-testnet.sh) : en dessous, le contrat refuse (#307).
+  const minCap = MIN_CAP[currency] ?? 5
+  useEffect(() => setCap((c) => Math.max(c, minCap)), [minCap])
   const [supplier, setSupplier] = useState(config.supplier ?? '')
   const [quote, setQuote] = useState<Quote | null>(null)
   const [quoteErr, setQuoteErr] = useState<string | null>(null)
@@ -105,7 +111,7 @@ export function HedgeScreen({ onDone, onPick }: { onDone: () => void; onPick?: (
         <span>
           Protection: <b>±{cap}%</b>
         </span>
-        <input className="range" type="range" min={5} max={20} step={1} value={cap} onChange={(e) => setCap(Number(e.target.value))} />
+        <input className="range" type="range" min={minCap} max={20} step={1} value={cap} onChange={(e) => setCap(Number(e.target.value))} />
         <small className="muted">
           Covered if the currency moves up to {cap}%. It’s also your max loss: the margin you deposit.
         </small>

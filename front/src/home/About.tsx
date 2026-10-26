@@ -134,8 +134,8 @@ export function About() {
           </article>
           <article className="card reveal">
             <p className="card-k">0</p>
-            <p className="card-l">insolvency risk: max loss is reserved upfront</p>
-            <p className="muted small">Reserved capital ≤ pool capital, enforced by the contract</p>
+            <p className="card-l">credit risk: every max loss is deposited or reserved upfront</p>
+            <p className="muted small">Reserved capital ≤ Dynamic tranche capital, checked by the contract at each new hedge</p>
           </article>
         </div>
         <div className="lp-cta reveal">

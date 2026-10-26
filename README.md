@@ -107,15 +107,15 @@ Environ **4 fois moins cher qu'une option**, parce que la protection est plafonn
 
 | Prix | Calcul | Sert à |
 |---|---|---|
-| prix plein | capital du pool ÷ nombre de parts | entrer (dépôt) |
-| prix de sortie | (capital − capital réservé) ÷ nombre de parts | sortir (retrait) |
+| prix plein | valeur junior ÷ parts junior | entrer (dépôt) |
+| prix de sortie | (valeur junior − capital réservé) ÷ parts junior | sortir (retrait) |
 
 Le capital réservé est la perte maximale des couvertures en cours. Il n'est pas versé à celui qui sort. Personne ne peut donc partir en laissant ses pertes possibles aux autres. Les retraits sont équitables par construction : chaque LP ne peut retirer que sa part du capital libre. Si la couverture se termine bien, la décote laissée par celui qui est parti profite aux LPs restants.
 
 **Règle de capacité : le risque de change du pool est plafonné et couvert par le capital du junior.** La perte maximale de chaque couverture (sa marge) est connue dès l'ouverture :
 
 ```
-capital réservé = Σ marges des couvertures ouvertes   ≤   capital du pool
+capital réservé = Σ marges des couvertures ouvertes   ≤   capital de la tranche junior (Dynamic)
 ```
 
 Le contrat **refuse toute couverture** qui ferait dépasser cette limite. Les marges des PME sont déposées dans le contrat mais n'appartiennent pas aux LPs. Les tests vérifient à chaque opération que `solde USDC du contrat = capital des LPs + marges des couvertures ouvertes`.
@@ -142,15 +142,15 @@ Les LPs déposent dans le même pool mais choisissent leur risque :
 | | **Senior** (prudent) | **Junior** (risque) |
 |---|---|---|
 | Profil | Veut un rendement stable | Accepte de perdre pour gagner plus |
-| Son argent sert à | Couvrir l'exposition (CETES, EURC) + trésorerie | Absorber l'exposition non couverte |
+| Son argent sert à | Couvrir l'exposition (CETES, EURC) + trésorerie (roadmap ; aujourd'hui il reste en USDC dans le contrat) | Absorber l'exposition non couverte |
 | Pertes | Protégé par le junior | Perd en premier |
 | Rendement | Taux cible payé en priorité (4,5 %, non garanti) | Tout le reste : spread, pertes des clients, trésorerie |
 
 Règles du contrat :
 1. **Perte max non couverte ≤ capital junior** : la règle de capacité s'applique au seul junior. Chaque contrat étant plafonné, le senior ne peut pas perdre à cause du change (il reste exposé aux protocoles tiers et à l'USDC).
 2. **Cascade** : les pertes touchent le junior d'abord ; les gains paient d'abord le taux du senior, le junior prend le surplus.
-3. **La part couverte est un réglage** : plus de junior, moins de couverture et plus de levier.
-4. **Junior épuisé** : le pool n'accepte plus que des couvertures entièrement couvertes.
+3. **La part couverte est un réglage** (roadmap, avec la couverture du pool) : plus de junior, moins de couverture et plus de levier.
+4. **Junior épuisé** : capacité nulle, toute nouvelle couverture est refusée (#101). En roadmap : n'accepter que des couvertures entièrement couvertes.
 5. **Ratio minimum** : tant qu'il y a des seniors, le junior reste ≥ 20 % du capital au moment de chaque dépôt senior ou retrait junior (refusés sinon) ; les intérêts senior peuvent le faire baisser ensuite.
 
 **Le 4,5 % du senior est un taux cible du contrat, pas un rendement gagné : il est payé par le junior tant que le capital libre n'est pas placé** (bons du Trésor, CETES) : le prix de la part senior progresse de 4,5 %/an, et cette progression est retirée de la valeur du junior. Le placement de la trésorerie est en roadmap ; d'ici là, le junior paie le senior avec ses spreads.
@@ -369,7 +369,7 @@ TODO.md                # setup et chantiers
 | Saut de cours entre deux rééquilibrages | Limites par devise, tranche junior en première perte |
 | LP qui retire avant un règlement perdant | Retraits différés à l'échéance suivante, ou prix des parts incluant les contrats ouverts |
 | Protocoles tiers (émetteurs des CETES et bons du Trésor, Blend si activé) | Plafond par protocole, réserve d'USDC dans le contrat |
-| Taux d'intérêt poussés par l'admin | Taux synchronisés depuis Etherfuse (push oracle, `scripts/sync-rates.sh`), lecture onchain en roadmap |
+| Taux d'intérêt poussés par l'admin | Taux Etherfuse poussés à la main par l'admin (`scripts/sync-rates.sh`, snapshot figé pour la démo), lecture onchain en roadmap |
 | Oracle manipulé au fixing | TWAP sur une fenêtre, bornes de cohérence, plusieurs oracles |
 | Écart oracle / cours réel du DEX ou de l'anchor | Résidu faible, affiché à l'utilisateur |
 

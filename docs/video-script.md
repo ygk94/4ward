@@ -7,7 +7,7 @@ Règle du council : zéro jargon à l'écran et à l'oral. On dit « lock the pr
 Scénario : facture de **1 000 000 MXN**, protection **±10 %**, crash du peso **+12 %**.
 Couverture à **90 jours** en **mode démo** (`set_time_factor 25920` : 90 jours annoncés → échéance réelle 5 min) : le prix affiché est le vrai prix à 90 jours.
 Chiffres calculés avec le vrai Pricing (taux Etherfuse figés dans `scripts/rates.snapshot` : USD 3,60 %, MXN 5,55 % ; spread 0,5 %) sur un spot de **0,055** : le mock-oracle doit être **remis à 0,055** avant chaque prise (checklist, étape a) ; à défaut, recalculer avec le vrai devis (formules en bas).
-Le front n'a ni bouton de crash, ni comparaison côte à côte, ni bouton « Pay my supplier », ni récapitulatif : ces plans passent par le **terminal** (crash, path payment) et par des **incrustations ajoutées au montage**.
+Le front n'a ni bouton de crash, ni comparaison côte à côte : ces plans passent par le **terminal** (crash) et par des **incrustations ajoutées au montage**. Le paiement du fournisseur se fait dans l'app (« Pay my supplier » sur la carte de `Mes positions`).
 
 ---
 
@@ -43,7 +43,7 @@ Le front n'a ni bouton de crash, ni comparaison côte à côte, ni bouton « Pay
 |---|---|---|
 | `Mes positions` : compte à rebours de l'échéance qui arrive à 0 ; incrustation « Demo mode: 90 days run in 5 minutes » ajoutée au montage | coupe au montage pendant l'attente (~10 s de plus après le 0, le temps que Settle apparaisse) | *On the due date, anyone can trigger the settlement. It uses the rate at the due date, so nobody can game the timing.* |
 | Bouton « Settle » de `Mes positions` → **+11,002.56 USDC** crédités | **Signature n° 2** (`settle`) | *The contract reads the oracle and pays out her protection: her deposit back, plus 5,501.28 USDC from the pool.* |
-| Terminal : path payment (`docs/payment-cli.md` § 6) → **1,000,000 MXN** envoyés | **Signature n° 3** (path payment, en CLI : le front n'a pas ce bouton) | *Then a Stellar path payment converts her dollars into pesos on the Stellar exchange and pays her supplier.* |
+| « Pay my supplier » sur la carte de `Mes positions` : aperçu du coût sur le DEX, puis récapitulatif → **1,000,000 MXN** envoyés | **Signature n° 3** (path payment depuis l'app ; secours : `docs/payment-cli.md` § 6) | *Then a Stellar path payment converts her dollars into pesos on the Stellar exchange and pays her supplier.* |
 | stellar.expert : la page du path payment, **1,000,000 MXN reçus** par le fournisseur | plan de coupe 3-4 s, zoom sur le montant | *Her supplier receives exactly one million pesos — in his currency, in seconds.* |
 | Incrustation ajoutée au montage, récapitulatif : prix figé 55,013 · payé 56,099 · sans protection 61,600 | | *Two transactions today: settlement, then payment. Making them one single click is on our roadmap.* |
 
