@@ -8,13 +8,15 @@ Checklist technique avant chaque prise : `docs/video-script.md`, section « Avan
 | Temps | Slide | Idée |
 |---|---|---|
 | 0:00 | cover | 4ward, la phrase d'accroche |
-| 0:05 | problem | Lucía, 1 000 000 MXN dans 90 jours, +10 % = +5 500 $ |
-| 0:25 | gap | banque, fintech, option, Stellar au comptant : rien pour elle |
-| 0:45 | solution | bloquer le prix, déposer une garantie, régler et payer |
-| 1:05 | numbers | peso +12 % : 61 600 sans protection, 56 099 avec, coût 0,6 % |
+| 0:05 | problem (PMF) | Lucía, 1 000 000 MXN dans 90 jours, +10 % = +5 500 $ |
+| 0:20 | gap (PMF) | banque, fintech, option, Stellar au comptant : rien pour elle |
+| 0:35 | solution | bloquer le prix, déposer une garantie, régler et payer |
+| 0:50 | numbers | peso +12 % : 61 600 sans protection, 56 099 avec, coût 0,6 % |
+| 1:05 | workflow | Quote, Open, Settle, Pay : un contrat Soroban |
 | 1:25 | holds | dépôt d'avance, règle de capacité, deux tranches |
-| 1:40 | stellar | Soroban, Reflector, path payment, USDC, Etherfuse, Wallets Kit |
-| 1:52 | demo | slide bleue de transition, on passe sur le site |
+| 1:35 | stellar | Soroban, Reflector, path payment, USDC, Etherfuse, Wallets Kit |
+| 1:45 | team | Hugo, Lancelot, Clément |
+| 1:55 | demo | slide bleue de transition, on passe sur le site |
 
 La slide « next » et la slide de clôture passent à la fin, après la démo.
 
