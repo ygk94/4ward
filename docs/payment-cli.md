@@ -153,9 +153,20 @@ Les textes de `panic!` sont effacés dans le WASM déployé : le front ne reçoi
 | #202 `NotMatured` | Paiement | L'échéance n'est pas encore atteinte (afficher le compte à rebours sur `maturity`) |
 | #203 `InvalidNotional` | Paiement | Montant de facture invalide |
 | #204 `InvalidDuration` | Paiement | Échéance invalide |
+| #100 `InvalidAmount` | Vault | Montant invalide |
 | #101 `InsufficientCapacity` | Vault | Le pool n'a pas assez de capital pour cette protection |
+| #102 `ReleaseExceedsReserved` | Vault | Erreur interne (libération au-delà du capital réservé) |
+| #103 `LossExceedsCapital` | Vault | La perte dépasse le capital du pool |
+| #104 `PoolDepleted` | Vault | Le pool est vidé : dépôt refusé |
+| #105 `DepositTooSmall` | Vault | Dépôt trop petit |
+| #106 `InsufficientShares` | Vault | Pas assez de parts |
+| #107 `WithdrawTooSmall` | Vault | Retrait trop petit, ou rien de libre à retirer pour l'instant |
 | #108 `CurrencyLimitExceeded` | Vault | Limite atteinte sur cette devise |
 | #109 `UnknownPosition` | Vault | Erreur interne (couverture non enregistrée dans le pool) |
+| #110 `Overflow` | Vault | Montant trop grand |
+| #111 `JuniorRatioTooLow` | Vault | La tranche dynamique doit rester ≥ 20 % du capital |
+| #112 `InsufficientSeniorShares` | Vault | Pas autant de parts prudentes |
+| #10 (contrat USDC / SAC) | Token USDC | Solde USDC insuffisant (marge de `open_hedge`, `deposit_lp`, `deposit_senior`) |
 | #205 `InvalidTimeFactor` | Paiement (admin) | Facteur de démo invalide |
 | #302 `StalePrice` | Pricing | Cours de l'oracle trop ancien : réessayer dans un instant |
 | #306 `CurrencyNotEnabled` | Pricing | Devise non disponible |
@@ -166,7 +177,7 @@ Les textes de `panic!` sont effacés dans le WASM déployé : le front ne reçoi
 | autres 300-311 | Pricing | voir `PricingError` dans `pricing.rs` |
 | `op_too_few_offers` | Path payment | Pas assez de liquidité sur le DEX pour ce montant |
 | `op_over_source_max` | Path payment | Le cours a bougé au-delà de `send-max` : relancer avec un devis à jour |
-| `op_underfunded` | Path payment / `open_hedge` | Solde USDC insuffisant |
+| `op_underfunded` | Path payment | Solde USDC insuffisant pour payer le fournisseur |
 
 ### Événements
 

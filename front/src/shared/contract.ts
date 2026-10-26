@@ -176,12 +176,14 @@ export function fmtRate(v: bigint) {
 const ERRORS: Record<number, string> = {
   100: 'Invalid amount.',
   101: 'The pool doesn’t have enough capacity for this hedge.',
+  102: 'Internal error (release exceeds reserved).',
   103: 'Loss exceeds the pool’s capital.',
   104: 'The pool is depleted.',
   105: 'Deposit too small.',
   106: 'Not enough shares.',
   107: 'Withdrawal too small, or nothing free to withdraw right now.',
   108: 'Limit reached for this currency.',
+  109: 'Internal error (hedge not registered in the pool).',
   110: 'Amount too large.',
   111: 'Dynamic must stay at least 20% of deposits: this deposit or withdrawal would break that.',
   112: 'You don’t hold that many Safe shares.',
@@ -190,6 +192,7 @@ const ERRORS: Record<number, string> = {
   202: 'Maturity not reached yet.',
   203: 'Invalid invoice amount.',
   204: 'Invalid maturity.',
+  205: 'Invalid demo time factor.',
   300: 'No price available for this currency.',
   301: 'Invalid oracle price.',
   302: 'Oracle price is stale, try again in a moment.',
@@ -201,11 +204,15 @@ const ERRORS: Record<number, string> = {
   308: 'Protection too high.',
   309: 'Rate too high.',
   310: 'Protection out of range.',
+  311: 'Spread too high.',
+  312: 'Settlement rate unavailable (oracle had no price at maturity).',
 }
 
 export function explainError(e: unknown): string {
   if (e instanceof ContractError) return translateDoc(e.doc)
   const msg = e instanceof Error ? e.message : String(e)
+  // #10 = erreur du contrat token USDC (SAC) : solde insuffisant. Aucun code du pool ne vaut 10.
+  if (/Error\(Contract, #10\)/.test(msg)) return 'Not enough USDC in your wallet.'
   const code = msg.match(/Error\(Contract, #(\d+)\)/)?.[1]
   if (code && ERRORS[Number(code)]) return ERRORS[Number(code)]
   if (/reject|declin|cancel/i.test(msg)) return 'Signature rejected in the wallet.'
@@ -219,12 +226,12 @@ const DOC_CODES: [string, number][] = [
   ['`book_loss` rendrait', 103],
   ['plus de capital', 104],
   ['Dépôt trop petit', 105],
+  ['parts senior que', 112],
   ['Retrait de plus de parts', 106],
   ['Retrait qui verserait 0', 107],
   ['limite de la devise', 108],
   ['Débordement', 110],
   ['passerait sous', 111],
-  ['parts senior que', 112],
   ["id qui n'existe pas", 200],
   ['déjà réglée', 201],
   ["avant l'échéance", 202],
@@ -233,7 +240,8 @@ const DOC_CODES: [string, number][] = [
   ['aucun prix pour la devise', 300],
   ["Prix de l'oracle nul", 301],
   ['MAX_PRICE_AGE_SECS', 302],
-  ['`set_rate`', 303],
+  ['non posé par `set_rate`', 303],
+  ['`set_rate` au-delà', 309],
   ['supérieure à un an', 304],
   ['`quote` avec un notionnel', 305],
   ['Devise non ouverte', 306],
