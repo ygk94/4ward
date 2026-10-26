@@ -27,11 +27,11 @@ export function QuoteCard({
           <dd>1 {currency} = {quote ? fmtRate(quote.forward_rate) : '—'} USD</dd>
         </div>
         <div>
-          <dt>Spot today (demo oracle)</dt>
+          <dt>Today’s rate (demo oracle)</dt>
           <dd>{quote ? fmtRate(quote.spot) : '—'} USD</dd>
         </div>
         <div className="strong">
-          <dt>Margin to deposit now</dt>
+          <dt>Deposit now</dt>
           <dd>{quote ? fmtUsdc(quote.margin, 2) : '—'} USDC</dd>
         </div>
       </dl>

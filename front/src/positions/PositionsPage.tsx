@@ -11,9 +11,13 @@ import { readMine, type Mine } from '../vault/poolApi'
 type Filter = 'all' | 'open' | 'closed'
 type Status = 'open' | 'due' | 'closed'
 
+// settle compare l'échéance à l'heure du ledger, en retard de quelques secondes sur le navigateur :
+// on attend cette marge avant de proposer Settle (sinon refus #202).
+const LEDGER_LAG_SECS = 10
+
 function statusOf(h: Hedge, now: number): Status {
   if (h.settled) return 'closed'
-  return Number(h.maturity) <= now ? 'due' : 'open'
+  return Number(h.maturity) + LEDGER_LAG_SECS <= now ? 'due' : 'open'
 }
 
 const STATUS_LABEL: Record<Status, string> = { open: 'Open', due: 'Due · settle now', closed: 'Closed' }
