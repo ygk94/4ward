@@ -1,34 +1,31 @@
 // [FRONT — Hugo] Page d'accueil : titre, capital déposé ; le fond plein écran (Background) sert de décor.
-// On entre en scrollant (molette, trackpad, ou swipe vers le haut sur mobile) : un trait s'allonge,
-// et à 100 % on passe sur la page de présentation. Si on s'arrête avant, le trait se rétracte doucement.
+// On entre en scrollant (molette, trackpad, ou swipe vers le haut sur mobile) : le bouton « Enter » se
+// remplit et le vault de fond éclate au même rythme ; à 100 % on passe sur la page de présentation.
+// Le remplissage reste en place à l'arrêt et ne recule que si on remonte. Un clic sur le bouton entre directement.
 import { useEffect, useRef } from 'react'
 import { fmtUsdc } from '../shared/contract'
 import { go } from '../shared/router'
 import { usePoolStats } from '../shared/usePool'
+import { burst } from '../visual/burst'
 
 /** Distance de scroll (px de molette) ou de swipe (px de doigt) pour remplir la barre. */
 const WHEEL_DISTANCE = 900
 const SWIPE_DISTANCE = 260
-/** Délai sans geste avant que le trait se rétracte, puis vitesse de retrait (par image). */
-const IDLE_MS = 180
-const DECAY = 0.025
 
 export function Home() {
   const { stats, demo } = usePoolStats()
-  const fillRef = useRef<HTMLDivElement>(null)
-  const barRef = useRef<HTMLDivElement>(null)
+  const fillRef = useRef<HTMLSpanElement>(null)
+  const barRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
     let progress = 0
-    let lastInput = 0
     let touchY: number | null = null
     let done = false
     let raf = 0
 
     const push = (delta: number) => {
       if (done) return
-      progress = Math.min(1, Math.max(0, progress + delta))
-      lastInput = performance.now()
+      progress = Math.min(1, Math.max(0, progress + delta)) // remonter fait reculer
     }
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
@@ -49,12 +46,12 @@ export function Home() {
     }
 
     const frame = () => {
-      if (!done && progress > 0 && performance.now() - lastInput > IDLE_MS) progress = Math.max(0, progress - DECAY)
       fillRef.current?.style.setProperty('--p', String(progress))
-      barRef.current?.setAttribute('aria-valuenow', String(Math.round(progress * 100)))
+      burst.home = progress // le vault de fond éclate au même rythme que le bouton se remplit
+      barRef.current?.setAttribute('data-progress', String(Math.round(progress * 100)))
       if (progress >= 1 && !done) {
         done = true
-        // petite pause sur le trait plein avant de changer de page
+        // petite pause sur le bouton plein avant de changer de page
         setTimeout(() => go('/about'), 180)
       }
       raf = requestAnimationFrame(frame)
@@ -67,6 +64,7 @@ export function Home() {
     window.addEventListener('keydown', onKey)
     return () => {
       cancelAnimationFrame(raf)
+      burst.home = 0
       window.removeEventListener('wheel', onWheel)
       window.removeEventListener('touchstart', onTouchStart)
       window.removeEventListener('touchmove', onTouchMove)
@@ -91,17 +89,12 @@ export function Home() {
           {stats ? fmtUsdc(stats.totalAssets) : '—'}
           <span>USDC</span>
         </p>
-        <div
-          ref={barRef}
-          className="enter-line"
-          role="progressbar"
-          aria-label="Scroll down to enter"
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={0}
-        >
-          <div ref={fillRef} className="enter-line-fill" />
-        </div>
+        <button ref={barRef} className="enter-btn" onClick={() => go('/about')} aria-label="Enter (or scroll down)">
+          <span ref={fillRef} className="enter-btn-fill" aria-hidden />
+          <span className="enter-btn-label">
+            Enter <span aria-hidden>→</span>
+          </span>
+        </button>
       </div>
     </section>
   )

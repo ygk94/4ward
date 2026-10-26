@@ -95,6 +95,23 @@ select {
 .bg-fixed.dim {
   opacity: 0.35;
 }
+/* Vault de fond : centré, plein écran, au-dessus des carreaux et sous les pages. */
+.bg-vault {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  transition: opacity 0.6s;
+}
+.bg-vault.dim {
+  opacity: 0.55;
+}
+/* plein écran pour que les arêtes qui éclatent ne soient pas coupées
+   (sélecteur double : .ink-vault, plus bas, remet position: relative) */
+.bg-vault .bg-vault-canvas {
+  position: absolute;
+  inset: 0;
+}
 .page {
   position: relative;
   z-index: 1;
@@ -248,7 +265,7 @@ select {
 .brand {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   font-weight: 700;
   font-size: 18px;
   letter-spacing: -0.02em;
@@ -256,25 +273,49 @@ select {
   margin-right: 14px;
 }
 .brand-mark {
-  color: var(--sky-ink);
+  width: 30px;
+  height: auto;
+  flex-shrink: 0;
+}
+/* « 4ward » en serif, « ward » en italique, comme le logo */
+.brand-word {
+  font-family: 'Newsreader', Georgia, serif;
+  font-weight: 500;
+  font-size: 24px;
+  letter-spacing: -0.01em;
+  line-height: 1;
+}
+.brand-word i {
+  font-style: italic;
+}
+.nav-pills {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.nav-indicator {
+  box-shadow: 0 6px 18px -8px rgba(47, 107, 255, 0.7);
 }
 .nav-pill {
+  position: relative;
   padding: 7px 14px;
   border-radius: 8px;
   border: 1px solid var(--line);
   font-size: 14px;
   background: rgba(251, 248, 241, 0.7);
   transition:
-    border-color 0.2s,
-    background 0.2s;
+    border-color 0.25s,
+    background 0.35s,
+    color 0.35s;
 }
 .nav-pill:hover {
   border-color: var(--blue);
   color: var(--blue);
 }
 .nav-pill.active {
-  border-color: var(--blue);
-  background: var(--blue);
+  border-color: transparent;
+  background: transparent;
   color: #fff;
 }
 .btn-wallet {
@@ -388,6 +429,42 @@ select {
 .home {
   touch-action: none;
   overscroll-behavior: none;
+}
+/* Bouton d'entrée : se remplit avec le scroll (cf. Home.tsx, variable --p de 0 à 1), cliquable. */
+.enter-btn {
+  position: relative;
+  margin-top: 22px;
+  min-width: 180px;
+  padding: 14px 28px;
+  border-radius: 999px;
+  border: 1px solid var(--line-2);
+  background: var(--panel);
+  backdrop-filter: blur(6px);
+  overflow: hidden;
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 17px;
+  letter-spacing: 0.01em;
+  transition:
+    border-color 0.3s,
+    transform 0.3s;
+}
+.enter-btn:hover {
+  border-color: var(--blue);
+  transform: translateY(-1px);
+}
+.enter-btn-fill {
+  position: absolute;
+  inset: 0;
+  background: var(--glacier);
+  transform-origin: left center;
+  transform: scaleX(var(--p, 0));
+}
+.enter-btn-label {
+  position: relative;
+  display: inline-flex;
+  gap: 10px;
+  align-items: center;
 }
 /* Trait d'entrée : non cliquable, s'allonge avec le scroll (cf. Home.tsx, variable --p de 0 à 1). */
 .enter-line {
@@ -1490,4 +1567,36 @@ select {
   width: 8px;
   height: 8px;
   border-radius: 2px;
+}
+
+/* Pastille glissante commune (cf. shared/useSlidingPill.ts) : groupe `.has-pill`, bouton actif `.active` / `.on`. */
+.has-pill {
+  position: relative;
+}
+.slide-pill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  border-radius: 8px;
+  background: var(--blue);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform 0.45s cubic-bezier(0.65, 0, 0.2, 1),
+    width 0.45s cubic-bezier(0.65, 0, 0.2, 1),
+    height 0.45s cubic-bezier(0.65, 0, 0.2, 1),
+    opacity 0.3s;
+}
+.has-pill > button {
+  position: relative;
+  transition:
+    border-color 0.25s,
+    background 0.35s,
+    color 0.35s;
+}
+.has-pill.has-pill > button.on,
+.has-pill.has-pill > button.active {
+  border-color: transparent;
+  background: transparent;
+  color: #fff;
 }
