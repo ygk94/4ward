@@ -5,12 +5,15 @@
 // l'entourent, un halo respire au centre, l'explosion lance une onde de choc et accélère la rotation.
 // Option `chart` (0 → 1, avec `rich`) : chaque arête vole jusqu'à une colonne d'un graphique en bas de
 // l'écran, puis le graphique se dessine en colonnes de points sur une grille de points (façon Morpho).
+// Option `rebuild` (avancement 0 → 1, avec `rich`) : cinématique du Risk lab. Des éclats d'arête tombent du haut de l'écran
+// et s'empilent dans chaque barre de l'histogramme (positions publiées dans burst.ts), puis s'effacent devant les vraies barres.
 // Au survol, les colonnes proches de la souris se soulèvent et foncent ; les points tremblent comme l'encre.
 import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js'
 import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js'
 import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js'
+import { risk, SLIDE_MS, slide } from './burst'
 
 interface Shape {
   verts: THREE.Vector3[]
@@ -183,17 +186,20 @@ interface Props {
   className?: string
   burst?: () => number
   chart?: () => number
+  rebuild?: () => number
   rich?: boolean
 }
 
-export function InkVault({ className, burst, chart, rich = false }: Props) {
+export function InkVault({ className, burst, chart, rebuild, rich = false }: Props) {
   const ref = useRef<HTMLDivElement>(null)
   const burstRef = useRef(burst)
   const chartRef = useRef(chart)
+  const rebuildRef = useRef(rebuild)
   useEffect(() => {
     burstRef.current = burst
     chartRef.current = chart
-  }, [burst, chart])
+    rebuildRef.current = rebuild
+  }, [burst, chart, rebuild])
 
   useEffect(() => {
     const host = ref.current!
@@ -325,6 +331,46 @@ export function InkVault({ className, burst, chart, rich = false }: Props) {
     const dotColor = new THREE.Color()
     if (rich) scene.add(grid.pts, colDots.pts)
 
+    // Cinématique du Risk lab : des éclats d'arête (mêmes traits à l'encre que le vault) tombent du haut en tournoyant
+    // et se posent en rangées dans chaque barre de l'histogramme (grille commune avec le motif de points du SVG).
+    const COLS = 4
+    const SH = 900 // éclats par couleur
+    const shardGroup = new THREE.Group()
+    const gainShards = makeStrokes(SH, [
+      { color: '#2f6bff', width: 2.2, opacity: 0.95 },
+      { color: '#6fd3ff', width: 1, opacity: 0.6 },
+      { color: '#6fd3ff', width: 4, opacity: 0.12 },
+    ], shardGroup)
+    const lossShards = makeStrokes(SH, [
+      { color: '#8c7bff', width: 2.2, opacity: 0.95 },
+      { color: '#b9a8ff', width: 1, opacity: 0.6 },
+      { color: '#8c7bff', width: 4, opacity: 0.12 },
+    ], shardGroup)
+    const shardRnd = Float32Array.from({ length: SH * 2 }, () => Math.random())
+    const gainPose = new Float32Array(SH * 4) // par éclat : centre x, centre y, angle, demi-longueur
+    const lossPose = new Float32Array(SH * 4)
+    shardGroup.visible = false
+    if (rich) scene.add(shardGroup)
+    const drawShards = (strokes: Stroke[], pose: Float32Array, n: number, fadeOut: number, t: number) => {
+      strokes.forEach((st, layer) => {
+        const arr = (st.line.geometry.getAttribute('instanceStart') as THREE.InterleavedBufferAttribute).data.array as Float32Array
+        ;(st.line.material as LineMaterial).opacity = st.line.userData.opacity * fadeOut
+        for (let m = 0; m < SH; m++) {
+          const o = m * 6
+          if (m >= n) {
+            arr.fill(1e5, o, o + 6)
+            continue
+          }
+          const [cx, cy, ang, len] = [pose[m * 4], pose[m * 4 + 1], pose[m * 4 + 2], pose[m * 4 + 3]]
+          const [ex, ey] = [Math.cos(ang) * len, Math.sin(ang) * len]
+          const amp = layer === 0 ? 0.004 : 0.012
+          const pts = [cx - ex, cy - ey, 0, cx + ex, cy + ey, 0]
+          for (let c = 0; c < 6; c++) arr[o + c] = pts[c] + Math.sin(t * (0.6 + (c % 3) * 0.17) + st.jitter[o + c]) * amp
+        }
+        ;(st.line.geometry.getAttribute('instanceStart') as THREE.InterleavedBufferAttribute).data.needsUpdate = true
+      })
+    }
+
     // Atténuation : multiplie la couleur ET l'alpha du canvas par (1 − opacity) → traînée d'encre.
     const fadeScene = new THREE.Scene()
     const fadeCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
@@ -381,6 +427,18 @@ export function InkVault({ className, burst, chart, rich = false }: Props) {
     let morph = 0
     let hover = 0 // présence de la souris, lissée
 
+    // Changement d'onglet : les billes partent du côté d'où arrive la page, en retard (les colonnes en tête d'abord),
+    // dépassent un peu leur place puis s'y calent exactement.
+    const slideOff = (i: number, n: number, w: number) => {
+      if (!slide.dir) return 0
+      const age = (performance.now() - slide.start) / SLIDE_MS
+      if (age >= 1) return 0
+      const delay = 0.15 + (slide.dir > 0 ? 1 - i / n : i / n) * 0.3 // la page est déjà là : les billes arrivent après
+      const u = Math.min(1, Math.max(0, (age - delay) / 0.55))
+      const back = 1 + 2.2 * (u - 1) ** 3 + 1.2 * (u - 1) ** 2 // easeOutBack : 0 → 1 avec un léger dépassement
+      return -slide.dir * w * 0.1 * (1 - back)
+    }
+
     const frame = () => {
       const t = ((performance.now() - start) / 1000) * (reduced ? 0.3 : 1)
       // éclatement lissé : suit la cible sans à-coups, dans les deux sens
@@ -419,7 +477,7 @@ export function InkVault({ className, burst, chart, rich = false }: Props) {
         const reach = w * 0.07
         const lift = new Float32Array(NB)
         for (let i = 0; i < NB; i++) {
-          colX[i] = (-w / 2 + ((i + 0.5) / NB) * w) * 0.96
+          colX[i] = (-w / 2 + ((i + 0.5) / NB) * w) * 0.96 + slideOff(i, NB, w)
           lift[i] = hover * Math.exp(-(((colX[i] - px) / reach) ** 2))
           colTop[i] = bottom + h * 0.56 * series[i] * (1 + 0.05 * Math.sin(t * 0.9 + i * 0.35)) + h * 0.14 * lift[i]
         }
@@ -459,6 +517,45 @@ export function InkVault({ className, burst, chart, rich = false }: Props) {
         const dots = Math.min(1, Math.max(0, (ce - 0.55) / 0.45))
         grid.mat.opacity = 0.14 * dots
         colDots.mat.opacity = 0.75 * dots
+      }
+
+      const rbP = rebuildRef.current?.()
+      shardGroup.visible = rich && rbP !== undefined
+      if (rich && rbP !== undefined) {
+        const rects = risk.rects
+        const h = 2 * camera.position.z * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))
+        const w = h * camera.aspect
+        let ng = 0
+        let nl = 0
+        rects.forEach((r, bin) => {
+          const x0 = (r.x0 - 0.5) * w
+          const x1 = (r.x1 - 0.5) * w
+          const slot = (x1 - x0) / COLS
+          const yBase = (0.5 - r.bottom) * h
+          const rows = Math.floor(((r.bottom - r.top) * h) / slot + 1e-6)
+          const loss = bin < rects.length / 2
+          const pose = loss ? lossPose : gainPose
+          for (let row = 0; row < rows; row++) {
+            const k = loss ? nl++ : ng++
+            if (k >= SH) continue
+            const [r1, r2] = [shardRnd[k * 2], shardRnd[k * 2 + 1]]
+            // les rangées du bas tombent d'abord : la barre se remplit de bas en haut
+            const delay = (row / rows) * 0.45 + r1 * 0.12
+            const f = Math.min(1, Math.max(0, (rbP - delay * 0.8) / 0.3))
+            // chute qui accélère puis ralentit en douceur à l'arrivée (l'éclat se pose sans à-coup)
+            const e = 0.35 * f * f + 0.65 * f * f * (3 - 2 * f)
+            const ty = yBase + (row + 0.5) * slot
+            const startY = h / 2 + 0.5 + r1 * 0.6
+            pose[k * 4] = (x0 + x1) / 2 + (1 - e) * (r2 - 0.5) * slot * 4
+            pose[k * 4 + 1] = f > 0 ? startY + (ty - startY) * e : 1e5
+            pose[k * 4 + 2] = (1 - e) * (1 - e) * (r2 - 0.5) * 8 // tournoie, puis se redresse en douceur
+            pose[k * 4 + 3] = ((x1 - x0) / 2) * 0.88 * (1 + (1 - e) * 0.6)
+          }
+        })
+        // les vraies barres (points) prennent le relais : les éclats s'effacent
+        const fadeOut = 1 - Math.min(1, Math.max(0, (rbP - 0.78) / 0.17))
+        drawShards(gainShards, gainPose, Math.min(ng, SH), fadeOut, t)
+        drawShards(lossShards, lossPose, Math.min(nl, SH), fadeOut, t)
       }
 
       drawStrokes(outerStrokes, outerLocal, outer.edges, t, 0.03, outerFlies, eased, chartBars?.[0])

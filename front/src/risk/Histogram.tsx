@@ -1,6 +1,8 @@
 // [FRONT — Hugo] Histogramme du Risk lab, grammaire des graphiques de data.morpho.org dans notre DA :
-// grille de points, barres qui montent au premier rendu, infobulle HTML au survol, tirage précédent en fantôme.
+// grille de points, infobulle HTML au survol, tirage précédent en fantôme. Au premier rendu, ce sont les arêtes du vault
+// de fond qui dessinent les barres (cf. burst.ts) : on leur publie la position des barres, puis on les révèle.
 import { useEffect, useId, useRef, useState, type CSSProperties, type PointerEvent as RPointerEvent } from 'react'
+import { risk, riskProgress } from '../visual/burst'
 import { pct } from './format'
 import { BIN_MAX, BIN_MIN, BIN_W, SENIOR_RATE, type Summary } from './montecarlo'
 
@@ -10,10 +12,11 @@ const PAD = { l: 8, r: 8, t: 12, b: 30 }
 const IW = W - PAD.l - PAD.r
 const IH = H - PAD.t - PAD.b
 const BASE = PAD.t + IH
+/** Les barres sont des groupes de points sur une grille régulière : COLS colonnes par barre (cf. InkVault, particules). */
+const COLS = 4
 const TICKS = [-0.5, -0.25, 0, 0.25, 0.5]
-/** Décalage d'apparition par barre et durée de l'animation (cf. risk.css). */
-const STAGGER_MS = 15
-const INTRO_MS = 500
+/** Avancement de la cinématique (0 → 1) à partir duquel les vraies barres apparaissent. */
+const REVEAL_AT = 0.8
 
 const xOf = (v: number) => PAD.l + ((Math.min(BIN_MAX, Math.max(BIN_MIN, v)) - BIN_MIN) / (BIN_MAX - BIN_MIN)) * IW
 
@@ -25,16 +28,15 @@ interface Tip {
 }
 
 export function Histogram({ s, prev, showPrev }: { s: Summary; prev: Summary | null; showPrev: boolean }) {
-  const dots = `dots-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
+  const uid = useId().replace(/[^a-zA-Z0-9_-]/g, '')
+  const dots = `dots-${uid}`
+  const gainDots = `gain-${uid}`
+  const lossDots = `loss-${uid}`
   const wrap = useRef<HTMLDivElement>(null)
   const svg = useRef<SVGSVGElement>(null)
   const [tip, setTip] = useState<Tip | null>(null)
-  // Animation d'entrée au premier rendu seulement ; ensuite, seule la transition y/height joue.
-  const [intro, setIntro] = useState(true)
-  useEffect(() => {
-    const t = setTimeout(() => setIntro(false), s.bins.length * STAGGER_MS + INTRO_MS + 50)
-    return () => clearTimeout(t)
-  }, [s.bins.length])
+  const [reveal, setReveal] = useState(false)
+  const geom = useRef({ bins: s.bins, max: 0, bw: 0 })
 
   const ghost = showPrev && prev ? prev : null
   // Échelle commune : le fantôme et le tirage courant se comparent à la même hauteur.
@@ -42,6 +44,40 @@ export function Histogram({ s, prev, showPrev }: { s: Summary; prev: Summary | n
   const total = s.bins.reduce((a, b) => a + b, 0)
   const bw = IW / s.bins.length
   const h = (c: number) => (max ? (c / max) * IH : 0)
+  // pas de la grille de points ; la hauteur d'une barre est arrondie à un nombre entier de rangées
+  const cell = bw / COLS
+  const hRows = (c: number) => Math.floor(h(c) / cell + 1e-6) * cell
+  useEffect(() => {
+    geom.current = { bins: s.bins, max, bw }
+  })
+
+  // Publie la position des barres tant que dure la cinématique (la page bouge encore à son entrée), puis les révèle.
+  useEffect(() => {
+    let raf = 0
+    setReveal(false) // la cinématique repart de zéro (rechargement à chaud, ré-exécution de l'effet) : les vraies barres se recachent
+    const tick = () => {
+      const ctm = svg.current?.getScreenCTM()
+      const { bins, max, bw } = geom.current
+      if (ctm && max) {
+        risk.rects = bins.map((c, i) => {
+          const x0 = PAD.l + i * bw
+          const tl = new DOMPoint(x0, BASE - (c / max) * IH).matrixTransform(ctm)
+          const br = new DOMPoint(x0 + bw, BASE).matrixTransform(ctm)
+          return { x0: tl.x / window.innerWidth, x1: br.x / window.innerWidth, top: tl.y / window.innerHeight, bottom: br.y / window.innerHeight }
+        })
+        if (!risk.start) risk.start = performance.now()
+      }
+      const p = riskProgress()
+      if (p >= REVEAL_AT) setReveal(true)
+      if (p < 1) raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => {
+      cancelAnimationFrame(raf)
+      risk.rects = []
+      risk.start = 0
+    }
+  }, [])
 
   /** Place la carte au-dessus de la barre, en pixels du conteneur (le SVG garde son viewBox). */
   const show = (i: number) => {
@@ -68,7 +104,7 @@ export function Histogram({ s, prev, showPrev }: { s: Summary; prev: Summary | n
     <div className="histo-wrap" ref={wrap}>
       <svg
         ref={svg}
-        className={`histo ${intro ? 'intro' : ''} ${tip ? 'hovering' : ''}`}
+        className={`histo ${reveal ? 'drawn' : ''} ${tip ? 'hovering' : ''}`}
         viewBox={`0 0 ${W} ${H}`}
         role="img"
         aria-label="Distribution of the Dynamic tranche annual return"
@@ -78,6 +114,12 @@ export function Histogram({ s, prev, showPrev }: { s: Summary; prev: Summary | n
           <pattern id={dots} width="16" height="16" patternUnits="userSpaceOnUse">
             <circle className="dot" cx="1" cy="1" r="1" />
           </pattern>
+          {/* grille des barres : cellule bw / COLS alignée sur la ligne de base, comme les particules de l'entrée */}
+          {[gainDots, lossDots].map((id) => (
+            <pattern key={id} id={id} x={PAD.l} y={BASE - cell} width={cell} height={cell} patternUnits="userSpaceOnUse">
+              <circle className={id === gainDots ? 'pd gain' : 'pd loss'} cx={cell / 2} cy={cell / 2} r={1.8} />
+            </pattern>
+          ))}
         </defs>
         <rect x={PAD.l} y={PAD.t} width={IW} height={IH} fill={`url(#${dots})`} />
 
@@ -91,12 +133,11 @@ export function Histogram({ s, prev, showPrev }: { s: Summary; prev: Summary | n
           <rect
             key={i}
             className={`bar ${BIN_MIN + i * BIN_W < 0 ? 'loss' : 'gain'} ${tip?.i === i ? 'on' : ''}`}
-            style={{ '--i': i } as CSSProperties}
-            x={PAD.l + i * bw + 1}
-            y={BASE - h(c)}
-            width={bw - 2}
-            height={h(c)}
-            rx={2}
+            style={{ fill: `url(#${BIN_MIN + i * BIN_W < 0 ? lossDots : gainDots})` }}
+            x={PAD.l + i * bw}
+            y={BASE - hRows(c)}
+            width={bw}
+            height={hRows(c)}
           />
         ))}
 

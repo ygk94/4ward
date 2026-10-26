@@ -174,18 +174,21 @@
   display: block;
 }
 .histo .bar {
-  transition:
-    y 0.45s cubic-bezier(0.2, 0.7, 0.2, 1),
-    height 0.45s cubic-bezier(0.2, 0.7, 0.2, 1),
-    opacity 0.2s;
+  /* pas de transition y/height : changer de climat ne doit pas faire « zoomer » les barres */
+  transition: opacity 0.6s;
 }
 .histo .bar.gain {
-  fill: var(--blue);
-  opacity: 0.8;
+  opacity: 0.9;
 }
 .histo .bar.loss {
+  opacity: 0.85;
+}
+/* les barres sont remplies de points (motifs définis dans Histogram.tsx) */
+.histo .pd.gain {
+  fill: var(--blue);
+}
+.histo .pd.loss {
   fill: var(--violet);
-  opacity: 0.75;
 }
 /* survol : la barre visée ressort, les autres s'effacent un peu */
 .histo.hovering .bar {
@@ -228,17 +231,17 @@
 .histo .marker.mean {
   stroke: var(--ink);
 }
-/* entrée : chaque barre monte depuis la ligne de base, en décalé de gauche à droite */
-.histo.intro .bar {
-  transform-box: fill-box;
-  transform-origin: 50% 100%;
-  animation: bar-in 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both;
-  animation-delay: calc(var(--i) * 15ms);
+/* entrée : les barres sont dessinées par les arêtes du vault de fond (cf. visual/burst.ts), puis elles apparaissent en fondu */
+.histo:not(.drawn) .bar,
+.histo:not(.drawn) .ghost,
+.histo:not(.drawn) .marker {
+  opacity: 0;
 }
-@keyframes bar-in {
-  from {
-    transform: scaleY(0);
-  }
+.histo .marker {
+  transition: opacity 0.6s;
+}
+.histo .ghost {
+  transition: opacity 0.6s;
 }
 .histo-tip {
   position: absolute;
@@ -350,4 +353,17 @@
   .histo.intro .bar {
     animation: none;
   }
+}
+
+/* pendant la cinématique d'entrée, le cadre du graphique laisse voir les éclats du fond (pas de flou) */
+.risk-chart {
+  transition:
+    background 0.6s,
+    backdrop-filter 0.6s,
+    -webkit-backdrop-filter 0.6s;
+}
+.risk-chart:has(.histo:not(.drawn)) {
+  background: rgba(251, 248, 241, 0);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
