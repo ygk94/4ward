@@ -40,7 +40,7 @@ La voix off ci-dessous est écrite pour ±10 %. Pour ±15 %, remplacer les phras
 Tout en lecture, sauf indication contraire. Chaque point doit être vert avant la phase 3.
 
 ```sh
-cd /Users/famillethomas/Projet/fistea-hackmeridian && source .env.testnet
+cd "$(git rev-parse --show-toplevel)" && source .env.testnet   # racine du repo
 stellar contract invoke --id fx-pool --network testnet --source-account fx-admin --send=no -- time_factor        # 25920
 stellar contract invoke --id fx-pool --network testnet --source-account fx-admin --send=no -- tranche_values     # junior > 0, senior > 0
 stellar contract invoke --id fx-pool --network testnet --source-account fx-admin --send=no -- capacity           # > dépôt
@@ -143,7 +143,7 @@ Si C3 tombe après l'échéance, si `settle` renvoie une erreur 312, ou si un é
 ### 2. Bloquer le prix : 0:25 → 1:00
 | Plan | Voix off |
 |---|---|
-| raw/10 | *She enters her invoice: one million pesos, 90 days, her supplier's address. The app reads the peso rate from a Reflector-compatible price feed and locks a price for 90 days: 55,013 USDC, whatever happens.* |
+| raw/10 | *She enters her invoice: one million pesos, 90 days, her supplier's address. The app reads the peso rate from a Reflector-compatible price feed and locks a price for 90 days: 55,013 USDC, as long as the peso stays within her protection.* |
 | raw/10 (slider) | *She picks her protection, plus or minus 10%, and deposits 10% as a guarantee. That deposit is the most she can ever lose. No credit check.* **[±15 : plus or minus 15%, and deposits 15%]** |
 | raw/11 → raw/12 | *One signature, and the price is locked, on Stellar, for anyone to check.* |
 

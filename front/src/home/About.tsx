@@ -163,7 +163,7 @@ export function About() {
             <span>02</span>
             <div>
               <h3>Get a locked price</h3>
-              <p className="muted">Today’s rate, adjusted for 90 days: “this is what you’ll pay, no matter what”.</p>
+              <p className="muted">Today’s rate, adjusted for 90 days: “this is what you’ll pay”, as long as the currency stays within your protection.</p>
             </div>
           </li>
           <li className="reveal">

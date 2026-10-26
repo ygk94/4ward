@@ -1,8 +1,9 @@
 // [FRONT — Hugo] Paiement du fournisseur après le règlement : path payment strict receive USDC → devise.
 // Opération Stellar classique (pas Soroban) : une transaction séparée de settle, signée par la PME dans son wallet.
 // Strict receive : le fournisseur reçoit exactement le notionnel, la PME paie au plus sendMax.
-import { Asset, BASE_FEE, Horizon, Operation, TransactionBuilder } from '@stellar/stellar-sdk'
+import { Asset, BASE_FEE, contract, Horizon, Operation, TransactionBuilder } from '@stellar/stellar-sdk'
 import { config } from '../shared/config'
+import { PRICE_DECIMALS, type Hedge } from '../shared/contract'
 import { connect, getAddress, signTransaction } from '../shared/wallet'
 
 const HORIZON_URL = (import.meta.env.VITE_HORIZON_URL as string | undefined) ?? 'https://horizon-testnet.stellar.org'
@@ -126,6 +127,33 @@ export function recallPayout(id: bigint): bigint | null {
     const v = localStorage.getItem(key('payout', id))
     return v === null ? null : BigInt(v)
   } catch {
+    return null
+  }
+}
+
+/**
+ * P&L du règlement recalculé sans dépendre du navigateur : cours de l'oracle à l'échéance (le même fixing que
+ * settle, pricing::fixing) puis la formule de hedge::pnl (arrondi vers le bas, borné à ± la marge).
+ * Lit le mock-oracle du testnet (config.mockOracleId) ; null si l'oracle n'a plus ce prix dans son historique.
+ */
+export async function settledPnl(hedge: Hedge): Promise<bigint | null> {
+  try {
+    const oracle = (await contract.Client.from({
+      contractId: config.mockOracleId,
+      rpcUrl: config.rpcUrl,
+      networkPassphrase: config.networkPassphrase,
+    })) as unknown as {
+      price: (a: { asset: { tag: 'Other'; values: [string] }; timestamp: bigint }) => Promise<{ result: { price: bigint } | undefined }>
+    }
+    const data = (await oracle.price({ asset: { tag: 'Other', values: [hedge.currency] }, timestamp: hedge.maturity })).result
+    if (!data) return null
+    const diff = hedge.side.tag === 'BuyCurrency' ? data.price - hedge.locked_rate : hedge.locked_rate - data.price
+    const scale = 10n ** BigInt(PRICE_DECIMALS)
+    const prod = hedge.notional * diff
+    const raw = prod >= 0n ? prod / scale : -((-prod + scale - 1n) / scale) // div_euclid : arrondi vers le bas
+    return raw > hedge.margin ? hedge.margin : raw < -hedge.margin ? -hedge.margin : raw
+  } catch (e) {
+    console.warn('[settledPnl]', e)
     return null
   }
 }

@@ -9,6 +9,7 @@ import {
   recallPayout,
   rememberPaid,
   rememberPayout,
+  settledPnl,
   type PaidRecord,
 } from '../payment/supplierPayment'
 import { go } from '../shared/router'
@@ -222,9 +223,15 @@ function HedgeRow({ id, hedge, status, now, onSettled }: { id: bigint; hedge: He
           <TxStatus state={state} success={(r) => `Closed early: ${fmtUsdc(r as bigint, 2)} USDC paid out.`} />
         </div>
       )}
-      {status === 'closed' && pay && PAYABLE.includes(hedge.currency) && !recallEarly(id) && (
-        <SupplierPayment id={id} hedge={hedge} />
-      )}
+      {status === 'closed' && pay && !recallEarly(id) &&
+        (PAYABLE.includes(hedge.currency) ? (
+          <SupplierPayment id={id} hedge={hedge} />
+        ) : (
+          <p className="small muted">
+            Paying the supplier in {hedge.currency} needs a {hedge.currency} market on the Stellar DEX. On testnet only MXN
+            has one: the hedge itself settled normally.
+          </p>
+        ))}
     </article>
   )
 }
@@ -255,6 +262,20 @@ function SupplierPayment({ id, hedge }: { id: bigint; hedge: Hedge }) {
   const [busy, setBusy] = useState<'quote' | 'signing' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const notional = `${fmtUsdc(hedge.notional)} ${hedge.currency}`
+  // P&L du règlement : mémorisé par ce navigateur au Settle, sinon recalculé depuis l'oracle (règlement par le keeper,
+  // autre navigateur).
+  const [pnl, setPnl] = useState<bigint | null>(() => {
+    const payout = recallPayout(id)
+    return payout === null ? null : payout - hedge.margin
+  })
+  useEffect(() => {
+    if (pnl !== null) return
+    let live = true
+    settledPnl(hedge).then((v) => live && setPnl(v))
+    return () => {
+      live = false
+    }
+  }, [pnl, hedge])
 
   async function preview() {
     setBusy('quote')
@@ -283,9 +304,7 @@ function SupplierPayment({ id, hedge }: { id: bigint; hedge: Hedge }) {
   }
 
   if (paid) {
-    const payout = recallPayout(id)
     const locked = (hedge.notional * hedge.locked_rate) / 10n ** BigInt(PRICE_DECIMALS)
-    const pnl = payout === null ? null : payout - hedge.margin
     return (
       <div className="pos-action">
         <p className="tx tx-ok">

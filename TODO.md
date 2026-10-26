@@ -60,7 +60,7 @@ Légende : ✅ fait · ⬜ à faire · 🔴 bloquant pour les autres ou pour la 
 - ⬜ 🔴 **Front** : en cours (Hugo).
 - ⬜ 🔴 **Vidéo, deck, nom, soumission.**
 - ⬜ 🔴 **État du testnet avant la vidéo (Hugo, `fx-admin`)** : le mock donne MXN ≈ 0,0692 (crashs du peuplement) ; remettre `set_price --asset '{"Other":"MXN"}' --price 5500000000000` moins de 900 s avant `open_hedge` (pas `crash.sh --reset`, qui prend le cours Reflector), puis vérifier qu'une quote 1e13 / 7776000 / cap 1000 renvoie `usdc_cost` 550128136866.
-- ⚠️ **Couvertures seed 14 (BRL) et 15 (MXN) bloquées en 302** (aucun prix posé avant leur échéance, fixing absent) : marges immobilisées (75 730,32 et 64 410,13 USDC), capacity suffisante pour la démo. Ne pas les montrer dans la vidéo ; ignorer leur bouton Settle dans le front s'il apparaît.
+- ✅ (déploiement précédent, n'existent plus sur le pool actuel) **Couvertures seed 14 (BRL) et 15 (MXN) bloquées en 302** (aucun prix posé avant leur échéance, fixing absent) : marges immobilisées (75 730,32 et 64 410,13 USDC), capacity suffisante pour la démo. Ne pas les montrer dans la vidéo ; ignorer leur bouton Settle dans le front s'il apparaît.
 
 **Points ouverts à trancher :** voir `docs/points-a-trancher.md` (les trois sont réglés).
 

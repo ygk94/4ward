@@ -17,7 +17,7 @@ export function QuoteCard({
   if (error) return <div className="quote quote-err">{error}</div>
   return (
     <div className={`quote ${loading ? 'loading' : ''}`}>
-      <p className="quote-l">{side === 'SellCurrency' ? 'You’ll receive, no matter what' : 'You’ll pay, no matter what'}</p>
+      <p className="quote-l">{side === 'SellCurrency' ? 'You’ll receive, within your protection' : 'You’ll pay, within your protection'}</p>
       <p className="quote-big">
         {quote ? fmtUsdc(quote.usdc_cost, 2) : '—'} <span>USDC</span>
       </p>

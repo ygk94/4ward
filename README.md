@@ -21,7 +21,7 @@ Une grande entreprise appellerait sa banque pour bloquer le taux (un *forward de
 ## La solution
 
 1. Lucía saisit sa facture : *1 000 000 MXN dans 90 jours*.
-2. L'app lui affiche un prix figé : *« vous paierez 55 013 USDC, quoi qu'il arrive »*.
+2. L'app lui affiche un prix figé : *« vous paierez 55 013 USDC »*, tant que le peso bouge moins que la protection choisie (au-delà, elle ne supporte que la part du mouvement qui dépasse son plafond).
 3. Elle choisit sa protection (par ex. ±10 %), dépose la marge correspondante en USDC et signe avec son wallet (Freighter, via Stellar Wallets Kit).
 4. Le jour J, n'importe qui peut déclencher le règlement. Le contrat prend le cours **en vigueur à l'échéance** sur un oracle SEP-40 (`price(asset, timestamp)` ; Reflector FX en production, mock-oracle de même interface pour la démo), pas le cours du moment où l'on règle :
    - le peso a monté → le pool lui verse la différence ;
@@ -112,7 +112,7 @@ Environ **4 fois moins cher qu'une option**, parce que la protection est plafonn
 
 Le capital réservé est la perte maximale des couvertures en cours. Il n'est pas versé à celui qui sort. Personne ne peut donc partir en laissant ses pertes possibles aux autres. Les retraits sont équitables par construction : chaque LP ne peut retirer que sa part du capital libre. Si la couverture se termine bien, la décote laissée par celui qui est parti profite aux LPs restants.
 
-**Règle de capacité : le pool ne peut pas faire faillite.** La perte maximale de chaque couverture (sa marge) est connue dès l'ouverture :
+**Règle de capacité : le risque de change du pool est plafonné et couvert par le capital du junior.** La perte maximale de chaque couverture (sa marge) est connue dès l'ouverture :
 
 ```
 capital réservé = Σ marges des couvertures ouvertes   ≤   capital du pool
@@ -192,7 +192,7 @@ Exemple, pool de 500 k$ à 80 contrats par trimestre (60 % d'importateurs) : ~16
 
 ### Couverture du pool (roadmap)
 
-Le plafond et la règle de capacité garantissent que le pool **ne fait pas faillite**, pas qu'il est rentable de façon régulière. Le pool ne parie pas sur la tendance (le taux forward l'intègre déjà), mais il reste exposé aux mouvements de la devise : environ 6,5 % en 90 jours sur le peso, contre un spread de 0,5 %. Sans couverture, il faudrait un spread de 3 à 5 % pour rémunérer les LPs, et aucune PME n'achèterait. Le pool se couvre donc en trois étages, comme une banque qui vend un forward.
+Le plafond et la règle de capacité garantissent que les pertes de change du pool restent **plafonnées et couvertes par le capital du junior**, pas qu'il est rentable de façon régulière. Le pool ne parie pas sur la tendance (le taux forward l'intègre déjà), mais il reste exposé aux mouvements de la devise : environ 6,5 % en 90 jours sur le peso, contre un spread de 0,5 %. Sans couverture, il faudrait un spread de 3 à 5 % pour rémunérer les LPs, et aucune PME n'achèterait. Le pool se couvre donc en trois étages, comme une banque qui vend un forward.
 
 ```
 Exposition au peso
@@ -308,7 +308,7 @@ Le pool est redéployé à chaque `./scripts/setup-testnet.sh`, qui fait aussi l
 
 **Mode démo :** le setup pose `set_time_factor 25920` : le prix est calculé sur la durée annoncée (90 jours), mais l'échéance réelle tombe 5 minutes après l'ouverture. C'est ce qui permet de régler en direct, dans la vidéo, une couverture « à 90 jours ».
 
-**Limites du MVP testnet :** oracle de démo (mock-oracle SEP-40, pour le crash) à la place de Reflector ; USDC et MXN de test émis par le compte ISSUER, offre DEX MXN/USDC posée par nous ; règle de capacité brute (somme des marges, sans netting) ; taux d'intérêt figés dans `scripts/rates.snapshot` et poussés par l'admin.
+**Limites du MVP testnet :** paiement du fournisseur depuis l'app en MXN seulement (seule devise avec un actif de test et une offre DEX posée par le setup ; les couvertures BRL, ARS et EUR se règlent normalement) ; oracle de démo (mock-oracle SEP-40, pour le crash) à la place de Reflector ; USDC et MXN de test émis par le compte ISSUER, offre DEX MXN/USDC posée par nous ; règle de capacité brute (somme des marges, sans netting) ; taux d'intérêt figés dans `scripts/rates.snapshot` et poussés par l'admin.
 
 ## Lancer le projet
 
@@ -363,7 +363,7 @@ TODO.md                # setup et chantiers
 | Risque | Parade |
 |---|---|
 | Défaut de la PME | Impossible : la perte max est déjà déposée |
-| Faillite du pool | Impossible : règle de capacité |
+| Pertes de change du pool | Plafonnées : règle de capacité, couvertes par le capital du junior (le senior reste exposé à l'USDC, à l'oracle et à l'épuisement du junior) |
 | LPs exposés aux mouvements de la devise | Netting, puis couverture de l'exposition nette en devise (voir *Couverture du pool*) |
 | Flux tous dans le même sens (anti-sélection) | Limites par devise, skew de prix, spread dynamique |
 | Saut de cours entre deux rééquilibrages | Limites par devise, tranche junior en première perte |

@@ -25,7 +25,7 @@ Le front n'a ni bouton de crash, ni comparaison côte à côte, ni bouton « Pay
 | À l'écran | Action | Voix off |
 |---|---|---|
 | `HedgeScreen` : montant 1,000,000, devise MXN, échéance, adresse du fournisseur | Hugo remplit le formulaire | *Lucía enters her invoice: one million pesos, the due date, and her supplier's address.* |
-| `QuoteCard` : « Today’s rate (demo oracle) », prix figé **55,012.81 USDC** | le devis s'affiche (chip « 90 days ») | *The app reads the peso rate from a Reflector-compatible price feed (a demo feed on testnet) and gives her a locked price for 90 days: 55,013 USDC, whatever happens.* |
+| `QuoteCard` : « Today’s rate (demo oracle) », prix figé **55,012.81 USDC** | le devis s'affiche (chip « 90 days ») | *The app reads the peso rate from a Reflector-compatible price feed (a demo feed on testnet) and gives her a locked price for 90 days: 55,013 USDC, as long as the peso stays within her protection.* |
 | Choix de la protection : **±10 %** → deposit **5,501.28 USDC** | Hugo choisit 10 % | *She picks her protection — plus or minus 10% — and deposits 10% of the invoice as a guarantee. That deposit is the most she can ever lose. No credit check, no surprise bills.* |
 | Fenêtre Freighter | **Signature n° 1** : « Lock my price » (`open_hedge`) | *One signature in her wallet, and the price is locked.* |
 | stellar.expert : la transaction, événement `hedge_opened` | plan de coupe 2-3 s | *Anyone can check the locked rate and her deposit on Stellar.* |
@@ -51,7 +51,7 @@ Le front n'a ni bouton de crash, ni comparaison côte à côte, ni bouton « Pay
 
 | À l'écran | Voix off |
 |---|---|
-| `VaultPage` : `PoolPanel` (capital, réservé, libre) + badge « Solvent » de `LpForm` | *Behind Lucía, a pool of dollars covers her and earns a small fee on every lock. It can't go bankrupt: it never promises more than it holds.* |
+| `VaultPage` : `PoolPanel` (capital, réservé, libre) + badge « Solvent » de `LpForm` | *Behind Lucía, a pool of dollars covers her and earns a small fee on every lock. Its currency risk is capped: it never promises more than its first-loss capital can cover.* |
 | Logos : Stellar · USDC · Reflector · Etherfuse · Stellar Wallets Kit | *USDC, Reflector-compatible prices, Etherfuse treasury rates inside the locked price, path payments: protection and payment on the same Stellar rails.* |
 | Slide « Next » : exportateurs en contrepartie · rendement du capital libre · factures couvertes transférables · SDK pour wallets et anchors | *Next: matching importers with exporters, putting idle capital to work, and a "lock the rate" button for every Stellar wallet.* |
 | `4ward` + phrase d'accroche | *4ward. Lock today's price for tomorrow's invoice.* |
