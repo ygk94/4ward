@@ -50,7 +50,7 @@ r = json.load(sys.stdin)["_embedded"]["records"][0]
 print(int(datetime.datetime.fromisoformat(r["closed_at"].replace("Z", "+00:00")).timestamp()))' | tr -d '\r'
 }
 
-# La couverture `id` en JSON, ou « null » si elle n'existe pas.
+# La couverture `id` en JSON, ou « null » (code 0) si elle n'existe pas ; code ≠ 0 si la lecture échoue (pool, RPC).
 get_hedge() {
   stellar contract invoke --id "$POOL" --source-account "$SOURCE" --network "$NET" -- get_hedge --hedge_id "$1" 2>/dev/null
 }
@@ -80,13 +80,18 @@ settle() {
 
 # Premier id dont on ne sait pas encore s'il est réglé : les couvertures réglées avant lui ne sont plus relues.
 FIRST=0
+FAILED=0   # 1 si le dernier passage n'a pas pu lire les couvertures
 
 pass() {
   local now id json settled maturity prefix=1 due=0
+  FAILED=0
   now=$(ledger_time) || { echo "   heure du ledger illisible, passage sauté"; return; }
   id=$FIRST
   while :; do
-    json=$(get_hedge "$id" || true)
+    if ! json=$(get_hedge "$id"); then
+      echo "   get_hedge($id) en échec : pool introuvable ou RPC en panne ? (passage interrompu)" >&2
+      FAILED=1; return
+    fi
     if [ -z "$json" ] || [ "$json" = null ]; then break; fi
     read -r settled maturity < <(echo "$json" | "$PY" -c 'import sys, json; h = json.load(sys.stdin); print(int(h["settled"]), h["maturity"])' | tr -d '\r')
     if [ "$settled" = 1 ]; then
@@ -106,6 +111,6 @@ pass() {
 say "Keeper sur $POOL ($NET), frais payés par $SOURCE$([ "$DRY" = 1 ] && echo ', à blanc')"
 while :; do
   pass
-  [ "$ONCE" = 1 ] && break
+  if [ "$ONCE" = 1 ]; then [ "$FAILED" = 0 ] || exit 1; break; fi
   sleep "$INTERVAL"
 done
