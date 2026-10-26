@@ -1,8 +1,9 @@
 // [FRONT — Hugo] Page d'accueil : titre, capital déposé ; le fond plein écran (Background) sert de décor.
+// Au premier affichage, le vault se construit seul, puis le texte arrive (titre ligne par ligne, TVL qui compte).
 // On entre en scrollant (molette, trackpad, ou swipe vers le haut sur mobile) : le bouton « Enter » se
 // remplit et le vault de fond éclate au même rythme ; à 100 % on passe sur la page de présentation.
 // Le remplissage reste en place à l'arrêt et ne recule que si on remonte. Un clic sur le bouton entre directement.
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { fmtUsdc } from '../shared/contract'
 import { go } from '../shared/router'
 import { usePoolStats } from '../shared/usePool'
@@ -12,8 +13,36 @@ import { burst } from '../visual/burst'
 const WHEEL_DISTANCE = 900
 const SWIPE_DISTANCE = 260
 
+/** Le premier affichage de l'accueil est mis en scène (le vault se construit, puis le texte arrive) ; pas les suivants. */
+let homeSeen = false
+const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+/** Compte de 0 jusqu'à `value` (après `delayMs`, sur `durMs`) ; valeur finale d'emblée si `animate` est faux. */
+function useCountUp(value: bigint | undefined, animate: boolean, delayMs: number, durMs: number) {
+  const [shown, setShown] = useState<bigint | undefined>(animate ? 0n : value)
+  const [start] = useState(() => performance.now() + delayMs)
+  useEffect(() => {
+    if (value === undefined) return
+    let raf = 0
+    const tick = () => {
+      const u = animate ? Math.min(1, Math.max(0, (performance.now() - start) / durMs)) : 1
+      const e = 1 - (1 - u) ** 3
+      setShown((value * BigInt(Math.round(e * 1000))) / 1000n)
+      if (u < 1) raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [value, animate, start, durMs])
+  return shown
+}
+
 export function Home() {
   const { stats, demo } = usePoolStats()
+  const [first] = useState(() => !homeSeen && !reducedMotion())
+  useEffect(() => {
+    homeSeen = true
+  }, [])
+  const tvl = useCountUp(stats?.totalAssets, first, 2300, 1400)
   const fillRef = useRef<HTMLSpanElement>(null)
   const barRef = useRef<HTMLButtonElement>(null)
 
@@ -73,20 +102,23 @@ export function Home() {
   }, [])
 
   return (
-    <section className="home">
+    <section className={`home ${first ? 'home-first' : ''}`}>
       <div className="home-copy">
         <p className="eyebrow">FX hedging for SMEs · Stellar</p>
         <h1 className="display">
-          Lock today’s rate
-          <br />
-          <span className="accent">for tomorrow’s invoice.</span>
+          <span className="line">
+            <span>Lock today’s rate</span>
+          </span>
+          <span className="line">
+            <span className="accent">for tomorrow’s invoice.</span>
+          </span>
         </h1>
       </div>
 
       <div className="home-gauge">
         <p className="eyebrow">Total value locked {demo && <span className="chip">demo</span>}</p>
         <p className="gauge-num">
-          {stats ? fmtUsdc(stats.totalAssets) : '—'}
+          {stats && tvl !== undefined ? fmtUsdc(tvl) : '—'}
           <span>USDC</span>
         </p>
         <button ref={barRef} className="enter-btn" onClick={() => go('/about')} aria-label="Enter (or scroll down)">

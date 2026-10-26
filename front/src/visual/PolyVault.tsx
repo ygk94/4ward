@@ -6,6 +6,8 @@
 // `burst` (0 → 1) : les arêtes éclatent en tournoyant, sans quitter l'écran ; onde de choc, rotation qui
 // s'emballe. `chart` (0 → 1) : chaque arête rejoint une colonne d'un graphique en points sur une grille de
 // points (façon Morpho) ; au survol, les colonnes proches de la souris se soulèvent et foncent.
+// Au lancement sur l'accueil, ouverture « construction à l'encre » : les sommets surgissent un à un, les arêtes se
+// tracent de sommet en sommet, puis le dodécaèdre, la cage, la poussière qui converge et le halo.
 // `rebuild` (avancement 0 → 1) : cinématique du Risk lab. Des éclats d'arête tombent du haut de l'écran et s'empilent
 // dans chaque barre de l'histogramme (positions publiées dans burst.ts), puis s'effacent devant les vraies barres.
 // Au changement d'onglet, les colonnes du graphique glissent dans le sens du menu, en retard sur la page (burst.slide).
@@ -180,6 +182,41 @@ function makePart(
   }
 }
 
+/**
+ * Ouverture « construction à l'encre » (au lancement, sur l'accueil) : ordre de tracé de chaque forme.
+ * Les sommets sont numérotés par distance (en arêtes) au sommet le plus haut ; chaque sommet apparaît à son tour,
+ * puis chaque arête se trace depuis son sommet le plus ancien. Temps en fraction de l'ouverture (0 → 1).
+ */
+function drawOrder(shape: Shape, from: number, span: number) {
+  const n = shape.verts.length
+  const top = shape.verts.reduce((best, v, i) => (v[1] > shape.verts[best][1] ? i : best), 0)
+  const level = new Array<number>(n).fill(-1)
+  level[top] = 0
+  const queue = [top]
+  while (queue.length) {
+    const v = queue.shift()!
+    for (const [i, j] of shape.edges) {
+      const w = i === v ? j : j === v ? i : -1
+      if (w >= 0 && level[w] < 0) {
+        level[w] = level[v] + 1
+        queue.push(w)
+      }
+    }
+  }
+  const maxL = Math.max(1, ...level)
+  // un léger aléa par sommet pour que le tracé ne soit pas mécanique
+  const vt = Float32Array.from(level, (l) => from + ((l + Math.random() * 0.6) / (maxL + 0.6)) * span)
+  const et = Float32Array.from(shape.edges, ([i, j]) => Math.min(vt[i], vt[j]) + 0.03)
+  const flip = Uint8Array.from(shape.edges, ([i, j]) => (vt[j] < vt[i] ? 1 : 0))
+  return { vt, et, flip }
+}
+
+/** Durée de l'ouverture (s) et durée du tracé d'une arête (fraction de l'ouverture). */
+const INTRO_S = 2.8
+const EDGE_SPAN = 0.16
+const easeOut = (x: number) => 1 - (1 - x) ** 3
+const easeOutBack = (x: number) => 1 + 2.2 * (x - 1) ** 3 + 1.2 * (x - 1) ** 2
+
 const BLUE: V = [47, 107, 255]
 const HOT: V = [27, 47, 168] // colonnes survolées : bleu plus profond
 
@@ -261,6 +298,8 @@ export function PolyVault({ className, burst, chart, rebuild }: Props) {
       2.35,
     )
     const parts = [outer, inner, cage]
+    // ouverture : la coque d'abord, puis le dodécaèdre à l'intérieur, puis la cage autour
+    const orders = [drawOrder(outer.shape, 0.02, 0.4), drawOrder(inner.shape, 0.42, 0.22), drawOrder(cage.shape, 0.5, 0.3)]
 
     // Graphique : une colonne par arête, dans un ordre mélangé pour que les trajectoires se croisent ;
     // hauteurs tirées d'une marche aléatoire qui monte, normalisée entre 0,15 et 1.
@@ -332,7 +371,9 @@ export function PolyVault({ className, burst, chart, rebuild }: Props) {
     const innerPhase = inner.shape.verts.map(() => Math.random() * Math.PI * 2)
     const start = performance.now()
     let raf = 0
-    let blast = 1 // le vault arrive en morceaux et s'assemble
+    // Au lancement sur l'accueil, le vault se construit (ouverture) ; ailleurs il arrive en morceaux comme avant.
+    const introOn = !reduced && (chartRef.current?.() ?? 0) === 0 && (burstRef.current?.() ?? 0) === 0
+    let blast = introOn ? 0 : 1
     let spin = 0
     let last = 0
     let morph = 0
@@ -355,6 +396,10 @@ export function PolyVault({ className, burst, chart, rebuild }: Props) {
       morph += (clamp01(chartRef.current?.() ?? 0) - morph) * (1 - Math.exp(-dt * 1.6))
       const ce = morph * morph * (3 - 2 * morph)
       const still = 1 - ce // en graphique, les formes cessent de tourner
+      const ip = introOn ? clamp01(t / INTRO_S) : 1 // avancement de l'ouverture
+      const ei = easeOut(ip)
+      spin += dt * (1 - ei) * 2.4 // le vault arrive en tournant vite, puis ralentit jusqu'à sa vitesse normale
+      const zoom = introOn && ip < 1 ? 0.82 + 0.18 * easeOutBack(clamp01(ip / 0.9)) : 1
       hover += ((pointer.inside ? 1 : 0) - hover) * (1 - Math.exp(-dt * 3))
 
       // Caméra : même cadrage que l'ancien vault WebGL (champ vertical 32°, recul en portrait).
@@ -391,9 +436,9 @@ export function PolyVault({ className, burst, chart, rebuild }: Props) {
 
       // Respiration : chaque sommet s'écarte un peu du centre, à son rythme.
       const local = [
-        outer.shape.verts.map((v, i) => scale(v, 1 + 0.06 * Math.sin(t * 0.55 + outerPhase[i]))),
-        inner.shape.verts.map((v, i) => scale(v, 1 + 0.12 * Math.sin(t * 0.8 + innerPhase[i]))),
-        cage.shape.verts,
+        outer.shape.verts.map((v, i) => scale(v, zoom * (1 + 0.06 * Math.sin(t * 0.55 + outerPhase[i])))),
+        inner.shape.verts.map((v, i) => scale(v, zoom * (1 + 0.12 * Math.sin(t * 0.8 + innerPhase[i])))),
+        zoom === 1 ? cage.shape.verts : cage.shape.verts.map((v) => scale(v, zoom)),
       ]
 
       // Extrémités de chaque arête dans la scène : éclatement, rotation, puis colonne du graphique.
@@ -436,7 +481,7 @@ export function PolyVault({ className, burst, chart, rebuild }: Props) {
       const unitPx = f / D
       const pulse = 1 + 0.08 * Math.sin(t * 1.3)
       const glowR = ((2.6 + eased * 5) * pulse * unitPx) / 2
-      const glowA = 0.09 * (1 - 0.5 * eased) * still
+      const glowA = 0.09 * (1 - 0.5 * eased) * still * clamp01((ip - 0.6) / 0.4)
       if (glowA > 0.002) {
         const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowR)
         g.addColorStop(0, 'rgba(111, 211, 255, 1)')
@@ -448,14 +493,14 @@ export function PolyVault({ className, burst, chart, rebuild }: Props) {
       }
 
       // Poussière
-      const dustA = 0.5 * (1 - 0.6 * eased) * still
+      const dustA = 0.5 * (1 - 0.6 * eased) * still * clamp01(ip * 3)
       if (dustA > 0.002) {
         const rot = rotator(t * 0.03, spin * 0.25, 0)
         ctx.globalAlpha = dustA
         ctx.fillStyle = '#2f6bff'
         ctx.beginPath()
         dust.forEach((d, i) => {
-          const k = 1 + eased * d.reach + 0.04 * Math.sin(t * 0.7 + i)
+          const k = 1 + eased * d.reach + 0.04 * Math.sin(t * 0.7 + i) + (1 - ei) * 2.2
           const [x, y] = project(rot(scale(d.base, k)))
           ctx.rect(x - 1, y - 1, 2, 2)
         })
@@ -465,7 +510,8 @@ export function PolyVault({ className, burst, chart, rebuild }: Props) {
       // Arêtes : chaque passe de couleur tremble à son rythme ; l'arrière est plus pâle que l'avant.
       const fade = clamp01((ce - 0.7) / 0.3)
       ctx.lineCap = 'round'
-      for (const p of parts) {
+      parts.forEach((p, pk) => {
+        const ord = orders[pk]
         p.layers.forEach((l, k) => {
           const ampK = k === 0 ? p.amp * 0.3 : p.amp
           const base = l.opacity * (1 - 0.75 * eased) * (1 - 0.8 * fade)
@@ -475,8 +521,15 @@ export function PolyVault({ className, burst, chart, rebuild }: Props) {
           for (let e = 0; e < p.a.length; e++) {
             const o = e * 6
             const j = (c: number) => Math.sin(t * (0.6 + (c % 3) * 0.17) + l.jitter[o + c]) * ampK
-            const a: V = [p.a[e][0] + j(0), p.a[e][1] + j(1), p.a[e][2] + j(2)]
-            const b: V = [p.b[e][0] + j(3), p.b[e][1] + j(4), p.b[e][2] + j(5)]
+            let a: V = [p.a[e][0] + j(0), p.a[e][1] + j(1), p.a[e][2] + j(2)]
+            let b: V = [p.b[e][0] + j(3), p.b[e][1] + j(4), p.b[e][2] + j(5)]
+            if (ip < 1) {
+              // ouverture : l'arête se trace depuis son sommet le plus ancien ; chaque passe d'encre suit avec un léger retard
+              const pe = easeOut(clamp01((ip - ord.et[e] - k * 0.025) / EDGE_SPAN))
+              if (pe <= 0) continue
+              if (ord.flip[e]) a = [b[0] + (a[0] - b[0]) * pe, b[1] + (a[1] - b[1]) * pe, b[2] + (a[2] - b[2]) * pe]
+              else b = [a[0] + (b[0] - a[0]) * pe, a[1] + (b[1] - a[1]) * pe, a[2] + (b[2] - a[2]) * pe]
+            }
             const depth = clamp01(((a[2] + b[2]) / 2 + p.radius) / (2 * p.radius))
             ctx.globalAlpha = base * (0.35 + 0.65 * depth + (0.65 - 0.65 * depth) * ce)
             const [ax, ay] = project(a)
@@ -487,7 +540,7 @@ export function PolyVault({ className, burst, chart, rebuild }: Props) {
             ctx.stroke()
           }
         })
-      }
+      })
 
       // Points sur les sommets (comme le composant Framer), tant que le vault est assemblé.
       const dotA = (1 - eased) * still
@@ -495,13 +548,15 @@ export function PolyVault({ className, burst, chart, rebuild }: Props) {
         [outer, inner].forEach((p, k) => {
           if (!p.dot) return
           ctx.fillStyle = p.dot.color
-          local[k].forEach((v) => {
+          local[k].forEach((v, vi) => {
             const w = rotations[k](v)
             const depth = clamp01((w[2] + p.radius) / (2 * p.radius))
             const [x, y] = project(w)
-            ctx.globalAlpha = dotA * 0.9 * (0.25 + 0.75 * depth)
+            const pop = ip < 1 ? clamp01((ip - orders[k].vt[vi]) / 0.08) : 1 // ouverture : le sommet surgit à son tour
+            if (pop <= 0) return
+            ctx.globalAlpha = dotA * 0.9 * (0.25 + 0.75 * depth) * Math.min(1, pop * 2)
             ctx.beginPath()
-            ctx.arc(x, y, p.dot!.size, 0, Math.PI * 2)
+            ctx.arc(x, y, p.dot!.size * (pop < 1 ? easeOutBack(pop) * 1.6 : 1), 0, Math.PI * 2)
             ctx.fill()
           })
         })
