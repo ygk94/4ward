@@ -37,10 +37,11 @@ export function HedgeScreen({ onDone, onPick }: { onDone: () => void; onPick?: (
     onPick?.(currency, side)
   }, [currency, side, onPick])
 
-  // Saisie tolérante (espaces, « _ ») mais validée : toUnits/BigInt lèveraient pendant le rendu sur « 1,000,000 » ou « 1e6 ».
-  const clean = amount.replace(/[\s_]/g, '')
-  const valid = /^\d+([.,]\d{0,7})?$/.test(clean)
-  const notional = valid ? Number(clean.replace(',', '.')) : 0
+  // Saisie tolérante (espaces, « _ », virgule des milliers : « 1,000,000 ») mais validée : toUnits/BigInt lèveraient
+  // pendant le rendu sur « 1e6 ». Le point est le seul séparateur décimal.
+  const clean = amount.replace(/[\s_,]/g, '')
+  const valid = /^\d+(\.\d{0,7})?$/.test(clean)
+  const notional = valid ? Number(clean) : 0
   const args = { currency, side: { tag: side }, notional: valid ? toUnits(clean) : 0n, duration_secs: BigInt(duration), cap_bps: cap * 100 }
 
   // Devis simulé (aucune signature), recalculé 400 ms après la dernière saisie.
@@ -52,24 +53,31 @@ export function HedgeScreen({ onDone, onPick }: { onDone: () => void; onPick?: (
       return
     }
     setLoading(true)
+    let cancelled = false // une réponse plus lente d'une saisie précédente ne doit pas écraser le devis courant
     const id = setTimeout(async () => {
       try {
         const p = await pool()
-        setQuote(await read(p.quote(args)))
+        const q = await read(p.quote(args))
+        if (cancelled) return
+        setQuote(q)
         setQuoteErr(null)
       } catch (e) {
+        if (cancelled) return
         setQuote(null)
         setQuoteErr(explainError(e))
       } finally {
-        setLoading(false)
+        if (!cancelled) setLoading(false)
       }
     }, 400)
-    return () => clearTimeout(id)
+    return () => {
+      cancelled = true
+      clearTimeout(id)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [amount, currency, side, duration, cap])
 
   const submit = async () => {
-    const id = await run((p, owner) => p.open_hedge({ owner, supplier, ...args }))
+    const id = await run((p, owner) => p.open_hedge({ owner, supplier: side === 'BuyCurrency' ? supplier : supplier || owner, ...args }))
     if (id !== undefined) onDone()
   }
 
@@ -128,7 +136,7 @@ export function HedgeScreen({ onDone, onPick }: { onDone: () => void; onPick?: (
 
       <QuoteCard quote={quote} loading={loading} error={quoteErr} currency={currency} side={side} />
 
-      <button className="btn btn-primary wide" disabled={!quote || notional <= 0 || state.step === 'signing' || !supplier} onClick={submit}>
+      <button className="btn btn-primary wide" disabled={!quote || loading || notional <= 0 || state.step === 'signing' || (side === 'BuyCurrency' && !supplier)} onClick={submit}>
         {state.step === 'signing' ? 'Waiting for wallet…' : 'Lock my price'}
       </button>
       <TxStatus state={state} success={(id) => `Hedge #${String(id)} opened.`} />

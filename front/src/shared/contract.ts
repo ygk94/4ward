@@ -135,7 +135,7 @@ export async function readStats(currencies = TRADABLE): Promise<PoolStats> {
 }
 
 /** Couvertures d'un propriétaire. Le contrat n'indexe pas par owner : on parcourt les ids jusqu'au premier vide. */
-export async function readHedges(owner: string, max = 60): Promise<{ id: bigint; hedge: Hedge }[]> {
+export async function readHedges(owner: string, max = 500): Promise<{ id: bigint; hedge: Hedge }[]> {
   const p = await pool()
   const out: { id: bigint; hedge: Hedge }[] = []
   for (let start = 0n; start < BigInt(max); start += 6n) { // le contrat numérote à partir de 0 (NextId = 0)
@@ -216,12 +216,14 @@ const ERRORS: Record<number, string> = {
 
 export function explainError(e: unknown): string {
   if (e instanceof ContractError) return translateDoc(e.doc)
-  const msg = e instanceof Error ? e.message : String(e)
+  // Stellar Wallets Kit rejette avec des objets { code, message } (modale fermée, signature refusée), pas des Error.
+  const msg =
+    e instanceof Error ? e.message : e && typeof e === 'object' && 'message' in e ? String((e as { message: unknown }).message) : String(e)
   // #10 = erreur du contrat token USDC (SAC) : solde insuffisant. Aucun code du pool ne vaut 10.
   if (/Error\(Contract, #10\)/.test(msg)) return 'Not enough USDC in your wallet.'
   const code = msg.match(/Error\(Contract, #(\d+)\)/)?.[1]
   if (code && ERRORS[Number(code)]) return ERRORS[Number(code)]
-  if (/reject|declin|cancel/i.test(msg)) return 'Signature rejected in the wallet.'
+  if (/reject|declin|cancel|closed the modal/i.test(msg)) return 'Signature rejected in the wallet.'
   return msg.length > 160 ? msg.slice(0, 160) + '…' : msg
 }
 

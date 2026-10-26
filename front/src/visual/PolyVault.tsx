@@ -560,7 +560,7 @@ export function PolyVault({ className, burst, chart, rebuild }: Props) {
           const slot = (x1 - x0) / SHARD_COLS
           if (slot <= 0) return
           const rows = Math.floor(((r.bottom - r.top) * H) / slot + 1e-6)
-          const kind = bin < risk.rects.length / 2 ? 'loss' : 'gain'
+          const kind = (r.loss ?? bin < risk.rects.length / 2) ? 'loss' : 'gain'
           for (let row = 0; row < rows; row++) {
             const k = counts[kind]++
             if (k >= SH) continue

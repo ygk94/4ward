@@ -75,8 +75,8 @@ export async function paySupplier(
     .setTimeout(180)
     .build()
 
-  const { signedTxXdr } = await signTransaction(tx.toXDR(), { address })
   try {
+    const { signedTxXdr } = await signTransaction(tx.toXDR(), { address })
     const sent = await server.submitTransaction(TransactionBuilder.fromXDR(signedTxXdr, config.networkPassphrase))
     const ops = await server.operations().forTransaction(sent.hash).call()
     const op = ops.records[0] as unknown as { source_amount?: string }
@@ -106,13 +106,15 @@ function explainHorizonError(e: unknown): string {
   }
   if (codes?.transaction === 'tx_bad_seq') return 'Your account sequence changed. Try again.'
   if (codes?.transaction === 'tx_insufficient_balance') return 'Not enough XLM to pay the network fee.'
-  const msg = e instanceof Error ? e.message : String(e)
-  if (/reject|declin|cancel/i.test(msg)) return 'Signature rejected in the wallet.'
+  const msg =
+    e instanceof Error ? e.message : e && typeof e === 'object' && 'message' in e ? String((e as { message: unknown }).message) : String(e)
+  if (/reject|declin|cancel|closed the modal/i.test(msg)) return 'Signature rejected in the wallet.'
   return codes ? `Payment failed (${op ?? codes.transaction}).` : msg
 }
 
 // Mémoire locale du parcours (versement du règlement, paiement fait), pour afficher le coût total après rechargement.
-const key = (kind: string, id: bigint) => `fx.${kind}.${id}`
+/** Clés par pool : les ids de couverture repartent de 0 à chaque redéploiement. */
+export const key = (kind: string, id: bigint) => `fx.${kind}.${config.poolId}.${id}`
 
 export function rememberPayout(id: bigint, payout: bigint) {
   try {

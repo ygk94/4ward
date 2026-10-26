@@ -15,6 +15,8 @@ export interface BinRect {
   x1: number
   top: number
   bottom: number
+  /** barre de pertes (rendement négatif) : éclats violets, sinon bleus */
+  loss?: boolean
 }
 export const RISK_MS = 3000
 // [FRONT] Changement d'onglet : la page glisse dans le sens du menu (dir = +1 en avançant, −1 en reculant, 0 sinon) ;

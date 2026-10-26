@@ -6,6 +6,7 @@ import {
   paySupplier,
   quoteSupplierPayment,
   recallPaid,
+  key,
   recallPayout,
   rememberPaid,
   rememberPayout,
@@ -178,7 +179,8 @@ function HedgeRow({ id, hedge, status, now, onSettled }: { id: bigint; hedge: He
               const payout = await run((p) => p.settle({ hedge_id: id }))
               if (typeof payout === 'bigint') rememberPayout(id, payout)
               // Relire même en cas d'échec : si le keeper l'a déjà réglée (201), la ligne passe en « Closed ».
-              onSettled()
+              // Après un succès, on laisse le message (et son lien explorateur) affiché quelques secondes.
+              setTimeout(onSettled, typeof payout === 'bigint' ? 4000 : 0)
             }}
           >
             {state.step === 'signing' ? 'Waiting…' : 'Settle'}
@@ -186,7 +188,7 @@ function HedgeRow({ id, hedge, status, now, onSettled }: { id: bigint; hedge: He
           <TxStatus state={state} success={(r) => `Settled: ${fmtUsdc(r as bigint, 2)} USDC paid out.`} />
         </div>
       )}
-      {status === 'open' && (
+      {status === 'open' && left > LEDGER_LAG_SECS && (
         <div className="pos-action">
           {!preview && state.step !== 'done' && (
             <button className="btn btn-ghost" onClick={previewClose}>
@@ -209,8 +211,10 @@ function HedgeRow({ id, hedge, status, now, onSettled }: { id: bigint; hedge: He
                 onClick={async () => {
                   const payout = await run((p) => p.close_early({ hedge_id: id }))
                   if (typeof payout === 'bigint') rememberEarly(id)
-                  setPreview(null)
-                  onSettled()
+                  setTimeout(() => {
+                    setPreview(null)
+                    onSettled()
+                  }, typeof payout === 'bigint' ? 4000 : 0)
                 }}
               >
                 {state.step === 'signing' ? 'Waiting…' : 'Confirm close'}
@@ -239,14 +243,14 @@ function HedgeRow({ id, hedge, status, now, onSettled }: { id: bigint; hedge: He
 // Une couverture clôturée par anticipation n'a pas de facture échue à payer : on la marque pour ne pas proposer le paiement.
 function rememberEarly(id: bigint) {
   try {
-    localStorage.setItem(`fx.early.${id}`, '1')
+    localStorage.setItem(key('early', id), '1')
   } catch {
     // stockage indisponible
   }
 }
 function recallEarly(id: bigint) {
   try {
-    return localStorage.getItem(`fx.early.${id}`) === '1'
+    return localStorage.getItem(key('early', id)) === '1'
   } catch {
     return false
   }

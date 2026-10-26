@@ -110,7 +110,9 @@ function TrancheCard({ kind, split, mine, onDone }: { kind: Kind; split: Split |
   const { state, run, reset } = useTx()
   const available = kind === 'dynamic' || !!split?.tranches
   const position = kind === 'dynamic' ? mine?.dynamic.balance : mine?.safe?.balance
-  const value = Number(amount.replace(',', '.')) || 0
+  // même saisie que l'écran de couverture : virgule des milliers ignorée, point décimal, rien d'autre (pas de « 1e3 »)
+  const clean = amount.replace(/[\s_,]/g, '')
+  const value = /^\d+(\.\d{0,7})?$/.test(clean) ? Number(clean) : 0
   const busy = state.step === 'signing'
   const copy = COPY[kind]
 
@@ -120,8 +122,8 @@ function TrancheCard({ kind, split, mine, onDone }: { kind: Kind; split: Split |
     setLast(action === 'deposit' ? 'deposit' : 'withdraw')
     const build =
       action === 'deposit'
-        ? deposit(kind, toUnits(amount))
-        : withdraw(kind, action === 'withdraw-all' ? 'all' : toUnits(amount), split, mine ?? { dynamic: { balance: 0n, shares: 0n }, safe: null })
+        ? deposit(kind, toUnits(clean))
+        : withdraw(kind, action === 'withdraw-all' ? 'all' : toUnits(clean), split, mine ?? { dynamic: { balance: 0n, shares: 0n }, safe: null })
     const res = await run(build)
     if (res !== undefined) {
       setAmount('')

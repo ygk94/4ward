@@ -97,7 +97,13 @@ export function Histogram({
           const x0 = PAD.l + i * bw
           const tl = new DOMPoint(x0, BASE - (c / max) * IH).matrixTransform(ctm)
           const br = new DOMPoint(x0 + bw, BASE).matrixTransform(ctm)
-          return { x0: tl.x / window.innerWidth, x1: br.x / window.innerWidth, top: tl.y / window.innerHeight, bottom: br.y / window.innerHeight }
+          return {
+            x0: tl.x / window.innerWidth,
+            x1: br.x / window.innerWidth,
+            top: tl.y / window.innerHeight,
+            bottom: br.y / window.innerHeight,
+            loss: BIN_MIN + i * BIN_W < 0,
+          }
         })
         if (!risk.start) risk.start = performance.now()
       }
