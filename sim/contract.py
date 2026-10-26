@@ -32,8 +32,9 @@ REF = dict(
 )
 REFLECTOR_SPOT = 5_325_000_000_000     # cours Reflector du 25/10 (0,05325)
 
-# Jeux de taux annuels en bps. « en-dur » : scripts/setup-testnet.sh (Fed, Banxico, Selic, proxy BADLAR, BCE) ;
-# « etherfuse » : rendements des stablebonds poussés par scripts/sync-rates.sh (25/10). ARS absent d'Etherfuse.
+# Jeux de taux annuels en bps. « en-dur » : ancien jeu (Fed, Banxico, Selic, proxy BADLAR, BCE ; docs/todo-pricing.md
+# §1.5), gardé pour la non-régression de self_test ; « etherfuse » : scripts/rates.snapshot, posé par
+# scripts/setup-testnet.sh (rendements des stablebonds relevés par sync-rates.sh le 25/10). ARS absent d'Etherfuse.
 RATE_SETS = {
     "en-dur": {"USD": 400, "MXN": 700, "BRL": 1_050, "ARS": 2_200, "EUR": 200},
     "etherfuse": {"USD": 360, "MXN": 555, "BRL": 1_148, "ARS": 2_200, "EUR": 210},

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
   "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
-<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="1236.157813pt" height="565.220254pt" viewBox="0 0 1236.157813 565.220254" xmlns="http://www.w3.org/2000/svg" version="1.1">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="1280.533698pt" height="563.499531pt" viewBox="0 0 1280.533698 563.499531" xmlns="http://www.w3.org/2000/svg" version="1.1">
  <metadata>
   <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
    <cc:Work>
@@ -15,9 +15,9 @@
  </defs>
  <g id="figure_1">
   <g id="patch_1">
-   <path d="M -0 565.220254 
-L 1236.157813 565.220254 
-L 1236.157813 0 
+   <path d="M -0 563.499531 
+L 1280.533698 563.499531 
+L 1280.533698 0 
 L -0 0 
 z
 " style="fill: #ffffff"/>
@@ -41,8 +41,8 @@ z
    </g>
    <g id="patch_4">
     <path d="M 342.01375 123.459318 
-L 364.944684 123.459318 
-L 364.944684 64.895937 
+L 362.65159 123.459318 
+L 362.65159 64.895937 
 L 342.01375 64.895937 
 z
 " clip-path="url(#pba50d3a036)" style="fill: #9ecae1"/>
@@ -80,17 +80,17 @@ z
 " clip-path="url(#pba50d3a036)" style="fill: #9aa5b1; opacity: 0.12"/>
    </g>
    <g id="patch_9">
-    <path d="M 726.793678 442.895937 
-L 819.108545 442.895937 
-L 819.108545 384.332557 
-L 726.793678 384.332557 
+    <path d="M 727.287515 442.895937 
+L 819.693477 442.895937 
+L 819.693477 384.332557 
+L 727.287515 384.332557 
 z
 " clip-path="url(#pba50d3a036)" style="fill: #d9480f; opacity: 0.35"/>
    </g>
    <g id="patch_10">
     <path d="M 226.345 442.895937 
-L 726.793678 442.895937 
-L 726.793678 384.332557 
+L 727.287515 442.895937 
+L 727.287515 384.332557 
 L 226.345 384.332557 
 z
 " clip-path="url(#pba50d3a036)" style="fill: #d9480f; opacity: 0.12"/>
@@ -113,7 +113,7 @@ L 0 3.5
       </g>
      </g>
      <g id="text_1">
-      <text style="font-size: 16px; font-family: 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: middle; fill: #7b8794" x="226.345" y="480.952187" transform="rotate(-0 226.345 480.952187)">0,0 %</text>
+      <text style="fill: #7b8794; font: 16px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: middle" x="226.345" y="480.953437" transform="rotate(-0 226.345 480.953437)">0,0 %</text>
      </g>
     </g>
     <g id="xtick_2">
@@ -128,7 +128,7 @@ L 342.592094 45.995937
       </g>
      </g>
      <g id="text_2">
-      <text style="font-size: 16px; font-family: 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: middle; fill: #7b8794" x="342.592094" y="480.952187" transform="rotate(-0 342.592094 480.952187)">0,5 %</text>
+      <text style="fill: #7b8794; font: 16px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: middle" x="342.592094" y="480.953437" transform="rotate(-0 342.592094 480.953437)">0,5 %</text>
      </g>
     </g>
     <g id="xtick_3">
@@ -143,7 +143,7 @@ L 458.839188 45.995937
       </g>
      </g>
      <g id="text_3">
-      <text style="font-size: 16px; font-family: 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: middle; fill: #7b8794" x="458.839188" y="480.952187" transform="rotate(-0 458.839188 480.952187)">1,0 %</text>
+      <text style="fill: #7b8794; font: 16px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: middle" x="458.839188" y="480.953437" transform="rotate(-0 458.839188 480.953437)">1,0 %</text>
      </g>
     </g>
     <g id="xtick_4">
@@ -158,7 +158,7 @@ L 575.086281 45.995937
       </g>
      </g>
      <g id="text_4">
-      <text style="font-size: 16px; font-family: 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: middle; fill: #7b8794" x="575.086281" y="480.952187" transform="rotate(-0 575.086281 480.952187)">1,5 %</text>
+      <text style="fill: #7b8794; font: 16px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: middle" x="575.086281" y="480.953437" transform="rotate(-0 575.086281 480.953437)">1,5 %</text>
      </g>
     </g>
     <g id="xtick_5">
@@ -173,7 +173,7 @@ L 691.333375 45.995937
       </g>
      </g>
      <g id="text_5">
-      <text style="font-size: 16px; font-family: 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: middle; fill: #7b8794" x="691.333375" y="480.952187" transform="rotate(-0 691.333375 480.952187)">2,0 %</text>
+      <text style="fill: #7b8794; font: 16px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: middle" x="691.333375" y="480.953437" transform="rotate(-0 691.333375 480.953437)">2,0 %</text>
      </g>
     </g>
     <g id="xtick_6">
@@ -188,7 +188,7 @@ L 807.580469 45.995937
       </g>
      </g>
      <g id="text_6">
-      <text style="font-size: 16px; font-family: 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: middle; fill: #7b8794" x="807.580469" y="480.952187" transform="rotate(-0 807.580469 480.952187)">2,5 %</text>
+      <text style="fill: #7b8794; font: 16px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: middle" x="807.580469" y="480.953437" transform="rotate(-0 807.580469 480.953437)">2,5 %</text>
      </g>
     </g>
     <g id="xtick_7">
@@ -203,45 +203,45 @@ L 923.827563 45.995937
       </g>
      </g>
      <g id="text_7">
-      <text style="font-size: 16px; font-family: 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: middle; fill: #7b8794" x="923.827563" y="480.952187" transform="rotate(-0 923.827563 480.952187)">3,0 %</text>
+      <text style="fill: #7b8794; font: 16px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: middle" x="923.827563" y="480.953437" transform="rotate(-0 923.827563 480.953437)">3,0 %</text>
      </g>
     </g>
     <g id="text_8">
-     <text style="font-size: 19px; font-family: 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: middle; fill: #1f2933" x="598.3357" y="503.992969" transform="rotate(-0 598.3357 503.992969)">Coût pour couvrir une facture à 90 jours (% de la facture)</text>
+     <text style="fill: #1f2933; font: 19px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: middle" x="598.3357" y="503.477969" transform="rotate(-0 598.3357 503.477969)">Coût pour couvrir une facture à 90 jours (% de la facture)</text>
     </g>
    </g>
    <g id="matplotlib.axis_2">
     <g id="ytick_1">
      <g id="line2d_15"/>
      <g id="text_9">
-      <text style="font-size: 17px; font-family: 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: end; fill: #1f2933" x="222.845" y="100.6363" transform="rotate(-0 222.845 100.6363)">Notre protection</text>
+      <text style="fill: #1f2933; font: 17px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: end" x="222.845" y="100.6363" transform="rotate(-0 222.845 100.6363)">Notre protection</text>
      </g>
     </g>
     <g id="ytick_2">
      <g id="line2d_16"/>
      <g id="text_10">
-      <text style="font-size: 17px; font-family: 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; fill: #1f2933" transform="translate(66.939063 197.423679)">Fintech de change</text>
-      <text style="font-size: 17px; font-family: 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; fill: #1f2933" transform="translate(117.795625 218.508327)">(dépôt, KYC)</text>
+      <text style="fill: #1f2933; font: 17px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif" transform="translate(66.93375 198.548767)">Fintech de change</text>
+      <text style="fill: #1f2933; font: 17px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif" transform="translate(117.811563 218.401048)">(dépôt, KYC)</text>
      </g>
     </g>
     <g id="ytick_3">
      <g id="line2d_17"/>
      <g id="text_11">
-      <text style="font-size: 17px; font-family: 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; fill: #1f2933" transform="translate(8.055313 304.242552)">Contrat à terme bancaire</text>
-      <text style="font-size: 17px; font-family: 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; fill: #1f2933" transform="translate(87.447969 325.3272)">(ligne de crédit)</text>
+      <text style="fill: #1f2933; font: 17px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif" transform="translate(8.063281 305.02764)">Contrat à terme bancaire</text>
+      <text style="fill: #1f2933; font: 17px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif" transform="translate(87.455938 324.879921)">(ligne de crédit)</text>
      </g>
     </g>
     <g id="ytick_4">
      <g id="line2d_18"/>
      <g id="text_12">
-      <text style="font-size: 17px; font-family: 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; fill: #1f2933" transform="translate(7.2 411.061425)">Assurance non plafonnée</text>
-      <text style="font-size: 17px; font-family: 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; fill: #1f2933" transform="translate(87.33375 431.466074)">(option d'achat)</text>
+      <text style="fill: #1f2933; font: 17px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif" transform="translate(7.2 412.186513)">Assurance non plafonnée</text>
+      <text style="fill: #1f2933; font: 17px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif" transform="translate(87.33375 431.222794)">(option d'achat)</text>
      </g>
     </g>
    </g>
    <g id="patch_11">
     <path d="M 226.345 461.795937 
-L 226.345 45.995938 
+L 226.345 45.995937 
 " style="fill: none; stroke: #7b8794; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
    </g>
    <g id="patch_12">
@@ -250,48 +250,48 @@ L 970.3264 461.795937
 " style="fill: none; stroke: #7b8794; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
    </g>
    <g id="text_13">
-    <text style="font-weight: 700; font-size: 19px; font-family: 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: start; fill: #1f2933" x="378.894335" y="99.113175" transform="rotate(-0 378.894335 99.113175)">0,6 %  (327 USDC)</text>
+    <text style="fill: #1f2933; font: 700 19px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: start" x="376.601241" y="99.42044" transform="rotate(-0 376.601241 99.42044)">0,6 %  (323 USDC)</text>
    </g>
    <g id="text_14">
-    <text style="font-size: 18px; font-family: 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: start; fill: #1f2933" x="589.035933" y="205.692985" transform="rotate(-0 589.035933 205.692985)">0,5 % à 1,5 %</text>
+    <text style="fill: #1f2933; font: 18px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: start" x="589.035933" y="205.623376" transform="rotate(-0 589.035933 205.623376)">0,5 % à 1,5 %</text>
    </g>
    <g id="text_15">
-    <text style="font-size: 18px; font-family: 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: start; fill: #1f2933" x="705.283026" y="312.171858" transform="rotate(-0 705.283026 312.171858)">0,5 % à 2,0 %</text>
+    <text style="fill: #1f2933; font: 18px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: start" x="705.283026" y="312.102249" transform="rotate(-0 705.283026 312.102249)">0,5 % à 2,0 %</text>
    </g>
    <g id="text_16">
-    <text style="font-size: 18px; font-family: 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: start; fill: #1f2933" x="833.058196" y="418.650732" transform="rotate(-0 833.058196 418.650732)">2,2 % à 2,5 %</text>
+    <text style="fill: #1f2933; font: 18px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: start" x="833.643128" y="418.581122" transform="rotate(-0 833.643128 418.581122)">2,2 % à 2,6 %</text>
    </g>
    <g id="text_17">
-    <text style="font-weight: 700; font-size: 26px; font-family: 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: start; fill: #1f2933" x="226.345" y="27.995937" transform="rotate(-0 226.345 27.995937)">La protection coûte 0,6 % de la facture, ~4 fois moins qu'une option</text>
+    <text style="fill: #1f2933; font: 700 26px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: start" x="226.345" y="27.995937" transform="rotate(-0 226.345 27.995937)">La protection coûte 0,6 % de la facture, ~4 fois moins qu'une option</text>
    </g>
    <g id="legend_1">
     <g id="patch_13">
-     <path d="M 685.389681 71.493594 
-L 715.389681 71.493594 
-L 715.389681 60.993594 
-L 685.389681 60.993594 
+     <path d="M 685.392025 71.493594 
+L 715.392025 71.493594 
+L 715.392025 60.993594 
+L 685.392025 60.993594 
 z
 " style="fill: #2b7bba"/>
     </g>
     <g id="text_18">
-     <text style="font-size: 15px; font-family: 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: start; fill: #1f2933" x="727.389681" y="71.493594" transform="rotate(-0 727.389681 71.493594)">Rémunération du pool</text>
+     <text style="fill: #1f2933; font: 15px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: start" x="727.392025" y="71.493594" transform="rotate(-0 727.392025 71.493594)">Rémunération du pool</text>
     </g>
     <g id="patch_14">
-     <path d="M 685.389681 94.594766 
-L 715.389681 94.594766 
-L 715.389681 84.094766 
-L 685.389681 84.094766 
+     <path d="M 685.392025 94.110781 
+L 715.392025 94.110781 
+L 715.392025 83.610781 
+L 685.392025 83.610781 
 z
 " style="fill: #9ecae1"/>
     </g>
     <g id="text_19">
-     <text style="font-size: 15px; font-family: 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: start; fill: #1f2933" x="727.389681" y="94.594766" transform="rotate(-0 727.389681 94.594766)">Rendement perdu sur le dépôt</text>
+     <text style="fill: #1f2933; font: 15px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; text-anchor: start" x="727.392025" y="94.110781" transform="rotate(-0 727.392025 94.110781)">Rendement perdu sur le dépôt</text>
     </g>
    </g>
   </g>
   <g id="text_20">
-   <text style="font-size: 13px; font-family: 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; fill: #7b8794" transform="translate(115.94776 537.472383)">Facture de 1 000 000 MXN (≈ 54 873 USDC), protection ±10 %, taux en dur : USD 4 % / MXN 7 %. Option : prime calculée (vol du peso 11 % mesurée sur 5 ans, à 13 %).</text>
-   <text style="font-size: 13px; font-family: 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif; fill: #7b8794" transform="translate(115.94776 553.595937)">Banque et fintechs : ordres de grandeur du marché, non vérifiés devise par devise. Sans couverture : coût 0, mais un mouvement courant de 5,4 % coûte ≈ 2 990 USDC.</text>
+   <text style="fill: #7b8794; font: 13px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif" transform="translate(115.94776 538.414781)">Facture de 1 000 000 MXN (≈ 55 013 USDC), protection ±10 %, taux Etherfuse : USD 3,6 % / MXN 5,55 %. Option : prime calculée (vol du peso 11 % mesurée sur 5 ans, à 13 %).</text>
+   <text style="fill: #7b8794; font: 13px 'DejaVu Sans', 'Bitstream Vera Sans', 'Computer Modern Sans Serif', 'Lucida Grande', 'Verdana', 'Geneva', 'Lucid', 'Arial', 'Helvetica', 'Avant Garde', sans-serif" transform="translate(115.94776 553.595937)">Banque et fintechs : ordres de grandeur du marché, non vérifiés devise par devise. Sans couverture : coût 0, mais un mouvement courant de 5,4 % coûte ≈ 2 998 USDC.</text>
   </g>
  </g>
  <defs>

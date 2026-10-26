@@ -10,7 +10,7 @@
 - ✅ **Tout le contrat est dans `main`** et redéployé (`6d760a1`) : Pricing (fixing, erreurs 300-312), Paiement (`settle` au fixing, `time_factor` 25 920), tranches. 143 tests verts. `crash.sh` et le mémo front mergés.
 - ✅ **`sim/` commité** (`a6a56e0`, local) ; **`sync-rates.sh` commité** (`7e8aee4`, local). Rien de poussé depuis.
 - ✅ **Décision d'Hugo (25/10 soir)** : taux Etherfuse adoptés et **figés** via un fichier commité `scripts/rates.snapshot` ; `setup-testnet.sh` lit ce fichier et n'appelle plus l'API. Push sur `feat/pricing` (pas `main`) ; Hugo merge, redéploie et fige les chiffres.
-- ⬜ 🔴 **En cours : §9** (snapshot des taux, puis chiffres figés partout).
+- ✅ **§9 fait** : snapshot des taux, redéploiement (quote rejouée à 55 012,81), chiffres figés dans README, mémo front, `sim/` et `crash.sh`.
 - ⬜ Ensuite : slides et objections (§6, §7) · écriture réelle de `crash.sh` par Hugo (§4.1).
 
 **Chiffres de référence de la démo (taux Etherfuse 25/10 : USD 360, MXN 555, spot 0,055, 90 j, ±10 %)** : forward `5501281368668` · prix figé **55 012,81** · dépôt **5 501,28** · payé après +12 % **56 098,72** (sans protection 61 600). Forward sans spread `5473911809619` (0,05474). Anciens chiffres (taux en dur 400/700) : 54 873,05 / 5 487,31 / 56 112,69.
@@ -82,13 +82,13 @@ F = S × (1 + r_USD·t) / (1 + r_dev·t)      t = duration_secs / 31_536_000
 - ✅ `set_rate(currency, bps)` : `bps ≤ 10_000` (100 %/an, ARS peut être haut), stocker `Rate(currency)`
 - ✅ `set_spread(bps)` : `bps ≤ 500`
 - ✅ Valeurs sourcées (noter la source dans un commentaire + dans le deck) :
-  | Devise | Taux directeur ~oct. 2026 | bps |
-  |---|---|---|
-  | USD | Fed funds ≈ 4 % | 400 |
-  | MXN | Banxico ≈ 7 % | 700 |
-  | BRL | Selic ≈ 10,5 % | 1050 |
-  | ARS | Pas de taux directeur depuis la fin des LEFI (pilotage par agrégats) ; proxy marché : plazo fijo 30 j 16–24 % (Banco Nación 19,25 %, La Nación 21/10/2026), BADLAR ≈ 22 % (ARCA, 20/09/2026) | 2200 |
-  | EUR | BCE ≈ 2 % | 200 |
+  | Devise | Taux directeur ~oct. 2026 | bps (repli en dur) | appliqué (Etherfuse 25/10, `scripts/rates.snapshot`) |
+  |---|---|---|---|
+  | USD | Fed funds ≈ 4 % | 400 | 360 (USTRY) |
+  | MXN | Banxico ≈ 7 % | 700 | 555 (CETES) |
+  | BRL | Selic ≈ 10,5 % | 1050 | 1148 (TESOURO) |
+  | ARS | Pas de taux directeur depuis la fin des LEFI (pilotage par agrégats) ; proxy marché : plazo fijo 30 j 16–24 % (Banco Nación 19,25 %, La Nación 21/10/2026), BADLAR ≈ 22 % (ARCA, 20/09/2026) | 2200 | 2200 (en dur, absent d'Etherfuse) |
+  | EUR | BCE ≈ 2 % | 200 | 210 (EUROB) |
   → vérifier les chiffres réels avant la vidéo, les mettre dans `scripts/setup-testnet.sh` via Hugo (§5).
 
 ### 1.6 ✅ `extend_ttl`
@@ -157,7 +157,7 @@ Tests à retirer de `#[ignore]` :
 
 > **Changement du 25/10 soir :** tout le front est à Hugo (`TODO.md`). Les cases ci-dessous deviennent ce qu'Hugo doit savoir pour coder `QuoteCard` / `CrashButton` ; notre livrable est le **mémo** ci-dessous.
 
-- ✅ 🔴 **Mémo front pour Hugo** → `docs/memo-front-pricing.md` (extraits TS vérifiés contre le testnet le 25/10, 21:59 UTC) : lecture `lastprice` sur Reflector et sur le mock (simulation, `Asset::Other("MXN")`, i128 → bigint, 14 décimales), appel `quote` en simulation (champs et décimales de `Quote`), durée ≥ 1 s (`open` refuse 0), table des codes 300-311 (§1.7), coût de la protection (§7), avertissement prix > 900 s → bouton « Rafraîchir le cours ».
+- ✅ 🔴 **Mémo front pour Hugo** → `docs/memo-front-pricing.md` (extraits TS vérifiés contre le testnet le 25/10, 21:59 UTC) : lecture `lastprice` sur Reflector et sur le mock (simulation, `Asset::Other("MXN")`, i128 → bigint, 14 décimales), appel `quote` en simulation (champs et décimales de `Quote`), durée ≥ 1 s (`open` refuse 0), table des codes 300-312 (§1.7), coût de la protection (§7), avertissement prix > 900 s → bouton « Rafraîchir le cours ».
 
 Dépend de `shared/wallet.ts` et `shared/contract.ts` (Hugo, 🔴). En attendant : appeler le contrat en **simulation** directement avec `@stellar/stellar-sdk` (`rpc.Server.simulateTransaction`), ce qui ne requiert pas de wallet pour `quote` et `lastprice`.
 
@@ -168,7 +168,7 @@ Dépend de `shared/wallet.ts` et `shared/contract.ts` (Hugo, 🔴). En attendant
   ```
 - ⬜ `pricing/oracle.ts` : `readSpot(contractId, currency)` → simulation de `lastprice({Other: currency})` sur **Reflector** (`config.reflectorFxId`) ET sur le mock (`config.mockOracleId`). Affichage : « Cours réel (Reflector) : 1 MXN = 0,0550 $ » + « Cours de démo (oracle de test) » quand ils divergent.
 - ⬜ `pricing/quote.ts` : simulation de `pool.quote(currency, side, notional, duration, cap)` → `Quote { spot, forward_rate, usdc_cost, margin }` ; décodage des `i128` (14 et 7 déc.) en helpers `fmtPrice14`, `fmtAmount7`.
-- ⬜ Rendu, zéro jargon : « Prix figé : vous paierez **54 873 USDC** quoi qu'il arrive » · « Protection ±10 % » · « Dépôt de garantie : 5 487 USDC (restitué à l'échéance, ± l'écart) » · petit texte « taux à terme = cours du jour ajusté de l'écart de taux MXN 7 % / USD 4 % ».
+- ⬜ Rendu, zéro jargon : « Prix figé : vous paierez **55 013 USDC** quoi qu'il arrive » · « Protection ±10 % » · « Dépôt de garantie : 5 501 USDC (restitué à l'échéance, ± l'écart) » · petit texte « taux à terme = cours du jour ajusté de l'écart de taux MXN 5,55 % / USD 3,6 % ».
 - ⬜ États : chargement, erreur (`cap below minimum` → message « protection minimale pour le peso : 5 % »), rafraîchissement quand les props changent (debounce 300 ms).
 - ⬜ Exposer `onQuote` pour que Paiement récupère `margin` (montant à approuver dans Freighter).
 
@@ -197,12 +197,12 @@ Dépend de `shared/wallet.ts` et `shared/contract.ts` (Hugo, 🔴). En attendant
 
 ### 4.2 ✅ `sim/` (chiffres pour le deck)
 Une commande : `~/.venvs/fistea-sim/bin/python sim/run_all.py` (venv hors du dépôt, `sim/requirements.txt`) ; `--rates etherfuse` régénère tout avec les taux Etherfuse (360 / 555 / 1148 / 210). Mode d'emploi, chiffres clés, hypothèses et images du deck : `sim/README.md`.
-- ✅ `sim/contract.py` : portage exact en entiers de `forward_rate` (floor puis spread ceil/floor), `to_usdc`, `margin_for` (ceil) et `pnl` (div_euclid, borné à ±marge). Auto-test au lancement : forward `5487305413412`, coût `548730541341`, marge `54873054135`, +12 % → 61 600,00 / 56 112,69. Tout retrouvé.
+- ✅ `sim/contract.py` : portage exact en entiers de `forward_rate` (floor puis spread ceil/floor), `to_usdc`, `margin_for` (ceil) et `pnl` (div_euclid, borné à ±marge). Auto-test au lancement : non-régression sur les taux en dur 400/700 (forward `5487305413412`, coût `548730541341`, marge `54873054135`, +12 % → 61 600,00 / 56 112,69) et chiffres de la vidéo aux taux du snapshot (forward `5501281368668`, 55 012,81 / 5 501,28 / 56 098,72). Tout retrouvé.
 - ✅ `sim/pnl.py` → `out/cout-total.png` / `.svg` : coût total de la facture de −20 % à +20 %, sans protection et ±5 / 10 / 20 %, point de la démo annoté.
-- ✅ Chiffres de la démo (`out/chiffres-demo.md`) : les bons sont **+6 727 / +1 240** par rapport au prix figé à 90 j (et non ≈ 6 600 / 1 100), plus deux colonnes : spot Reflector (0,05325) et taux Etherfuse. `docs/memo-front-pricing.md` corrigé (avertissement « 60 s » retiré, chiffres Reflector exacts) ; restent `TODO.md:222` (à Hugo) et `TODO.md:162` (historique 60 s).
+- ✅ Chiffres de la démo (`out/chiffres-demo.md`) : les bons sont **+6 587 / +1 086** par rapport au prix figé à 90 j (taux Etherfuse), plus deux colonnes : spot Reflector (0,05325) et l'autre jeu de taux. `docs/memo-front-pricing.md` corrigé (avertissement « 60 s » retiré, chiffres Reflector exacts) ; restent `TODO.md:222` (à Hugo) et `TODO.md:162` (historique 60 s).
 - ✅ Calibration (`out/calibration.md`) : vol mesurée sur les cours BCE et le dollar officiel argentin (1 an / 5 ans, `sim/data/`). Plafonds minimums cohérents (0,8 à 1,1 mouvement typique de 90 j) : BRL 7 % bon, MXN 5 % un peu juste (6 % suggéré), EUR 3 % aussi (4 %), ARS 15 % large sauf dévaluation (limite par devise). Le spread de 0,5 % ne paie pas le risque d'un carnet à sens unique (il faudrait ≈ 4 %) : il rémunère le service une fois le risque compensé puis couvert.
 - ✅ Tranches (`out/tranches.md`) : le tableau du README est reproduit à l'identique (il vient de `small_pool.py`, intégré avec `tranches2.py` / `netting.py`) ; `lp_annual.py` nettoyé (`out/lp-annuel.md`, exploration).
-- ✅ Coût de la protection (`out/cout-protection.png` + `.md`) : 327 USDC = 0,60 % (273 de spread + 54 de rendement perdu) ; option non plafonnée 2,15-2,55 % (Garman-Kohlhagen, vol mesurée / 13 %) ; banque et fintechs = hypothèses.
+- ✅ Coût de la protection (`out/cout-protection.png` + `.md`) : 323 USDC = 0,59 % (274 de spread + 49 de rendement perdu) ; option non plafonnée 2,15-2,55 % (Garman-Kohlhagen, vol mesurée / 13 %) ; banque et fintechs = hypothèses.
 
 ### 4.3 ✅ Push oracle des taux (Etherfuse) : `scripts/sync-rates.sh`
 - ✅ Source publique, sans clé : `GET https://api.etherfuse.com/lookup/tokens/cost` (objet indexé par symbole ; on lit `current_basis_points`, rendement annuel en bps, déjà au format de `set_rate`). Surchargeable par `ETHERFUSE_URL`.
@@ -278,14 +278,14 @@ Une commande : `~/.venvs/fistea-sim/bin/python sim/run_all.py` (venv hors du dé
 
 ## 6. Pitch (slides Pricing, à donner à Hugo dimanche soir)
 
-- ⬜ Slide « Le prix figé est un taux à terme, pas le cours du jour » : formule, exemple MXN (0,0550 → 0,0546), « sans ça, un arbitragiste gagne sans risque contre le pool ».
+- ⬜ Slide « Le prix figé est un taux à terme, pas le cours du jour » : formule, exemple MXN : 0,0550 → 0,05474 (CETES 5,55 % vs USTRY 3,6 %, Etherfuse) → 0,05501 avec le spread de 0,5 %, « sans ça, un arbitragiste gagne sans risque contre le pool ».
 - ⬜ Slide « Un tunnel de change à perte max connue » : schéma collar centré sur F, zone plate ±cap, « valeur ≈ 0 à l'ouverture, le spread rémunère le pool », courbe `sim/out/cout-total.png` ✅.
 - ⬜ Réponses aux objections (1 phrase chacune, notes du pitch) :
   - plafond vs mouvements de 15 % → la PME choisit, minimum par devise, alternative réelle = aucune couverture
   - marge immobilisée vs banque → pas de ligne de crédit, pas d'appel de marge, pas de défaut
   - anti-sélection → limites par devise, skew en roadmap
-  - taux en dur → limite assumée, lecture onchain en roadmap, valeurs sourcées
-  - fixing manipulable → TWAP / bornes en roadmap, oracle Reflector multi-sources
+  - taux poussés par l'admin → rendements Etherfuse (USTRY, CETES…) figés dans `scripts/rates.snapshot` ; lecture onchain en roadmap
+  - fixing manipulable → TWAP / bornes en roadmap, oracle Reflector
   - réglementation des dérivés → MVP testnet, KYC via anchors en roadmap
 
 ---
@@ -295,12 +295,12 @@ Une commande : `~/.venvs/fistea-sim/bin/python sim/run_all.py` (venv hors du dé
 Le README a gagné les sections *Ce que paie la PME*, *Tranche senior et tranche junior*, *Où dort l'argent du pool* et *Couvrir le portefeuille, pas chaque contrat* (non commitées, sur `feat/pricing`). Conséquences pour Pricing :
 
 - ✅ Oracle : Reflector FX reste le choix (seul oracle de change SEP-40 sur Stellar). Mainnet `CBKGPWGKSKZF52CFHMTRR23TBWTPMRDIYZ4O2P5VS65BMHYH4DXMCJZC` = **24 devises** vérifiées onchain (EUR, GBP, CAD, JPY, CNY, HKD, KRW, INR, PHP, TRY, RUB, ZAR, MXN, BRL, ARS, COP, CLP, PEN, CRC, VES, NGN, KES, CDF, XAU), testnet = 9. Pyth = 2ᵉ source possible en roadmap (pull, non SEP-40) ; Chainlink, Band, DIA, RedStone : pas de change fiat confirmé sur Stellar.
-- ✅ `r_USD` = taux des bons du Trésor US tokenisés (~4 %, coût d'opportunité du capital mis en couverture) : cohérent avec `USD 400`, rien à changer dans le code.
+- ✅ `r_USD` = taux des bons du Trésor US tokenisés (rendement USTRY d'Etherfuse : 3,6 % au 25/10, `scripts/rates.snapshot`, coût d'opportunité du capital mis en couverture) : cohérent avec `USD 360`, rien à changer dans le code.
 - ⬜ (option) `forward_rate` utilise `twap` de Reflector au lieu de `lastprice` pour le fixing de `settle` (parade anti-manipulation citée dans le README). Hors MVP si pas le temps.
 - ⬜ `QuoteCard` : afficher le **coût de la protection** (spread + rendement perdu sur la marge ≈ 0,6 % pour 90 j) à côté du prix figé.
 - ✅ `sim/` : simulations de la discussion intégrées (`tranches.py` reprend `small_pool.py`, `tranches2.py`, `netting.py` ; `lp_annual.py`), en plus de `pnl.py` (§4.2).
 - ⬜ Slides (§6), en plus des deux prévues :
-  - « Ce que paie la PME » : 0,60 % pour 90 j vs forward bancaire 0,5-2 % (avec ligne de crédit) vs option 2,2-2,5 % → image `sim/out/cout-protection.png` ✅ ;
+  - « Ce que paie la PME » : 0,59 % pour 90 j vs forward bancaire 0,5-2 % (avec ligne de crédit) vs option 2,2 à 2,6 % → image `sim/out/cout-protection.png` ✅ ;
   - « Comment le pool se couvre » : netting → détention de la devise en CETES (le rendement local paie l'écart forward/spot) → limites ; couverture par portefeuille avec seuil ;
   - « Senior / junior » : senior 4,5 % protégé par construction ; junior ≈ 13,8 % à 80 contrats de 10 k$ par trimestre (tableau du README), 15 % avec 1 M$ compensé par trimestre, 6,5 % sans (`sim/out/tranches.md`) ;
   - « 24 devises dès le mainnet » (liste Reflector).
@@ -315,14 +315,14 @@ Le README a gagné les sections *Ce que paie la PME*, *Tranche senior et tranche
 - ✅ Décidé le 25/10 soir : Clément prend le côté `settle` (+ facteur d'accélération, option b : facteur 25 920 → 90 j en 5 min réelles), nous `fixing` + historique du mock.
 - ✅ `pricing::fixing(env, &currency, maturity) -> i128` : `price(asset, maturity)` de l'oracle ; 312 `NoFixing` si pas de prix, 301 si ≤ 0, 302 si le dernier prix avant l'échéance a plus de 900 s. 5 tests sur le vrai mock-oracle (crash avant l'échéance compté, prix après l'échéance ignoré, limite 900 s, 302, 312 ×2). Vérifié sur Reflector testnet : `price(ts)` arrondit à la période de 300 s, `null` si futur, historique ok à −12 h, `null` à −23 h.
 - ✅ `contracts/mock-oracle` (point 9 de la section Pricing de `TODO.md`) : `set_price` empile l'historique (64 prix max), `price(asset, ts)` = dernier prix posé à `ts` ou avant, `None` si futur ; `lastprice` inchangé. 2 tests.
-- ⬜ Clément remplace `pricing::spot` par `pricing::fixing(env, &hedge.currency, hedge.maturity)` dans `settle` (`hedge.rs:147`) + ses tests ; ensuite retirer le `#[allow(dead_code)]` de `fixing`.
-- ⬜ Hugo : redéployer le mock-oracle (nouvelle fonction `price`) et le pool après le merge.
+- ✅ Clément remplace `pricing::spot` par `pricing::fixing(env, &hedge.currency, hedge.maturity)` dans `settle` (`hedge.rs:147`) + ses tests ; ensuite retirer le `#[allow(dead_code)]` de `fixing`.
+- ✅ Hugo : redéployer le mock-oracle (nouvelle fonction `price`) et le pool après le merge.
 - Démo : le crash doit avoir lieu **avant l'échéance réelle** (5 min) ; plus besoin de rafraîchir le mock avant `settle`, mais toujours avant `open_hedge`.
 - Bonus : règle aussi la fraîcheur du prix au `settle` pendant la démo.
 
-### 8.2 ⬜ Durée de la démo vs prix affiché (Hugo + Clément + nous)
-La vidéo raconte 90 j (54 873 USDC) mais ouvre à 60 s (≈ 55 275 USDC). Options : a. assumer « échéance de démo 60 s » · b. facteur d'accélération (prix sur 90 j, échéance réelle 60 s ; à coder dans `hedge.rs`) · c. deux couvertures.
-- ⬜ Donner notre avis : côté Pricing, b ne demande **rien** (`forward_rate` prend la durée annoncée) ; c'est le calcul de `maturity` dans `hedge.rs` qui change. b montre l'écart forward / spot, le cœur du pricing.
+### 8.2 ✅ Durée de la démo vs prix affiché (Hugo + Clément + nous)
+La vidéo racontait 90 j (54 873 USDC à l'époque, taux 400/700) mais ouvrait à 60 s (≈ 55 275 USDC). Décidé : option b, livrée (`time_factor` 25 920). Options : a. assumer « échéance de démo 60 s » · b. facteur d'accélération (prix sur 90 j, échéance réelle 60 s ; à coder dans `hedge.rs`) · c. deux couvertures.
+- ✅ Donner notre avis : côté Pricing, b ne demande **rien** (`forward_rate` prend la durée annoncée) ; c'est le calcul de `maturity` dans `hedge.rs` qui change. b montre l'écart forward / spot, le cœur du pricing.
 
 ### 8.3 ⬜ Etherfuse (rendement du capital libre, attribué à Pricing dans `TODO.md`)
 - ✅ 25/10 soir : Etherfuse adopté pour les **taux d'intérêt** (push oracle figé, §9). Le **placement** du capital libre reste à trancher ci-dessous.
@@ -338,14 +338,14 @@ Condition d'Hugo : **`setup-testnet.sh` n'appelle pas l'API**. `sync-rates.sh` �
 - ✅ `setup-testnet.sh` (accord d'Hugo) : plus d'appel à `sync-rates.sh` ni à l'API ; lit `scripts/rates.snapshot` → `set_rate` par devise ; repli sur les taux en dur si le fichier manque ou est vide. Lecture testée sous le bash 3.2 de macOS (snapshot / absent / vide).
 - ✅ **Un seul lancement** le 25/10 à 22:47 UTC : USD 360 · MXN 555 · BRL 1148 · ARS 2200 (en dur) · EUR 210, inchangés depuis le premier relevé, donc les chiffres annoncés par Hugo tiennent. ⚠️ Vérifier que l'API donne toujours USD 360 / MXN 555 : sinon les chiffres annoncés par Hugo (55 012,81 / 5 501,28 / 56 098,72) changent → recalculer et le prévenir **avant** qu'il fige.
 - ✅ Contrôle croisé : `sim/contract.py` avec les taux du snapshot (identiques au jeu `etherfuse`) retrouve exactement forward `5501281368668`, 55 012,81, 5 501,28, 56 098,72.
-- ⬜ Commit + **push sur `feat/pricing`** (pas `main`) : `7e8aee4` (sync-rates), `a6a56e0` (sim), le snapshot et le setup. Prévenir Hugo.
-- ⬜ Après le redéploiement d'Hugo : `quote` MXN 1 000 000 / 90 j / ±10 % en simulation = forward `5501281368668`, coût `550128136866`, marge `55012813687`.
-- ⬜ Chiffres figés partout (demande d'Hugo) :
-  - ⬜ `README.md` (accord d'Hugo) : 54 873 → 55 012,81, 5 487 → 5 501,28, 56 112,69 → 56 098,72, et les phrases qui disent « prix figé sous le cours du jour » (avec ces taux, le prix figé spread compris est **au-dessus** du spot : l'écart de taux sur 90 j, 0,48 %, est plus petit que le spread de 0,5 %).
-  - ⬜ `sim/` : `--rates etherfuse` par défaut (ou lu depuis `scripts/rates.snapshot`), régénérer `out/` (graphiques compris).
-  - ⬜ `docs/memo-front-pricing.md` : valeurs de référence (§2, §3, §8).
-  - ⬜ `scripts/crash.sh` : constantes du prorata `5487305` / `5611269` → `5501281` / `5609872`.
-  - ⬜ Cette to-do : §1.5 (sources des taux), §6 (exemple de slide : 0,0550 → **0,05474** sans spread, puis +0,5 % de spread).
+- ✅ Commit + **push sur `feat/pricing`** (pas `main`) : `7e8aee4` (sync-rates), `a6a56e0` (sim), le snapshot et le setup. Prévenir Hugo.
+- ✅ Après le redéploiement d'Hugo : `quote` MXN 1 000 000 / 90 j / ±10 % en simulation = forward `5501281368668`, coût `550128136866`, marge `55012813687`.
+- ✅ Chiffres figés partout (demande d'Hugo) :
+  - ✅ `README.md` (accord d'Hugo) : 54 873 → 55 012,81, 5 487 → 5 501,28, 56 112,69 → 56 098,72, et les phrases qui disent « prix figé sous le cours du jour » (avec ces taux, le prix figé spread compris est **au-dessus** du spot : l'écart de taux sur 90 j, 0,48 %, est plus petit que le spread de 0,5 %).
+  - ✅ `sim/` : `--rates etherfuse` par défaut (ou lu depuis `scripts/rates.snapshot`), régénérer `out/` (graphiques compris).
+  - ✅ `docs/memo-front-pricing.md` : valeurs de référence (§2, §3, §8).
+  - ✅ `scripts/crash.sh` : constantes du prorata `5487305` / `5611269` → `5501281` / `5609872`.
+  - ✅ Cette to-do : §1.5 (sources des taux), §6 (exemple de slide : 0,0550 → **0,05474** sans spread, puis +0,5 % de spread).
   - Clément (demandé par Hugo) : `docs/video-script.md`, `docs/payment-cli.md`.
 
 ---

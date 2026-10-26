@@ -36,7 +36,8 @@ def main(argv=None):
         contract.self_test()
     except AssertionError as e:
         sys.exit(f"ARRÊT : {e}")
-    print("contrat      : valeurs de référence retrouvées (démo : forward 5501281368668, marge 55012813687, 56 098,72)")
+    print("contrat      : valeurs de référence retrouvées (auto-test taux en dur 400/700 : forward 5487305413412 ; "
+          "démo taux Etherfuse : forward 5501281368668, marge 55012813687, 56 098,72)")
     contract.use_rates(args.rates)
     print(f"taux         : {contract.rates_label()}")
 

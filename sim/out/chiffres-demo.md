@@ -26,7 +26,4 @@ La 2ᵉ colonne sert si le mock est réaligné sur Reflector avant l'enregistrem
 
 Chiffres de la vidéo (taux Etherfuse : USD 3,6 % / MXN 5,55 %) : prix figé 55 012,81 · dépôt 5 501,28 · sans protection 61 600,00 (+6 587,19) · avec 56 098,72 (+1 085,90) · crédité 11 002,56.
 
-Mentions périmées trouvées (à corriger par le propriétaire du fichier) :
-
-- `TODO.md:164` : prix figé à 60 s (55 275) au lieu de 55 012,81 à 90 jours
-- `TODO.md:164` : payé total à 60 s (56 072,50) au lieu de 56 098,72
+Aucune mention périmée trouvée dans README.md, docs/video-script.md, TODO.md, docs/memo-front-pricing.md, sim/README.md, scripts/crash.sh, front/src/home/About.tsx.

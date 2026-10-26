@@ -7,11 +7,11 @@ Tout le code ci-dessous est **un seul fichier prêt à copier** dans `front/src/
 
 | | ID |
 |---|---|
-| pool | `CAQY7OYOJTXBAJ6SSUC72EUGWBDDPFENPIDQMCUJZ35YKXUNR7V6YGRK` |
-| mock-oracle | `CARFDCPIC3CYMSGUSONWLS7WDSCMARHNZP4XKMJODGKKHWWCOA7657M3` |
+| pool | `CAXH7TE6BA3LI237FIBK5AWDQ335JKY3KKAGQYRVAVQOIOK4VL64YPXC` (déploiement actuel ; référence : `.env.testnet`) |
+| mock-oracle | `CBBNIAYYP6GBS25HE3DJ46X5VINNV4R2GHR4XBROARAW4EYV6APYEPKK` (idem) |
 | Reflector FX (testnet) | `CCSSOHTBL3LEWUCBBEB5NJFC2OKFRC74OWEIJIZLRJBGAAU4VMU5NV4W` |
 
-Après le prochain redéploiement (merge de `feat/pricing`, `feat/payment`, `feat/tranches`), **seuls les IDs de `.env.testnet` / `front/.env.local` changent** : les noms de fonctions, l'encodage et les décimales restent les mêmes.
+Les IDs vérifiés le 25/10 à 21:59 étaient ceux d'un déploiement antérieur ; à chaque redéploiement, **seuls les IDs de `.env.testnet` / `front/.env.local` changent** : les noms de fonctions, l'encodage et les décimales restent les mêmes.
 
 ---
 
@@ -47,7 +47,6 @@ Simulation de `quote(currency, side, notional, duration_secs, cap_bps) -> Quote`
 | `margin` | 7 | dépôt de garantie | `55012813687` → **5 501,28 USDC** |
 
 **Durée : passer la durée ANNONCÉE** (90 j = `7_776_000`), jamais la durée réelle de la démo. Sur `feat/payment` (Clément, option b) : `open_hedge` calcule le prix sur `duration_secs` et fixe l'échéance réelle à `maintenant + max(duration_secs / time_factor, 1)`. Avec `set_time_factor(25920)`, 90 j → **300 s réelles**. Le compte à rebours se fait sur `get_hedge(id).maturity` (échéance réelle, secondes Unix), pas sur la durée saisie.
-⚠️ Le pool déployé aujourd'hui n'a pas encore `time_factor` : une couverture de 90 j ouverte dessus échoit dans 90 vrais jours. Attendre le redéploiement pour la répétition.
 
 **Durée ≥ 1 s** : `quote` accepte 0 mais `open_hedge` le refuse (204). Imposer au moins 1 s dans le formulaire.
 
@@ -85,8 +84,9 @@ Une simulation qui échoue renvoie un texte qui contient `Error(Contract, #302)`
 | 308 | protection > 50 % | Protection maximale : 50 % |
 | 309-311 | admin (`set_rate`, `set_min_cap`, `set_spread`) | — |
 | 312 | `settle` : pas de cours à l'échéance | Cours de règlement indisponible |
-| 111 | Vault (`feat/tranches`) : dépôt senior / retrait junior qui ferait passer le junior sous son minimum | Dépôt impossible pour l'instant : la part junior du pool est trop faible |
-| 112 | Vault (`feat/tranches`) : retrait de plus de parts senior que détenues | Vous n'avez pas assez de parts senior |
+| 10 | token USDC (SAC) : solde insuffisant au transfert de la marge (`open_hedge`) ou au dépôt LP | Solde USDC insuffisant |
+| 111 | Vault (tranches) : dépôt senior / retrait junior qui ferait passer le junior sous son minimum | Dépôt impossible pour l'instant : la part junior du pool est trop faible |
+| 112 | Vault (tranches) : retrait de plus de parts senior que détenues | Vous n'avez pas assez de parts senior |
 
 Codes 100-112 (Vault), 200-205 (Paiement ; 205 = `set_time_factor` à 0, admin) et #10 (token USDC : solde insuffisant) : table complète dans `docs/payment-cli.md` § « Erreurs à traduire » ; les ajouter au même `ERROR_MESSAGES`.
 Contrôle de l'ordre : `quote` vérifie montant et plafond **avant** de lire l'oracle, donc 305 / 306 / 307 / 308 sortent même si le cours est périmé (vérifié en § 8).
@@ -258,7 +258,9 @@ export const ERROR_MESSAGES: Record<number, string> = {
   307: 'Protection trop faible pour cette devise', // compléter avec le minimum : MIN_CAP_BPS ci-dessous
   308: 'Protection maximale : 50 %',
   312: 'Cours de règlement indisponible',
-  // Vault, tranches (feat/tranches)
+  // Token USDC (SAC) : solde insuffisant (marge de open_hedge, dépôt LP)
+  10: 'Solde USDC insuffisant',
+  // Vault, tranches
   111: 'Dépôt impossible pour l’instant : la part junior du pool est trop faible',
   112: 'Vous n’avez pas assez de parts senior',
 }
@@ -402,5 +404,5 @@ set_price préparé (non signé, non envoyé) : 0,0550 → 0,0616 +12 %, XDR 768
 ```
 
 - `lastprice` Reflector et mock : décodés. Le mock avait 73 min : `quote` renvoie **302**, comme attendu (rafraîchir le cours avant tout devis).
-- Le décodage d'un devis réussi n'a donc pas tourné en direct ce soir ; les valeurs de référence (`5501281368668` / `550128136866` / `55012813687`, taux du snapshot) ont été vérifiées sur le pool redéployé le 25/10 (`docs/todo-pricing.md`, « État »). Pour revérifier : `./scripts/crash.sh --refresh`, puis, dans les 15 min, `quote` depuis le front ou la CLI (`docs/payment-cli.md`) : on doit retrouver ces trois valeurs à l'unité.
+- Le décodage d'un devis réussi n'a donc pas tourné en direct ce soir ; les valeurs de référence (`5501281368668` / `550128136866` / `55012813687`, taux du snapshot) ont été vérifiées sur le pool redéployé le 25/10 (`docs/todo-pricing.md`, « État »). Pour revérifier : remettre le mock à 0,055 (`./scripts/crash.sh --demo`, ou `set_price` 5500000000000 ; `--refresh` repose le cours actuel, qui n'est pas forcément 0,055 sur le testnet), puis, dans les 15 min, `quote` depuis le front ou la CLI (`docs/payment-cli.md`) : on doit retrouver ces trois valeurs à l'unité.
 - `set_price` (crash +12 % et « cours réel ») : construit et simulé avec fx-admin comme source, **non signé, non envoyé**.
