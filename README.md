@@ -4,7 +4,7 @@
 
 > **Lock in today the price of a supplier invoice payable in foreign currency in 90 days. On the due date, your supplier is paid in their currency, at the promised rate.**
 
-**Live demo: [4ward-fx.vercel.app](https://4ward-fx.vercel.app)** (testnet, Freighter wallet)
+**Live demo: [4ward-fx.vercel.app](https://4ward-fx.vercel.app)** (testnet, Freighter wallet) · **Pitch deck: [docs/4ward-pitch-deck.pdf](docs/4ward-pitch-deck.pdf)**
 
 HackMeridian project (Stellar, Lisbon, 25-26/10/2026), **Genesis** path, tracks:
 - **Stellar Unlocked**: *strict receive* path payment USDC → MXN (the supplier receives the exact amount), USDC as a SAC, Soroban events, `require_auth`, entry TTLs;
