@@ -111,6 +111,9 @@ select {
 .bg-vault .bg-vault-canvas {
   position: absolute;
   inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 .page {
   position: relative;
@@ -740,6 +743,14 @@ select {
   width: clamp(80px, 13vh, 130px);
   aspect-ratio: 1;
   flex-shrink: 0;
+  transition: width 0.7s cubic-bezier(0.65, 0, 0.2, 1);
+}
+/* « Hedge an invoice » : le vault devient un globe, plus grand pour lire le trajet */
+.pool-vault.is-globe {
+  width: clamp(150px, 26vh, 250px);
+}
+canvas.vault-globe {
+  display: block;
 }
 .kpis {
   display: grid;
