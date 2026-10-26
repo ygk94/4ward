@@ -52,7 +52,7 @@ Le front n'a ni bouton de crash, ni comparaison côte à côte, ni bouton « Pay
 | À l'écran | Voix off |
 |---|---|
 | `VaultPage` : `PoolPanel` (capital, réservé, libre) + badge « Solvent » de `LpForm` | *Behind Lucía, a pool of dollars covers her and earns a small fee on every lock. It can't go bankrupt: it never promises more than it holds.* |
-| Logos : Stellar · USDC · Reflector · Freighter | *Stablecoins, Reflector, path payments, Freighter: protection and payment on the same Stellar rails.* |
+| Logos : Stellar · USDC · Reflector · Etherfuse · Stellar Wallets Kit | *USDC, Reflector-compatible prices, Etherfuse treasury rates inside the locked price, path payments: protection and payment on the same Stellar rails.* |
 | Slide « Next » : exportateurs en contrepartie · rendement du capital libre · factures couvertes transférables · SDK pour wallets et anchors | *Next: matching importers with exporters, putting idle capital to work, and a "lock the rate" button for every Stellar wallet.* |
 | `<NOM>` + phrase d'accroche | *<NOM>. Lock today's price for tomorrow's invoice.* |
 

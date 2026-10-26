@@ -33,7 +33,7 @@ Le prix reste calculé sur la durée annoncée (`--duration_secs 7776000` = 90 j
 stellar contract invoke --id fx-pool --source-account fx-lp --network testnet -- \
   deposit_lp --lp fx-lp --amount 1000000000000                        # 100 000 USDC
 ```
-Retour : les parts du LP. Contrôle : `-- capacity` → `1000000000000`.
+Retour : les parts du LP. Contrôle : `-- capacity` augmente de `1000000000000` (le setup a déjà déposé 1 000 000 USDC).
 
 ## 2. Lucía bloque son taux (fx-lucia)
 
@@ -100,7 +100,7 @@ stellar tx new path-payment-strict-receive --source-account fx-lucia --network t
   --destination fx-supplier --dest-asset "MXN:$ISSUER" --dest-amount 10000000000000
 ```
 *Strict receive* : le fournisseur reçoit **exactement** 1 000 000 MXN ; Lucía paie au plus `send-max`.
-`send-max` = notionnel × spot + ~0,5 % de marge de glissement (61 600 → 61 910 USDC à +12 %, 59 400 → 59 500 à +8 %).
+`send-max` = notionnel × spot + ~0,5 % de marge de glissement (61 600 → 61 910 USDC à +12 %, 59 400 → 59 700 à +8 %).
 
 ## Lectures (sans signature)
 
@@ -230,7 +230,7 @@ Déploiement de Clément refait avec `./scripts/setup-testnet.sh` de `main` (tau
 | 4 | `set_price` +12 % (rafraîchi) puis `settle` | `position_released` + `hedge_settled` : P&L plafonné 5 527,50, versé 11 055 | [0e7ff537…](https://stellar.expert/explorer/testnet/tx/0e7ff5373925826af2df7b069d9d7e213d7f7240a5a5056053c13b593d995507) |
 | — | 2ᵉ `settle` / id 42 | `#201 AlreadySettled` / `#200 UnknownHedge` | |
 
-Bilan Lucía : 545 130 → 489 057,50 USDC, soit **56 072,50** (le chiffre du script vidéo ; sans protection : 61 600).
+Bilan Lucía : 545 130 → 489 057,50 USDC, soit **56 072,50** (chiffre du script vidéo de l'époque, 60 s ; sans protection : 61 600).
 Après `settle` : USDC du pool = `total_assets` = `capacity` = 994 472,50, exposition MXN à 0.
 
 Note Windows : `setup-testnet.sh` appelle `python3`, qui sous Windows ouvre le Microsoft Store. Contournement : un alias `python3` → `python` dans le `PATH` le temps du script.

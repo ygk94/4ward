@@ -49,7 +49,7 @@ Règles de calcul : tout en `i128`, **arrondis en faveur du pool** (P&L payé pa
 - ✅ (`docs/video-script.md`) Rédiger les 5 temps du § Démo du TODO : texte dit, écran montré, action, durée
 - ✅ Chiffres exacts de la démo (facture, prix figé, marge, crash +12 %, coût avec et sans protection)
 - ✅ Phrase honnête sur les 2 signatures (`settle` puis path payment, atomicité en roadmap)
-- ⬜ Livrer à Hugo
+- ✅ Livrer à Hugo
 
 ## 4. `open`
 
@@ -58,7 +58,7 @@ Règles de calcul : tout en `i128`, **arrondis en faveur du pool** (P&L payé pa
 - ✅ Code : `require_auth(owner)`, `check_cap`, `forward_rate`, calcul de marge, transfert owner → contrat, `vault::reserve`, `NextId`, stockage persistant + `extend_ttl`, retour de l'id
 - ✅ Test bout en bout `open_then_settle_full_flow` (ouverture puis règlement à +8 %)
 - ✅ Branché sur le vrai Vault (`main`) : `vault::open_position(&hedge)` dans `open`, `vault::close_position(&hedge)` dans `settle` (exposition par devise, limite par devise #108)
-- ✅ Codes d'erreur `HedgeError` 200+ (`UnknownHedge`, `AlreadySettled`, `NotMatured`, `InvalidNotional`, `InvalidDuration`) : les textes de `panic!` sont effacés dans le WASM, le front a besoin des codes
+- ✅ Codes d'erreur `HedgeError` 200+ (`UnknownHedge`, `AlreadySettled`, `NotMatured`, `InvalidNotional`, `InvalidDuration`, `InvalidTimeFactor` (205)) : les textes de `panic!` sont effacés dans le WASM, le front a besoin des codes
 - ✅ Fixtures de test sur les vrais appels (`deposit_lp`, `open_hedge`, `total_assets`, `capacity`) ; tests marqués `#[ignore = "attend Pricing"]`
 - ✅ Refus sans la signature du owner : `open_refused_without_owner_signature` (signé par le fournisseur ou par personne → refusé, rien ne bouge ; témoin signé par Lucía → passe ; le test casse si on retire `require_auth`) et `settle_needs_no_signature`
 
@@ -70,10 +70,10 @@ Règles de calcul : tout en `i128`, **arrondis en faveur du pool** (P&L payé pa
 
 ## 6. PR vers `main` 🔴
 
-- ⬜ Retirer les `#[ignore]` des tests Paiement
-- ⬜ Aucun stub Vault / Pricing dans le diff (`git diff main --stat` ne doit montrer que `hedge.rs`, `test.rs`, `Cargo.toml` du pool, `docs/`)
-- ⬜ `cargo test` + `stellar contract build` OK, CI verte
-- ⬜ Prévenir Hugo : les tests Paiement ne passeront qu'une fois Vault et Pricing fusionnés
+- ✅ Retirer les `#[ignore]` des tests Paiement
+- ✅ Aucun stub Vault / Pricing dans le diff (`git diff main --stat` ne doit montrer que `hedge.rs`, `test.rs`, `Cargo.toml` du pool, `docs/`)
+- ✅ `cargo test` + `stellar contract build` OK, CI verte
+- ✅ Prévenir Hugo : les tests Paiement ne passeront qu'une fois Vault et Pricing fusionnés
 
 ## 7. Parcours CLI testnet 🔴 pour le front d'Hugo
 
@@ -89,7 +89,7 @@ Règles de calcul : tout en `i128`, **arrondis en faveur du pool** (P&L payé pa
 
 - ✅ Vérifier la profondeur de l'offre (100 000 000 MXN à 0,055) pour 1 000 000 MXN
 - ✅ Réalignement testé : `manage-sell-offer --offer-id <id> --price "297:5000"` (0,0594)
-- ✅ 🔴 Après le crash +12 %, **réaligner l'offre sur le nouveau prix du mock** (commande pour Hugo dans `docs/payment-cli.md` § 5, au lieu d'un script), sinon le coût total de Lucía ne tombe plus sur le prix figé. Script `scripts/align-dex.sh` (nouveau fichier, le mien)
+- ✅ 🔴 Après le crash +12 %, **réaligner l'offre sur le nouveau prix du mock** (commande pour Hugo dans `docs/payment-cli.md` § 5, au lieu d'un script), sinon le coût total de Lucía ne tombe plus sur le prix figé. Pas de script : commandes manuelles dans `docs/payment-cli.md` § 5
 
 ## 9. Après le merge
 
@@ -107,7 +107,7 @@ Règles de calcul : tout en `i128`, **arrondis en faveur du pool** (P&L payé pa
 
 - ✅ Point 2, durée de démo (option b) : `set_time_factor` / `time_factor` (admin, 1 par défaut, #205 si 0, événement `time_factor_set`) ; prix sur la durée annoncée, échéance réelle = durée / facteur (au moins 1 s). Démo : 25 920 → 90 jours en 300 s ; chiffres du script et de `payment-cli.md` passés à 90 jours
 - ✅ Point 1, fixing à l'échéance : `settle` appelle `pricing::fixing(env, &hedge.currency, hedge.maturity)` (feat/pricing de Lancelot fusionné dans feat/payment) ; tests : crash avant l'échéance compté et prix posé après ignoré, #302 si oracle muet à l'échéance, #312 si l'historique ne remonte plus ; `#[allow(dead_code)]` de `fixing` retiré
-- ✅ Validés sur testnet : fixing (prix posé après l'échéance ignoré) et scénario complet de la vidéo en mode démo (90 jours en 5 min, coût total 56 112,69 au centime)
+- ✅ Validés sur testnet : fixing (prix posé après l'échéance ignoré) et scénario complet de la vidéo en mode démo (90 jours en 5 min, coût total 56 112,69 au centime, taux en dur de l'époque ; 56 098,72 avec les taux Etherfuse)
 
 
 ## 11. Améliorations
@@ -120,7 +120,7 @@ Règles de calcul : tout en `i128`, **arrondis en faveur du pool** (P&L payé pa
 
 | Avec | Sujet |
 |---|---|
-| Pricing + Hugo | `spot` refuse un prix de plus de 300 s, et `forward_rate` le lit : le prix du mock doit être remis à jour juste avant **`open_hedge`** et juste avant **`settle`** dans la démo (vu sur testnet : prix posé 765 s avant l'ouverture) |
+| Pricing + Hugo | `spot` refuse un prix de plus de 900 s (`MAX_PRICE_AGE_SECS`), et `forward_rate` le lit : le prix du mock doit être remis à jour juste avant **`open_hedge`** ; au `settle`, le fixing exige un prix posé moins de 900 s avant l'échéance (le crash le fait) (vu sur testnet : prix posé 765 s avant l'ouverture) |
 | Pricing | Erreurs de Pricing en `#[contracterror]` (codes 300+ ?) pour que le front distingue « plafond trop bas » / « prix trop ancien » |
 | Pricing | Formule du forward : le README a raison (`r_USD / r_devise`), le transcript du council est inversé |
 | Pricing | Prix du mock après crash → je réaligne l'offre DEX |
