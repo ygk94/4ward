@@ -46,15 +46,15 @@ Large companies handle this with bank forwards. Small ones are mostly locked out
 
 ## Challenges
 
-The first challenge was making a 90-day product demonstrable in three minutes. A forward is priced on its duration, so a hedge expiring in 60 seconds would show a price close to spot and lose the interest-rate gap that is the heart of the product. We added an admin-only time factor: the price is computed on the announced 90 days while the real maturity falls five minutes later. The video therefore shows the true 90-day price and settles it live. We documented why this factor must stay at 1 in production, since otherwise the carry could be arbitraged.
+Demoing a 90-day product in three minutes. A forward is priced on its duration, so a 60-second hedge would show a price close to spot. We added an admin-only time factor: the price uses the announced 90 days while the real maturity falls five minutes later, so the video shows the true price and settles it live.
 
-The second was settling at the right price. Our first version of settle read the oracle at the moment it was called. Since settlement is open to anyone, whoever settles could pick their moment, which gave a free option the pool never charged for. We moved settlement to the fixing at maturity using the SEP-40 price-at-timestamp call. That meant adding price history to our mock oracle so it behaves exactly like Reflector, and handling the edge cases where no recent price exists before maturity.
+Settling at the right price. Our first settle read the oracle when called, so whoever settled could pick their moment. We moved to the fixing at maturity through SEP-40 price-at-timestamp, which meant adding price history to our mock oracle so it behaves like Reflector.
 
-The third was keeping the pool solvent by construction. The vault must never owe more than it holds, and an LP must not be able to withdraw just before a losing hedge settles. This led to the two share prices, the capacity rule, rounding in favour of the pool everywhere, and an invariant test run after every operation. While writing the netting logic, our property tests showed that the intuitive "net of margins" approach underestimates losses when caps or locked rates differ. We kept the exact computation in the code but left it switched off rather than ship something half right.
+Keeping the pool solvent by construction. Two share prices, a capacity rule, rounding in favour of the pool and an invariant test after every operation. Our property tests also showed that naive netting underestimates losses, so we kept it switched off.
 
-We also hit platform limits. A Soroban transaction cannot contain a classic Stellar operation, so settlement and the path payment to the supplier cannot be atomic yet, and the front end chains two transactions. On testnet the mock oracle does not publish by itself and the contract rejects prices older than 15 minutes, so the live site started failing with stale price errors. We wrote a keepalive script that refreshes all four currencies every ten minutes, a settlement keeper, and a one-command crash script for the video.
+Platform limits. Soroban cannot mix in classic operations, so settle and the supplier payment are two transactions. On testnet the mock oracle never publishes alone, so we wrote a keepalive, a keeper and a crash script.
 
-Finally, we were three people with less than 48 hours. We split the contract into three modules with clear interfaces: Hugo on the vault and the front end, Lancelot on pricing, Clément on hedges and settlement. Each of us worked on our own branch and git worktree, with CI running the contract tests and the front-end build on every push, and integration used real cross-module tests instead of mocks. Before submitting we ran a full consistency pass so that every figure in the README, the deck and the video matches what the contract actually returns.
+Teamwork. Three people, under 48 hours, three modules with clear interfaces, one branch and worktree each, CI on every push.
 
 
 ## What's next
