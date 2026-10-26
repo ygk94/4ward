@@ -63,7 +63,7 @@ Pour la référence ci-dessus (arrondir à l'USDC dans les gros titres) :
 - **Coût de la protection** (`protectionCost(q, durée)`) : « ≈ 323 USDC (0,6 % de la facture) : 274 de rémunération du pool + 49 de rendement perdu sur le dépôt ». Les constantes `SPREAD_BPS = 50` et `USD_RATE_BPS = 360` reprennent `scripts/setup-testnet.sh` et `scripts/rates.snapshot` (le contrat ne les expose pas).
 - Après le crash +12 % (`afterMove(q, notional, side, nouveauSpot)`, mêmes formules que `settle`) :
   - « Sans protection : **61 600 USDC** » (`withoutProtection`)
-  - « Avec <NOM> : **56 098,72 USDC** » (`withProtection`) ; protection versée 5 501,28 (plafonnée au dépôt)
+  - « Avec 4ward : **56 098,72 USDC** » (`withProtection`) ; protection versée 5 501,28 (plafonnée au dépôt)
 
 Si le mock est aligné sur Reflector avant la vidéo, tout se recalcule tout seul depuis `quote` ; à 0,05325 : prix figé 53 262,41, avec protection 54 313,76 (`sim/out/chiffres-demo.md`).
 

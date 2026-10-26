@@ -1,4 +1,4 @@
-# <NOM>
+# 4ward
 
 > **Bloquez aujourd'hui le prix d'une facture fournisseur payable en devise dans 90 jours. Le jour J, votre fournisseur est payé dans sa monnaie, au taux promis.**
 
@@ -88,7 +88,7 @@ La conversion USDC → MXN pour payer le fournisseur n'est pas comptée : elle e
 | Solution | Coût pour 90 jours | Accès pour une PME |
 |---|---|---|
 | Aucune couverture | 0, mais un mouvement de 6,5 % (fréquent sur 90 j) coûte ~3 600 $ | — |
-| **<NOM>** | **~0,6 %** | sans banque ni ligne de crédit, marge de 5 à 20 % au choix |
+| **4ward** | **~0,6 %** | sans banque ni ligne de crédit, marge de 5 à 20 % au choix |
 | Forward bancaire | ~0,5 à 2 % | ligne de crédit, rarement accordée à une petite PME |
 | Fintechs de change (Ebury, iBanFirst, Corpay) | ~0,5 à 1,5 % | dépôt initial de 5 à 10 %, KYC, devises limitées |
 | Option d'achat (protection non plafonnée) | ~2,6 % (prime à la monnaie, vol 13 %) | rare pour une PME |
@@ -381,4 +381,4 @@ Correctifs prévus après le hackathon ; détail dans `docs/points-a-trancher.md
 
 ## Concurrence
 
-*FX Swap by Hedgehog* (SCF #21) propose des swaps de devises avec livraison physique (USDC/EURC/AUDD) pour des utilisateurs DeFi. <NOM> vise les PME : une couverture sur n'importe quelle devise couverte par l'oracle, sans livraison physique obligatoire (le pool ne détient la devise que pour couvrir son exposition nette), reliée au paiement du fournisseur.
+*FX Swap by Hedgehog* (SCF #21) propose des swaps de devises avec livraison physique (USDC/EURC/AUDD) pour des utilisateurs DeFi. 4ward vise les PME : une couverture sur n'importe quelle devise couverte par l'oracle, sans livraison physique obligatoire (le pool ne détient la devise que pour couvrir son exposition nette), reliée au paiement du fournisseur.

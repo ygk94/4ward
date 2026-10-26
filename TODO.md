@@ -140,7 +140,7 @@ Commencer avec des données factices, brancher le contrat après le merge.
 4. ⬜ Déployer le front sur Vercel (prêt : `front/vercel.json`, variables dans `front/.env.example`, marche à suivre dans `front/README.md`) et mettre le lien dans le README
 
 ### Pitch et soumission
-1. ⬜ 🔴 Nom du projet → remplacer `<NOM>` partout (README, front, deck)
+1. ✅ Nom du projet : **4ward** (26/10), remplacé dans le README, le front, le script vidéo et le mémo ; reste le deck
 2. ⬜ Deck (8-10 slides) : problème (Lucía) → solution → démo → pourquoi Stellar → slide « Built on Stellar » en deux colonnes (Unlocked : path payment strict receive USDC → MXN, USDC SAC, événements Soroban ; Composed : Reflector FX SEP-40, Stellar Wallets Kit, taux Etherfuse CETES / USTRY dans le prix à terme) → protection plafonnée et règle de capacité → pricing (slides de Pricing) → concurrence (Hedgehog) → roadmap → équipe
 3. ⬜ Slide roadmap : Blend sur le capital non réservé, parts SEP-41, netting, affacturage, SDK anchors
 4. ⬜ 🔴 Enregistrer la vidéo (3 min) sur le script de Paiement, **avant lundi 10h**

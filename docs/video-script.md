@@ -15,7 +15,7 @@ Le front n'a ni bouton de crash, ni comparaison côte à côte, ni bouton « Pay
 
 | À l'écran | Voix off |
 |---|---|
-| Titre `<NOM>`, puis une facture : *Tequila Jalisco → Lucía, Lisbon — 1,000,000 MXN — due in 90 days* | *This is Lucía. She imports tequila into Lisbon, and she owes her supplier in Guadalajara one million pesos, due in 90 days.* |
+| Titre `4ward`, puis une facture : *Tequila Jalisco → Lucía, Lisbon — 1,000,000 MXN — due in 90 days* | *This is Lucía. She imports tequila into Lisbon, and she owes her supplier in Guadalajara one million pesos, due in 90 days.* |
 | Graphique simple : le peso qui monte de 10 % → « +5,500 USD » en rouge | *If the peso rises 10% before then, that invoice costs her 5,500 dollars more.* |
 | Logo banque barré | *A large company would call its bank and lock the exchange rate. Lucía has no credit line, and no bank will do it for her.* |
 | Logo Stellar | *On Stellar, she can already pay abroad in seconds — but only at today's rate. Nothing lets her lock today's rate for a future payment. Until now.* |
@@ -35,7 +35,7 @@ Le front n'a ni bouton de crash, ni comparaison côte à côte, ni bouton « Pay
 | À l'écran | Action | Voix off |
 |---|---|---|
 | Terminal : `./scripts/crash.sh 12` (0,055 → 0,0616), puis incrustation « Peso +12% » | terminal (fx-admin), **avant l'échéance réelle** (5 min après l'ouverture) | *Now let's say the peso jumps 12%.* |
-| Incrustation ajoutée au montage, côte à côte : **Without protection: 61,600 USDC (+6,587)** / **With <NOM>: 56,099 USDC (+1,086)** | | *Without protection, her invoice would cost 6,587 dollars more. With her protection, she only pays the part beyond her 10% limit: about 1,086 dollars.* |
+| Incrustation ajoutée au montage, côte à côte : **Without protection: 61,600 USDC (+6,587)** / **With 4ward: 56,099 USDC (+1,086)** | | *Without protection, her invoice would cost 6,587 dollars more. With her protection, she only pays the part beyond her 10% limit: about 1,086 dollars.* |
 
 ## 4. Le jour J : règlement et paiement du fournisseur — 1:35 → 2:30
 
@@ -54,7 +54,7 @@ Le front n'a ni bouton de crash, ni comparaison côte à côte, ni bouton « Pay
 | `VaultPage` : `PoolPanel` (capital, réservé, libre) + badge « Solvent » de `LpForm` | *Behind Lucía, a pool of dollars covers her and earns a small fee on every lock. It can't go bankrupt: it never promises more than it holds.* |
 | Logos : Stellar · USDC · Reflector · Etherfuse · Stellar Wallets Kit | *USDC, Reflector-compatible prices, Etherfuse treasury rates inside the locked price, path payments: protection and payment on the same Stellar rails.* |
 | Slide « Next » : exportateurs en contrepartie · rendement du capital libre · factures couvertes transférables · SDK pour wallets et anchors | *Next: matching importers with exporters, putting idle capital to work, and a "lock the rate" button for every Stellar wallet.* |
-| `<NOM>` + phrase d'accroche | *<NOM>. Lock today's price for tomorrow's invoice.* |
+| `4ward` + phrase d'accroche | *4ward. Lock today's price for tomorrow's invoice.* |
 
 ---
 
@@ -96,7 +96,7 @@ Avec `F` = prix figé par MXN (`quote.forward_rate`), `S0` = spot du jour, `S1 =
 | Surcoût sans protection | `N × S1 − N × F` | 6 587,19 |
 | Protection versée | `min(N × S1 − N × F, deposit)` | 5 501,28 |
 | Crédité au règlement | `deposit + protection versée` | 11 002,56 |
-| Payé au total avec `<NOM>` | `N × S1 − protection versée` | 56 098,72 |
-| Surcoût avec `<NOM>` | `payé au total − prix figé` | 1 085,91 |
+| Payé au total avec `4ward` | `N × S1 − protection versée` | 56 098,72 |
+| Surcoût avec `4ward` | `payé au total − prix figé` | 1 085,91 |
 
 À vérifier après le recalcul : le mouvement du peso entre `F` et `S1` doit **dépasser 10 %**, pour que la démo montre bien le plafond (au-delà, Lucía ne paie que ce qui dépasse sa protection).
