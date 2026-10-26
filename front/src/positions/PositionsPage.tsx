@@ -1,11 +1,12 @@
 // [FRONT — Hugo] Mes positions : protections (en cours / à régler / fermées) et position LP.
 import { useCallback, useEffect, useState } from 'react'
-import { fmtRate, fmtUsdc, pool, read, readHedges, type Hedge } from '../shared/contract'
+import { fmtRate, fmtUsdc, readHedges, type Hedge } from '../shared/contract'
 import { go } from '../shared/router'
 import { TxStatus } from '../shared/TxStatus'
 import { useTx } from '../shared/useTx'
 import { WalletButton } from '../shared/TopBar'
 import { useWallet } from '../shared/wallet'
+import { readMine, type Mine } from '../vault/poolApi'
 
 type Filter = 'all' | 'open' | 'closed'
 type Status = 'open' | 'due' | 'closed'
@@ -20,7 +21,7 @@ const STATUS_LABEL: Record<Status, string> = { open: 'Open', due: 'Due · settle
 export function PositionsPage() {
   const { address } = useWallet()
   const [hedges, setHedges] = useState<{ id: bigint; hedge: Hedge }[] | null>(null)
-  const [lp, setLp] = useState<{ balance: bigint; shares: bigint } | null>(null)
+  const [lp, setLp] = useState<Mine | null>(null)
   const [filter, setFilter] = useState<Filter>('all')
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000))
   const [error, setError] = useState<string | null>(null)
@@ -28,14 +29,9 @@ export function PositionsPage() {
   const load = useCallback(async () => {
     if (!address) return
     try {
-      const p = await pool()
-      const [hs, balance, shares] = await Promise.all([
-        readHedges(address),
-        read(p.lp_balance({ lp: address })),
-        read(p.lp_shares({ lp: address })),
-      ])
+      const [hs, mine] = await Promise.all([readHedges(address), readMine(address)])
       setHedges(hs.reverse())
-      setLp({ balance, shares })
+      setLp(mine)
       setError(null)
     } catch (e) {
       console.warn('[positions]', e)
@@ -44,8 +40,11 @@ export function PositionsPage() {
     }
   }, [address])
 
+  // Relecture périodique : une couverture réglée par le keeper (scripts/keeper.sh) passe en « Closed » sans recharger.
   useEffect(() => {
     load()
+    const id = setInterval(load, 8000)
+    return () => clearInterval(id)
   }, [load])
   useEffect(() => {
     const id = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000)
@@ -80,12 +79,17 @@ export function PositionsPage() {
         </div>
       </header>
 
-      {lp && lp.shares > 0n && (
+      {lp && (lp.dynamic.shares > 0n || (lp.safe?.balance ?? 0n) > 0n) && (
         <article className="pos-card lp-card">
           <span className="status status-open">Liquidity provider</span>
           <div className="pos-main">
-            <p className="pos-big">{fmtUsdc(lp.balance, 2)} USDC</p>
-            <p className="muted small">{fmtUsdc(lp.shares, 2)} shares · valued at exit price</p>
+            <p className="pos-big">{fmtUsdc(lp.dynamic.balance + (lp.safe?.balance ?? 0n), 2)} USDC</p>
+            {lp.dynamic.shares > 0n && (
+              <p className="muted small">
+                Dynamic: {fmtUsdc(lp.dynamic.balance, 2)} USDC · {fmtUsdc(lp.dynamic.shares, 2)} shares · valued at exit price
+              </p>
+            )}
+            {(lp.safe?.balance ?? 0n) > 0n && <p className="muted small">Safe: {fmtUsdc(lp.safe?.balance ?? 0n, 2)} USDC</p>}
           </div>
           <button className="btn btn-ghost" onClick={() => go('/vault')}>
             Manage →
@@ -140,8 +144,9 @@ function HedgeRow({ id, hedge, status, now, onSettled }: { id: bigint; hedge: He
             className="btn btn-primary"
             disabled={state.step === 'signing'}
             onClick={async () => {
-              const r = await run((p) => p.settle({ hedge_id: id }))
-              if (r !== undefined) onSettled()
+              await run((p) => p.settle({ hedge_id: id }))
+              // Relire même en cas d'échec : si le keeper l'a déjà réglée (201), la ligne passe en « Closed ».
+              onSettled()
             }}
           >
             {state.step === 'signing' ? 'Waiting…' : 'Settle'}

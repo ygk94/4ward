@@ -77,7 +77,7 @@ export function About() {
           If the peso rises 10%, her invoice costs <span className="accent-pink">$5,500</span> more.
         </h2>
         <p className="lede reveal">
-          Lucía imports tequila into Lisbon. A large company would call its bank for an FX forward. Lucía has no credit
+          Lucía imports tequila into Lisbon. A large company would call its bank to lock the exchange rate. Lucía has no credit
           line: her bank will never offer her that product.
         </p>
       </section>
@@ -92,7 +92,7 @@ export function About() {
           <article className="card reveal">
             <p className="card-k">~0.6%</p>
             <p className="card-l">of the invoice, all-in, for 90 days</p>
-            <p className="muted small">≈ 4× cheaper than an FX option</p>
+            <p className="muted small">No credit line needed</p>
           </article>
           <article className="card reveal">
             <p className="card-k">5–20%</p>
@@ -147,7 +147,7 @@ export function About() {
             <span>02</span>
             <div>
               <h3>Get a locked price</h3>
-              <p className="muted">Oracle spot rate + interest differential + spread: “you’ll pay 55,013 USDC, no matter what”.</p>
+              <p className="muted">Today’s rate, adjusted for 90 days: “you’ll pay 55,013 USDC, no matter what”.</p>
             </div>
           </li>
           <li className="reveal">

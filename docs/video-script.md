@@ -26,7 +26,7 @@ Chiffres calculés avec le vrai Pricing (taux Etherfuse figés dans `scripts/rat
 | `HedgeScreen` : montant 1,000,000, devise MXN, échéance, adresse du fournisseur | Hugo remplit le formulaire | *Lucía enters her invoice: one million pesos, the due date, and her supplier's address.* |
 | `QuoteCard` : spot Reflector, prix figé **55,013 USDC** | le devis s'affiche | *The app reads the live peso rate from the Reflector oracle and gives her a locked price for 90 days: 55,013 USDC, whatever happens.* |
 | Choix de la protection : **±10 %** → deposit **5,501.28 USDC** | Hugo choisit 10 % | *She picks her protection — plus or minus 10% — and deposits 10% of the invoice as a guarantee. That deposit is the most she can ever lose. No credit check, no margin calls.* |
-| Fenêtre Freighter | **Signature n° 1** : « Lock my rate » (`open_hedge`) | *One signature in her wallet, and the price is locked.* |
+| Fenêtre Freighter | **Signature n° 1** : « Lock my price » (`open_hedge`) | *One signature in her wallet, and the price is locked.* |
 | stellar.expert : la transaction, événement `hedge_opened` | plan de coupe 2-3 s | *It's on-chain: anyone can verify the locked rate and her deposit.* |
 
 ## 3. Le peso flambe — 1:15 → 1:45
