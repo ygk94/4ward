@@ -87,7 +87,7 @@ export function RiskPage() {
       <section className="risk-main">
         <header className="risk-head">
           <div>
-            <p className="eyebrow">Risk lab {busy && <span className="chip">running…</span>}</p>
+            <p className="eyebrow">Risk lab · simulation, not live results {busy && <span className="chip">running…</span>}</p>
             <h1 className="risk-title">Safe or Dynamic?</h1>
           </div>
           <button className={`btn btn-ghost risk-adv-toggle ${advanced ? 'on' : ''}`} onClick={() => setAdvanced((v) => !v)}>
@@ -99,13 +99,13 @@ export function RiskPage() {
           <article className="tranche-card safe">
             <p className="eyebrow">Safe</p>
             <p className="tranche-big">{pct(SENIOR_RATE)}</p>
-            <p className="small">a year, fixed. Paid first.</p>
+            <p className="small">a year, contract target rate. Paid first, not guaranteed.</p>
           </article>
           <article className="tranche-card dynamic">
             <p className="eyebrow">Dynamic</p>
             <p className="tranche-big">{mean !== undefined ? pct(mean) : '—'}</p>
             <p className="small">
-              a year on average.{' '}
+              a year on average, simulated.{' '}
               {s && (oneIn ? `Loses money about 1 year in ${oneIn}.` : 'Never lost money in the simulation.')}
             </p>
           </article>

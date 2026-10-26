@@ -129,8 +129,8 @@ export function About() {
           </article>
           <article className="card reveal">
             <p className="card-k">~4%</p>
-            <p className="card-l">on idle capital (tokenized US Treasuries)</p>
-            <p className="muted small">Roadmap: Etherfuse</p>
+            <p className="card-l">target on idle capital in tokenized US Treasuries</p>
+            <p className="muted small">Roadmap, not live on testnet</p>
           </article>
           <article className="card reveal">
             <p className="card-k">0</p>

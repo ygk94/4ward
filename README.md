@@ -144,7 +144,7 @@ Les LPs déposent dans le même pool mais choisissent leur risque :
 | Profil | Veut un rendement stable | Accepte de perdre pour gagner plus |
 | Son argent sert à | Couvrir l'exposition (CETES, EURC) + trésorerie | Absorber l'exposition non couverte |
 | Pertes | Protégé par le junior | Perd en premier |
-| Rendement | Taux fixe payé en priorité (~4,5 %) | Tout le reste : spread, pertes des clients, trésorerie |
+| Rendement | Taux cible payé en priorité (4,5 %, non garanti) | Tout le reste : spread, pertes des clients, trésorerie |
 
 Règles du contrat :
 1. **Perte max non couverte ≤ capital junior** : la règle de capacité s'applique au seul junior. Chaque contrat étant plafonné, le senior ne peut pas perdre à cause du change (il reste exposé aux protocoles tiers et à l'USDC).
@@ -153,7 +153,7 @@ Règles du contrat :
 4. **Junior épuisé** : le pool n'accepte plus que des couvertures entièrement couvertes.
 5. **Ratio minimum** : tant qu'il y a des seniors, le junior reste ≥ 20 % du capital au moment de chaque dépôt senior ou retrait junior (refusés sinon) ; les intérêts senior peuvent le faire baisser ensuite.
 
-**Le rendement du senior est payé par le junior tant que le capital libre n'est pas placé** (bons du Trésor, CETES) : le prix de la part senior progresse de 4,5 %/an, et cette progression est retirée de la valeur du junior. Le placement de la trésorerie est en roadmap ; d'ici là, le junior paie le senior avec ses spreads.
+**Le 4,5 % du senior est un taux cible du contrat, pas un rendement gagné : il est payé par le junior tant que le capital libre n'est pas placé** (bons du Trésor, CETES) : le prix de la part senior progresse de 4,5 %/an, et cette progression est retirée de la valeur du junior. Le placement de la trésorerie est en roadmap ; d'ici là, le junior paie le senior avec ses spreads.
 
 *Implémenté dans le contrat (`main`, déployé sur testnet)* : un seul vault, deux catégories de parts. `deposit_lp` / `withdraw` = junior (inchangés), `deposit_senior` / `withdraw_senior` / `senior_balance` / `tranche_values` en plus. Prix senior capitalisé à chaque opération senior, valeur junior = capital − valeur senior, capacité = junior − réservé.
 

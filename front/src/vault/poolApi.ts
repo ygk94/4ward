@@ -5,7 +5,8 @@
 import type { contract } from '@stellar/stellar-sdk'
 import { pool, read, type PoolClient } from '../shared/contract'
 
-/** Rendement fixe de la tranche Safe (SENIOR_RATE_BPS = 450 dans feat/tranches), affiché seulement. */
+/** Taux cible de la tranche Safe (SENIOR_RATE_BPS = 450 dans vault.rs), affiché seulement. Financé par la tranche Dynamic
+ * tant que la trésorerie n'est pas placée (roadmap) : promis, pas gagné, et pas garanti si Dynamic est épuisée. */
 export const SAFE_APR = 4.5
 /** Part minimale de la tranche Dynamic dans les dépôts (MIN_JUNIOR_BPS = 2000). */
 export const MIN_DYNAMIC_SHARE = 20

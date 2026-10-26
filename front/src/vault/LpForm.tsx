@@ -47,7 +47,7 @@ export function LpForm({ onDone }: { onDone: () => void }) {
             <b>
               {COPY[k].name} <i className="info">ⓘ</i>
             </b>
-            <span>{k === 'safe' ? `${SAFE_APR}% fixed APR` : `variable · ${split ? fmtUsdc(split.sharePrice, 4) : '—'}/share`}</span>
+            <span>{k === 'safe' ? `${SAFE_APR}% target rate` : `variable · ${split ? fmtUsdc(split.sharePrice, 4) : '—'}/share`}</span>
           </button>
         ))}
       </div>
@@ -92,13 +92,13 @@ function SplitBar({ split }: { split: Split | null }) {
 const COPY: Record<Kind, { name: string; line: string; rule: string; finance: string }> = {
   safe: {
     name: 'Safe',
-    line: 'Fixed yield, paid first. Losses hit Dynamic first: Safe only loses if Dynamic is wiped out.',
+    line: `Target rate of ${SAFE_APR}% a year, paid first. Not guaranteed: on testnet it is paid by Dynamic, not by T-bills. Losses hit Dynamic first.`,
     rule: `Paid by Dynamic until idle capital is invested (Etherfuse, roadmap). Refused if Dynamic would fall under ${MIN_DYNAMIC_SHARE}% of deposits.`,
     finance: 'In finance, this is called a senior tranche.',
   },
   dynamic: {
     name: 'Dynamic',
-    line: 'Takes the risk, earns the rest: SME spreads and favourable FX moves, minus Safe’s yield.',
+    line: 'Takes the risk, earns the rest: SME spreads and favourable FX moves, minus Safe’s target rate. No fixed return.',
     rule: `New hedges only use Dynamic capital not locked by open hedges. Must stay at least ${MIN_DYNAMIC_SHARE}% of deposits.`,
     finance: 'In finance, this is called a junior tranche.',
   },

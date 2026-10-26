@@ -58,7 +58,7 @@ export function PoolPanel({ stats, demo, activity }: { stats: PoolStats | null; 
             {stats ? fmtUsdc(stats.totalAssets) : '—'} <span>USDC</span>
           </h1>
           <p className="muted small">
-            Total value locked · LP return since launch{' '}
+            Total value locked · LP return since launch, measured on-chain{' '}
             <b className={lpReturn >= 0 ? 'up' : 'down'}>
               {lpReturn >= 0 ? '+' : ''}
               {pct(lpReturn, 2)}%
