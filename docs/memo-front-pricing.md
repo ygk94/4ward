@@ -42,9 +42,9 @@ Simulation de `quote(currency, side, notional, duration_secs, cap_bps) -> Quote`
 | Champ de `Quote` | Décimales | Sens | Valeur de référence (1 000 000 MXN, spot 0,055, 90 j, ±10 %) |
 |---|---|---|---|
 | `spot` | 14 | cours du jour | `5500000000000` → 0,0550 |
-| `forward_rate` | 14 | **prix figé** par MXN | `5487305413412` → 0,054873 |
-| `usdc_cost` | 7 | ce que la PME paiera | `548730541341` → **54 873,05 USDC** |
-| `margin` | 7 | dépôt de garantie | `54873054135` → **5 487,31 USDC** |
+| `forward_rate` | 14 | **prix figé** par MXN | `5501281368668` → 0,055013 |
+| `usdc_cost` | 7 | ce que la PME paiera | `550128136866` → **55 012,81 USDC** |
+| `margin` | 7 | dépôt de garantie | `55012813687` → **5 501,28 USDC** |
 
 **Durée : passer la durée ANNONCÉE** (90 j = `7_776_000`), jamais la durée réelle de la démo. Sur `feat/payment` (Clément, option b) : `open_hedge` calcule le prix sur `duration_secs` et fixe l'échéance réelle à `maintenant + max(duration_secs / time_factor, 1)`. Avec `set_time_factor(25920)`, 90 j → **300 s réelles**. Le compte à rebours se fait sur `get_hedge(id).maturity` (échéance réelle, secondes Unix), pas sur la durée saisie.
 ⚠️ Le pool déployé aujourd'hui n'a pas encore `time_factor` : une couverture de 90 j ouverte dessus échoit dans 90 vrais jours. Attendre le redéploiement pour la répétition.
@@ -57,16 +57,16 @@ Rafraîchir le devis quand les champs changent (debounce ~300 ms). `onQuote(q)` 
 
 Pour la référence ci-dessus (arrondir à l'USDC dans les gros titres) :
 
-- **« Prix figé : vous paierez 54 873 USDC, quoi qu'il arrive »** — `fmtAmount7(q.usdc_cost, 0)`
+- **« Prix figé : vous paierez 55 013 USDC, quoi qu'il arrive »** — `fmtAmount7(q.usdc_cost, 0)`
 - **« Protection ±10 % »** — `capBps / 100`
-- **« Dépôt de garantie : 5 487 USDC (restitué à l'échéance, ± l'écart) »** — `fmtAmount7(q.margin, 0)`
-- Petit texte : « Prix figé = cours du jour (0,0550 $) ajusté de l'écart de taux entre le peso (7 %) et le dollar (4 %) »
-- **Coût de la protection** (`protectionCost(q, durée)`) : « ≈ 327 USDC (0,6 % de la facture) : 273 de rémunération du pool + 54 de rendement perdu sur le dépôt ». Les constantes `SPREAD_BPS = 50` et `USD_RATE_BPS = 400` reprennent `scripts/setup-testnet.sh` (le contrat ne les expose pas).
+- **« Dépôt de garantie : 5 501 USDC (restitué à l'échéance, ± l'écart) »** — `fmtAmount7(q.margin, 0)`
+- Petit texte : « Prix figé = cours du jour (0,0550 $) ajusté de l'écart de taux entre le peso (5,55 %) et le dollar (3,6 %) »
+- **Coût de la protection** (`protectionCost(q, durée)`) : « ≈ 323 USDC (0,6 % de la facture) : 274 de rémunération du pool + 49 de rendement perdu sur le dépôt ». Les constantes `SPREAD_BPS = 50` et `USD_RATE_BPS = 360` reprennent `scripts/setup-testnet.sh` et `scripts/rates.snapshot` (le contrat ne les expose pas).
 - Après le crash +12 % (`afterMove(q, notional, side, nouveauSpot)`, mêmes formules que `settle`) :
   - « Sans protection : **61 600 USDC** » (`withoutProtection`)
-  - « Avec <NOM> : **56 112,69 USDC** » (`withProtection`) ; protection versée 5 487,31 (plafonnée au dépôt)
+  - « Avec <NOM> : **56 098,72 USDC** » (`withProtection`) ; protection versée 5 501,28 (plafonnée au dépôt)
 
-Si le mock est aligné sur Reflector avant la vidéo, tout se recalcule tout seul depuis `quote` ; à 0,05325 : prix figé 53 127,09, avec protection 54 327,29 (`sim/out/chiffres-demo.md`).
+Si le mock est aligné sur Reflector avant la vidéo, tout se recalcule tout seul depuis `quote` ; à 0,05325 : prix figé 53 262,41, avec protection 54 313,76 (`sim/out/chiffres-demo.md`).
 
 ## 4. Erreurs
 
@@ -88,7 +88,7 @@ Une simulation qui échoue renvoie un texte qui contient `Error(Contract, #302)`
 | 111 | Vault (`feat/tranches`) : dépôt senior / retrait junior qui ferait passer le junior sous son minimum | Dépôt impossible pour l'instant : la part junior du pool est trop faible |
 | 112 | Vault (`feat/tranches`) : retrait de plus de parts senior que détenues | Vous n'avez pas assez de parts senior |
 
-Codes 100-110 (Vault) et 200-205 (Paiement ; 205 = `set_time_factor` à 0, admin) : tables dans `docs/payment-cli.md` § « Erreurs à traduire » ; les ajouter au même `ERROR_MESSAGES`.
+Codes 100-112 (Vault), 200-205 (Paiement ; 205 = `set_time_factor` à 0, admin) et #10 (token USDC : solde insuffisant) : table complète dans `docs/payment-cli.md` § « Erreurs à traduire » ; les ajouter au même `ERROR_MESSAGES`.
 Contrôle de l'ordre : `quote` vérifie montant et plafond **avant** de lire l'oracle, donc 305 / 306 / 307 / 308 sortent même si le cours est périmé (vérifié en § 8).
 
 ## 5. `CrashButton`
@@ -108,7 +108,7 @@ Contrôle de l'ordre : `quote` vérifie montant et plafond **avant** de lire l'o
 ## 6. Helpers de format (dans le fichier du § 7)
 
 - `fmtPrice14(5500000000000n)` → `0,0550` ; `fmtPrice14(v, 6)` pour 6 décimales
-- `fmtAmount7(548730541341n)` → `54 873,05` ; `fmtAmount7(v, 0)` → `54 873` (séparateur : espace fine insécable U+202F)
+- `fmtAmount7(550128136866n)` → `55 012,81` ; `fmtAmount7(v, 0)` → `55 013` (séparateur : espace fine insécable U+202F)
 - `parseAmount7('1 000 000')` → `10000000000000n` ; accepte `1000000,5` et `12.5`, refuse `1,000,000` et plus de 7 décimales (→ `null`)
 - `fmtPctBps(-318n)` → `−3,18 %` ; `deltaBps(a, b)` écart relatif arrondi
 - Aucun `Number` pour les montants : uniquement `bigint` (14 et 7 décimales)
@@ -236,7 +236,7 @@ export function afterMove(q: Quote, notional: bigint, side: Side, newSpot: bigin
 
 /** Coût de la protection (README, « Ce que paie la PME ») : spread + rendement perdu sur la marge. */
 export const SPREAD_BPS = 50n // = SPREAD_BPS de scripts/setup-testnet.sh
-export const USD_RATE_BPS = 400n // = set_rate USD 400
+export const USD_RATE_BPS = 360n // = set_rate USD 360 (scripts/rates.snapshot)
 export function protectionCost(q: Quote, durationSecs: number) {
   const spread = (q.usdc_cost * SPREAD_BPS) / (10_000n + SPREAD_BPS)
   const lostYield = (q.margin * USD_RATE_BPS * BigInt(durationSecs)) / (10_000n * 31_536_000n)
@@ -292,7 +292,7 @@ export function fmtPrice14(v: bigint, digits = 4): string {
   return `${s.slice(0, -digits)},${s.slice(-digits)}`
 }
 
-/** Montant 7 décimales → « 54 873,05 » (arrondi au centime le plus proche). */
+/** Montant 7 décimales → « 55 012,81 » (arrondi au centime le plus proche). */
 export function fmtAmount7(v: bigint, digits = 2): string {
   const neg = v < 0n
   const a = neg ? -v : v
@@ -378,17 +378,17 @@ quote(GBP, cap 1000, notional 10000000000000) → code 306 → « Devise non dis
 quote(MXN, cap 5001, notional 10000000000000) → code 308 → « Protection maximale : 50 % »
 quote(MXN, cap 1000, notional 0) → code 305 → « Montant invalide »
 
-Valeurs de référence :
+Valeurs de référence (taux du snapshot USD 360 / MXN 555) :
 OK  fmtPrice14(spot) : 0,0550
-OK  fmtPrice14(forward, 6) : 0,054873
-OK  fmtAmount7(usdc_cost) : 54 873,05
-OK  fmtAmount7(usdc_cost, 0) : 54 873
-OK  fmtAmount7(margin) : 5 487,31
+OK  fmtPrice14(forward, 6) : 0,055013
+OK  fmtAmount7(usdc_cost) : 55 012,81
+OK  fmtAmount7(usdc_cost, 0) : 55 013
+OK  fmtAmount7(margin) : 5 501,28
 OK  movedPrice(+12 %) : 6160000000000
 OK  sans protection : 61 600,00
-OK  avec protection : 56 112,69
-OK  protection versée : 5 487,31
-coût de la protection : spread 273,00 + rendement perdu 54,12 = 327,12 USDC (+0,59 %)
+OK  avec protection : 56 098,72
+OK  protection versée : 5 501,28
+coût de la protection : spread 273,70 + rendement perdu 48,83 = 322,53 USDC (+0,58 %)
 OK  parseAmount7("1 000 000") : 10000000000000
 OK  parseAmount7("1000000,5") : 10000005000000
 OK  parseAmount7("12.5") : 125000000
@@ -402,5 +402,5 @@ set_price préparé (non signé, non envoyé) : 0,0550 → 0,0616 +12 %, XDR 768
 ```
 
 - `lastprice` Reflector et mock : décodés. Le mock avait 73 min : `quote` renvoie **302**, comme attendu (rafraîchir le cours avant tout devis).
-- Le décodage d'un devis réussi n'a donc pas tourné en direct ce soir ; les valeurs de référence (`5487305413412` / `548730541341` / `54873054135`) ont été lues sur ce pool avec la CLI le 25/10 (`docs/todo-pricing.md`, « État »). Pour revérifier : `./scripts/crash.sh --refresh`, puis, dans les 15 min, `quote` depuis le front ou la CLI (`docs/payment-cli.md`) : on doit retrouver ces trois valeurs à l'unité.
+- Le décodage d'un devis réussi n'a donc pas tourné en direct ce soir ; les valeurs de référence (`5501281368668` / `550128136866` / `55012813687`, taux du snapshot) ont été vérifiées sur le pool redéployé le 25/10 (`docs/todo-pricing.md`, « État »). Pour revérifier : `./scripts/crash.sh --refresh`, puis, dans les 15 min, `quote` depuis le front ou la CLI (`docs/payment-cli.md`) : on doit retrouver ces trois valeurs à l'unité.
 - `set_price` (crash +12 % et « cours réel ») : construit et simulé avec fx-admin comme source, **non signé, non envoyé**.

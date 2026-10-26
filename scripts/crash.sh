@@ -153,11 +153,11 @@ if [ "$MODE" = reset ] && [ "$CUR_SYM" = MXN ]; then
   echo "   Écart avec l'offre DEX MXN/USDC ($(fmt_price "$DEX_PRICE")) : $(fmt_pct "$GAP")"
   if [ "$GAP" -ne 0 ]; then
     echo "   → prévenir Hugo / Clément : réaligner l'offre DEX (docs/payment-cli.md § 5)."
-    # Chiffres de la vidéo à 0,055, cotés sur 90 j (facteur 25 920) : prix figé 54 873,05 · payé au total après +12 %
-    # 56 112,69. Proportionnels au spot à durée égale.
+    # Chiffres de la vidéo à 0,055, cotés sur 90 j (facteur 25 920) : prix figé 55 012,81 · payé au total après +12 %
+    # 56 098,72 (taux de scripts/rates.snapshot). Proportionnels au spot à durée égale.
     R9=$(( NEW / 1000 ))   # ≈ 5,3e9 pour MXN : × 5,6e6 ≈ 3e16, tient en 64 bits
-    echo "   Chiffres vidéo recalculés au prorata du spot : prix figé ≈ $(fmt_usd $(( (5487305 * R9 + 2750000000) / 5500000000 ))) USDC," \
-      "payé au total ≈ $(fmt_usd $(( (5611269 * R9 + 2750000000) / 5500000000 ))) USDC (à confirmer par quote)"
+    echo "   Chiffres vidéo recalculés au prorata du spot : prix figé ≈ $(fmt_usd $(( (5501281 * R9 + 2750000000) / 5500000000 ))) USDC," \
+      "payé au total ≈ $(fmt_usd $(( (5609872 * R9 + 2750000000) / 5500000000 ))) USDC (à confirmer par quote)"
   fi
 fi
 

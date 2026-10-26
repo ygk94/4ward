@@ -1,4 +1,4 @@
-// [FRONT — Hugo] (logique fournie par Pricing) Devis : spot réel Reflector, prix figé, marge à déposer (appel quote).
+// [FRONT — Hugo] (logique fournie par Pricing) Devis : spot de l'oracle du pool (mock en démo), prix figé, marge à déposer (appel quote).
 import { fmtRate, fmtUsdc, type Quote } from '../shared/contract'
 
 export function QuoteCard({ quote, loading, error, currency }: { quote: Quote | null; loading: boolean; error: string | null; currency: string }) {
@@ -15,7 +15,7 @@ export function QuoteCard({ quote, loading, error, currency }: { quote: Quote | 
           <dd>1 {currency} = {quote ? fmtRate(quote.forward_rate) : '—'} USD</dd>
         </div>
         <div>
-          <dt>Spot today (Reflector)</dt>
+          <dt>Spot today (demo oracle)</dt>
           <dd>{quote ? fmtRate(quote.spot) : '—'} USD</dd>
         </div>
         <div className="strong">

@@ -147,7 +147,7 @@ export function About() {
             <span>02</span>
             <div>
               <h3>Get a locked price</h3>
-              <p className="muted">Reflector rate + interest differential + spread: “you’ll pay 54,873 USDC, no matter what”.</p>
+              <p className="muted">Oracle spot rate + interest differential + spread: “you’ll pay 55,013 USDC, no matter what”.</p>
             </div>
           </li>
           <li className="reveal">
