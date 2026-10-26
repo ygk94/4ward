@@ -310,7 +310,7 @@ Le pool est redéployé à chaque `./scripts/setup-testnet.sh`, qui fait aussi l
 
 **Mode démo :** le setup pose `set_time_factor 25920` : le prix est calculé sur la durée annoncée (90 jours), mais l'échéance réelle tombe 5 minutes après l'ouverture. C'est ce qui permet de régler en direct, dans la vidéo, une couverture « à 90 jours ».
 
-**Limites du MVP testnet :** paiement du fournisseur depuis l'app en MXN seulement (seule devise avec un actif de test et une offre DEX posée par le setup ; les couvertures BRL, ARS et EUR se règlent normalement) ; oracle de démo (mock-oracle SEP-40, pour le crash) à la place de Reflector ; USDC et MXN de test émis par le compte ISSUER, offre DEX MXN/USDC posée par nous ; règle de capacité brute (somme des marges, sans netting) ; taux d'intérêt figés dans `scripts/rates.snapshot` et poussés par l'admin.
+**Limites du MVP testnet :** paiement du fournisseur depuis l'app en MXN seulement (seule devise avec un actif de test et une offre DEX posée par le setup ; les couvertures BRL, ARS et EUR se règlent normalement) ; oracle de démo (mock-oracle SEP-40, pour le crash) à la place de Reflector ; USDC et MXN de test émis par le compte ISSUER, offre DEX MXN/USDC posée par nous ; règle de capacité brute (somme des marges, sans netting) ; taux d'intérêt lus sur l'API Etherfuse et poussés par l'admin (`scripts/sync-rates.sh`), pas lus par le contrat.
 
 ## Lancer le projet
 
