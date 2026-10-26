@@ -3,10 +3,12 @@
 #   ./scripts/seed-testnet.sh            tout : comptes, dépôts LP, couvertures, refus attendus, mouvements de cours,
 #                                        règlements par le keeper, retraits, contrôle de l'invariant
 #   ./scripts/seed-testnet.sh --no-wait  sans attendre les échéances (pas de règlement ni de retrait final)
+#   ./scripts/seed-testnet.sh --help     cette aide (tout autre argument est refusé)
 # À lancer après ./scripts/setup-testnet.sh (mode démo : 90 jours = 5 minutes). Relançable : les comptes existants
-# sont réutilisés, chaque lancement ajoute de nouveaux dépôts et de nouvelles couvertures.
+# sont réutilisés, chaque lancement ajoute de nouveaux dépôts et de nouvelles couvertures. Les cours du mock bougés
+# par le seed sont remis aux prix de la démo à la fin (crash.sh --demo : MXN 0,055, BRL 0,18, ARS 0,001, EUR 1,1193).
 # Alias surchargeables : POOL=fx-pool ADMIN=fx-admin SUPPLIER=fx-supplier NET=testnet
-set -uo pipefail
+set -uo pipefail   # pas de -e : on compte les ok/ko au lieu de s'arrêter au premier échec
 cd "$(dirname "$0")/.."
 
 NET=${NET:-testnet}
@@ -15,7 +17,12 @@ ADMIN=${ADMIN:-fx-admin}
 SUPPLIER=${SUPPLIER:-fx-supplier}
 HORIZON=https://horizon-testnet.stellar.org
 WAIT=1
-[ "${1:-}" = "--no-wait" ] && WAIT=0
+case "${1:-}" in
+  --no-wait) WAIT=0 ;;
+  -h|--help) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  '') ;;
+  *) echo "option inconnue : $1 (voir --help)" >&2; exit 1 ;;
+esac
 
 PY=""
 for cand in python3 python; do
@@ -23,7 +30,7 @@ for cand in python3 python; do
 done
 [ -n "$PY" ] || { echo "Python 3 introuvable." >&2; exit 1; }
 
-ISSUER=$(stellar keys address $ADMIN)
+ISSUER=$(stellar keys address $ADMIN 2>/dev/null) || { echo "identité $ADMIN absente de cette machine (ADMIN=... pour en choisir une autre)" >&2; exit 1; }
 USDC="USDC:$ISSUER"
 U=10000000            # 1 unité en 7 décimales
 DAY=86400
@@ -146,6 +153,9 @@ if [ $WAIT -eq 1 ]; then
   sh_emre=$(read_pool tranche_values >/dev/null; stellar contract invoke --id $POOL --source-account $ADMIN --network $NET --send=no -- senior_balance --lp seed-lp-emre 2>/dev/null | tail -1 | tr -d '"')
   echo "   valeur prudente de seed-lp-emre : $sh_emre"
 fi
+
+say "Cours du mock remis aux prix de la démo (sinon chaque relance cumule les mouvements)"
+for c in MXN BRL EUR ARS; do ADMIN=$ADMIN NET=$NET ./scripts/crash.sh --demo $c >/dev/null 2>&1 && ok "prix $c remis" || ko "prix $c non remis"; done
 
 say "Contrôle de l'invariant sur la chaîne"
 USDC_SAC=$(stellar contract id asset --asset "$USDC" --network $NET)

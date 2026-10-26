@@ -1,10 +1,18 @@
 #!/usr/bin/env bash
 # Monte tout l'environnement de démo sur le testnet Stellar.
-# Relançable : les étapes déjà faites sont sautées ou échouent sans bloquer.
-#   ./scripts/setup-testnet.sh
+# ATTENTION : chaque lancement redéploie mock-oracle et pool (nouveaux IDs, .env.testnet et front/.env.local réécrits,
+# couvertures et historique perdus pour le front). Pour remettre un prix : ./scripts/crash.sh --demo (set_price).
+#   ./scripts/setup-testnet.sh           tout le setup (comptes, actifs, offre DEX, contrats)
+#   ./scripts/setup-testnet.sh --help    cette aide (tout autre argument est refusé)
 # Résultat : IDs de contrats et d'actifs dans .env.testnet et front/.env.local
 set -euo pipefail
 cd "$(dirname "$0")/.."
+
+case "${1:-}" in
+  -h|--help) sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  '') ;;
+  *) echo "option inconnue : $1 (voir --help)" >&2; exit 1 ;;
+esac
 
 NET=testnet
 ADMIN=fx-admin      # émetteur des actifs de test + admin des contrats
@@ -91,10 +99,9 @@ echo "   pool = $POOL"
 say "Paramètres Pricing (taux d'intérêt, plafonds minimum)"
 # Taux annuels en bps, figés dans scripts/rates.snapshot (rendements Etherfuse au jour du snapshot, ARS en dur) :
 # pas d'appel réseau ici. Le refaire exprès : ./scripts/sync-rates.sh --snapshot (les chiffres de la démo changent).
-# Repli si le snapshot manque ou est vide : Fed ≈ 4 %, Banxico ≈ 7 %, Selic ≈ 10,5 %, proxy BADLAR ≈ 22 %, BCE ≈ 2 %
-# (docs/todo-pricing.md §1.5).
-RATES=("USD 400" "MXN 700" "BRL 1050" "ARS 2200" "EUR 200")
-RATES_SRC="taux en dur (scripts/rates.snapshot absent ou vide)"
+# Repli si le snapshot manque ou est vide : copie du snapshot du 25/10/2026 (chiffres de la démo : 55 012,81 USDC).
+RATES=("USD 360" "MXN 555" "BRL 1148" "ARS 2200" "EUR 210")
+RATES_SRC="copie du snapshot du 25/10/2026 (scripts/rates.snapshot absent ou vide)"
 if [ -f scripts/rates.snapshot ]; then
   SNAP=()
   while read -r c b _; do
