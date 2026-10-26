@@ -2,6 +2,7 @@
 // Vue simple : Safe contre Dynamic, l'histogramme et trois climats de marché. « Advanced » ouvre les curseurs,
 // les indicateurs détaillés et les hypothèses. Recalcul dans un Web Worker.
 import { useEffect, useRef, useState } from 'react'
+import { useSlidingPill } from '../shared/useSlidingPill'
 import { pct } from './format'
 import { Histogram } from './Histogram'
 import { CAP, DYNAMIC, SAFE, SENIOR_RATE, type Params, type Summary } from './montecarlo'
@@ -68,6 +69,9 @@ export function RiskPage() {
   const [advanced, setAdvanced] = useState(false)
   const { summary: s, prev, busy } = useMonteCarlo({ vol, importers, contracts, seed })
   const [showPrev, setShowPrev] = useState(true)
+  const { wrap: moodsWrap, pill: moodsPill } = useSlidingPill(vol)
+  const { wrap: presetsWrap, pill: presetsPill } = useSlidingPill(`${vol}-${advanced}`)
+
   const mean = useTween(s?.mean)
 
   const reset = () => {
@@ -105,7 +109,8 @@ export function RiskPage() {
               {s && (oneIn ? `Loses money about 1 year in ${oneIn}.` : 'Never lost money in the simulation.')}
             </p>
           </article>
-          <div className="moods" role="group" aria-label="Market conditions">
+          <div className="moods has-pill" role="group" aria-label="Market conditions" ref={moodsWrap}>
+            <span className="slide-pill" ref={moodsPill} aria-hidden />
             <p className="eyebrow">Market</p>
             {MOODS.map((m) => (
               <button key={m.label} className={Math.abs(vol - m.vol) < 1e-9 ? 'on' : ''} onClick={() => setVol(m.vol)}>
@@ -149,7 +154,8 @@ export function RiskPage() {
             </span>
             <input className="range" type="range" min={5} max={40} step={0.5} value={vol * 100} onChange={(e) => setVol(Number(e.target.value) / 100)} />
           </label>
-          <div className="chips">
+          <div className="chips has-pill" ref={presetsWrap}>
+            <span className="slide-pill" ref={presetsPill} aria-hidden />
             {VOL_PRESETS.map((p) => (
               <button key={p.label} className={Math.abs(vol - p.vol) < 1e-9 ? 'on' : ''} onClick={() => setVol(p.vol)}>
                 {p.label} {(p.vol * 100).toFixed(1)}%

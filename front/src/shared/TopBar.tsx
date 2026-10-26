@@ -1,8 +1,32 @@
 // [FRONT — Hugo] Barre du haut : navigation à gauche, wallet à droite.
+// L'onglet actif est marqué par une pastille bleue qui glisse d'un bouton à l'autre.
 import { useState } from 'react'
 import { BRAND } from './config'
+import { LogoMark } from './Logo'
 import { go, useRoute } from './router'
+import { useSlidingPill } from './useSlidingPill'
 import { shortAddress, useWallet } from './wallet'
+
+const TABS = [
+  { route: '/vault', label: 'Vaults' },
+  { route: '/positions', label: 'My positions' },
+  { route: '/risk', label: 'Risk lab' },
+] as const
+
+/** Onglets avec la pastille glissante (cf. useSlidingPill). */
+function NavPills({ route }: { route: string }) {
+  const { wrap, pill } = useSlidingPill(route)
+  return (
+    <div className="nav-pills has-pill" ref={wrap}>
+      <span className="slide-pill nav-indicator" ref={pill} aria-hidden />
+      {TABS.map((t) => (
+        <button key={t.route} className={`nav-pill ${route === t.route ? 'active' : ''}`} onClick={() => go(t.route)}>
+          {t.label}
+        </button>
+      ))}
+    </div>
+  )
+}
 
 export function TopBar() {
   const route = useRoute()
@@ -10,23 +34,14 @@ export function TopBar() {
     <header className="topbar">
       <nav className="topbar-left">
         <button className="brand" onClick={() => go('/')}>
-          <span className="brand-mark" aria-hidden>◇</span>
-          {BRAND}
+          <LogoMark className="brand-mark" />
+          <span className="brand-word">
+            {BRAND.slice(0, 1)}
+            <i>{BRAND.slice(1)}</i>
+          </span>
         </button>
         {/* Sur l'accueil, pas de catégories : on y entre par le scroll (cf. Home.tsx). */}
-        {route !== '/' && (
-          <>
-            <button className={`nav-pill ${route === '/vault' ? 'active' : ''}`} onClick={() => go('/vault')}>
-              Vaults
-            </button>
-            <button className={`nav-pill ${route === '/positions' ? 'active' : ''}`} onClick={() => go('/positions')}>
-              My positions
-            </button>
-            <button className={`nav-pill ${route === '/risk' ? 'active' : ''}`} onClick={() => go('/risk')}>
-              Risk lab
-            </button>
-          </>
-        )}
+        {route !== '/' && <NavPills route={route} />}
       </nav>
       <WalletButton />
     </header>
