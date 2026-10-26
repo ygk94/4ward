@@ -2,13 +2,14 @@
 # Filet de sécurité de la vidéo : fait bouger le prix d'une devise sur le mock-oracle (bouton crash du front en panne).
 #   ./scripts/crash.sh [PCT] [DEVISE]      crash : prix × (1 + PCT %), PCT défaut 12 (accepte -8, 12.5 ou 12,5), DEVISE défaut MXN
 #   ./scripts/crash.sh --refresh [DEVISE]  repose le même prix (horodatage à maintenant, prix de moins de 900 s)
-#   ./scripts/crash.sh --reset [DEVISE]    aligne le mock sur le vrai cours Reflector FX
+#   ./scripts/crash.sh --reset [DEVISE]    aligne le mock sur le vrai cours Reflector FX (PAS le prix de la vidéo)
+#   ./scripts/crash.sh --demo [DEVISE]     pose le prix de la démo (setup) : MXN 0,055, BRL 0,18, ARS 0,001, EUR 1,1193
 #   ./scripts/crash.sh --dry-run ...       calcule et affiche tout, sans envoyer set_price
 # Alias surchargeables : ORACLE=fx-mock-oracle ADMIN=fx-admin NET=testnet (ex. ORACLE=pricing-mock ADMIN=pricing-dev).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-usage() { sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; }
 
 say() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 die() { printf '\033[31mErreur : %s\033[0m\n' "$*" >&2; exit 1; }
@@ -34,6 +35,7 @@ for arg in "$@"; do
     -h|--help) usage; exit 0 ;;
     --refresh) MODE=refresh ;;
     --reset) MODE=reset ;;
+    --demo) MODE=demo ;;
     --dry-run) DRY_RUN=1 ;;
     -[0-9]*|[0-9]*) PCT=$arg ;;
     -*) die "option inconnue : $arg (voir --help)" ;;
@@ -85,7 +87,7 @@ delta_bps() {
   echo "$r"
 }
 
-# Montant en centimes → « 55 275,00 ».
+# Montant en centimes → « 55 012,81 ».
 fmt_usd() {
   local c=$1 d u=""
   d=$(( c / 100 ))
@@ -114,7 +116,7 @@ say "Mock-oracle $ORACLE, $CUR_SYM ($NET)"
 OUT=$(lastprice "$ORACLE")
 read -r CUR CUR_TS <<<"$OUT" || true
 if [ -z "${CUR:-}" ]; then
-  [ "$MODE" = reset ] || die "pas de prix $CUR_SYM sur le mock : lancer d'abord --reset (prix Reflector) ou set_price à la main"
+  [ "$MODE" = reset ] || [ "$MODE" = demo ] || die "pas de prix $CUR_SYM sur le mock : lancer d'abord --reset (prix Reflector) ou set_price à la main"
   echo "   pas encore de prix $CUR_SYM sur le mock"
 else
   show_price "Prix actuel" "$CUR" "$CUR_TS"
@@ -140,6 +142,17 @@ case "$MODE" in
     NEW=$REF
     LABEL="Alignement sur Reflector"
     ;;
+  demo)
+    # Prix posés par setup-testnet.sh (14 décimales) : ceux des chiffres de la vidéo.
+    case "$CUR_SYM" in
+      MXN) NEW=5500000000000 ;;
+      BRL) NEW=18000000000000 ;;
+      ARS) NEW=100000000000 ;;
+      EUR) NEW=111930000000000 ;;
+      *) die "pas de prix de démo pour $CUR_SYM (MXN, BRL, ARS, EUR)" ;;
+    esac
+    LABEL="Prix de la démo (setup-testnet.sh)"
+    ;;
 esac
 
 say "$LABEL"
@@ -150,7 +163,7 @@ echo "   set_price --asset '$ASSET' --price $NEW"
 
 if [ "$MODE" = reset ] && [ "$CUR_SYM" = MXN ]; then
   GAP=$(delta_bps "$DEX_PRICE" "$NEW")
-  echo "   Écart avec l'offre DEX MXN/USDC ($(fmt_price "$DEX_PRICE")) : $(fmt_pct "$GAP")"
+  echo "   Écart avec le prix DEX de référence du setup ($(fmt_price "$DEX_PRICE"), vérifier l'offre réelle sur Horizon) : $(fmt_pct "$GAP")"
   if [ "$GAP" -ne 0 ]; then
     echo "   → prévenir Hugo / Clément : réaligner l'offre DEX (docs/payment-cli.md § 5)."
     # Chiffres de la vidéo à 0,055, cotés sur 90 j (facteur 25 920) : prix figé 55 012,81 · payé au total après +12 %

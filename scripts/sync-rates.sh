@@ -4,7 +4,7 @@
 #   ./scripts/sync-rates.sh --all      ajoute GBP ← GILTS
 #   ./scripts/sync-rates.sh --dry-run  calcule et affiche tout, sans envoyer set_rate
 #   ./scripts/sync-rates.sh --snapshot écrit les taux dans scripts/rates.snapshot (lu par setup-testnet.sh), sans set_rate
-# Repli sur le taux en dur de la devise si l'API ne répond pas, si la valeur manque, vaut 0 ou sort de ]0, 5000] bps.
+# Repli sur le taux de scripts/rates.snapshot si l'API ne répond pas, si la valeur manque, vaut 0 ou sort de ]0, 5000] bps.
 # Alias surchargeables : POOL=fx-pool ADMIN=fx-admin NET=testnet ETHERFUSE_URL=https://api.etherfuse.com/lookup/tokens/cost
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -30,7 +30,7 @@ for arg in "$@"; do
   esac
 done
 
-# .env.testnet est facultatif : il ne sert qu'au repli sur POOL_ID (setup-testnet.sh appelle ce script avant de l'écrire).
+# .env.testnet est facultatif : il ne sert qu'au repli sur POOL_ID.
 # shellcheck disable=SC1091
 [ -f .env.testnet ] && source .env.testnet
 
@@ -45,9 +45,17 @@ if [ -z "${POOL:-}" ]; then
 fi
 [ -n "$POOL" ] || [ "$DRY_RUN" = 1 ] || [ "$SNAPSHOT" = 1 ] || die "pool introuvable : ni alias fx-pool ni POOL_ID dans .env.testnet (POOL=... pour le choisir)"
 
-# Devise, stablebond Etherfuse (- : aucun), taux en dur de référence en bps (- : aucun).
-# Taux en dur = ceux de setup-testnet.sh (Fed, Banxico, Selic, proxy BADLAR, BCE) : docs/todo-pricing.md §1.5
-ROWS=("USD USTRY 400" "MXN CETES 700" "BRL TESOURO 1050" "ARS - 2200" "EUR EUROB 200")
+# Devise, stablebond Etherfuse (- : aucun), taux de repli en bps (- : aucun).
+# Taux de repli = scripts/rates.snapshot (taux du pool déployé, chiffres de la démo), lus ci-dessous ;
+# valeurs écrites ici = copie du snapshot du 25/10/2026, utilisées seulement si le fichier manque.
+ROWS=("USD USTRY 360" "MXN CETES 555" "BRL TESOURO 1148" "ARS - 2200" "EUR EUROB 210")
+if [ -f "$SNAPSHOT_FILE" ]; then
+  for i in "${!ROWS[@]}"; do
+    set -- ${ROWS[$i]}
+    SNAP_BPS=$(awk -v c="$1" '$1 == c && $2 ~ /^[0-9]+$/ { print $2; exit }' "$SNAPSHOT_FILE")
+    [ -z "$SNAP_BPS" ] || ROWS[$i]="$1 $2 $SNAP_BPS"
+  done
+fi
 [ "$ALL" = 0 ] || ROWS+=("GBP GILTS -")
 
 # bps → « 5,55 % ».
