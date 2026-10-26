@@ -1,6 +1,6 @@
 # Points à trancher
 
-État au 25/10 soir. Le contrat est complet dans `main` et le testnet est vérifié. **Les trois points sont réglés** (mergés dans `main` et validés sur le testnet le 25/10 soir).
+État au 25/10 soir. Le contrat est complet dans `main` et le testnet est vérifié. **Les trois points sont réglés** (mergés dans `main` et validés sur le testnet le 25/10 soir). Le point 4 liste les limites connues du contrat, documentées et à corriger après la deadline.
 
 ---
 
@@ -48,6 +48,26 @@
 **Le problème.** Les refus du Pricing sont des `panic!("currency not enabled")`, `"stale price"`, `"rate not set"`, `"cap below minimum"`… Les textes sont effacés dans le contrat compilé : le front reçoit une erreur générique et ne peut pas afficher « protection minimale pour le peso : 5 % ».
 
 **Le correctif.** `#[contracterror] enum PricingError` avec des codes 300-399, comme le vault (100-110) et le paiement (200-204).
+
+---
+
+## 4. ⬜ Limites connues du contrat (documentées, correctifs après la deadline)
+
+Aucune n'est corrigée dans le contrat avant la soumission ; elles sont résumées dans le README (*Limites connues du contrat*).
+
+**a. Fixing indisponible (302/312) = couverture irréglable.** `settle` lit le cours en vigueur à l'échéance (`pricing::fixing`). S'il n'y a aucun prix de moins de 900 s avant l'échéance (302), ou si l'échéance dépasse l'historique de l'oracle (312 : 64 prix sur le mock, ~12 h sur Reflector), l'erreur est **définitive** : un prix posé après l'échéance ne compte jamais, aucune fonction ne passe `settled` à true ni ne libère `Reserved`. La marge de la PME et le capital réservé restent bloqués. *Correctif :* fonction admin `settle_fallback(id)` qui, après l'échéance + un délai de grâce, fait `close_position` et rend la marge avec un P&L nul. *Pour la vidéo :* 90 j uniquement, `crash.sh` ou `crash.sh --refresh` pendant les 5 min avant l'échéance, keeper actif.
+
+**b. Mode démo (`time_factor` > 1).** Le prix porte sur la durée annoncée et l'échéance est raccourcie, donc le carry n'est pas neutralisé : avec un oracle immobile, on encaisse l'écart forward / spot sans risque en quelques minutes. `time_factor` doit valoir 1 en production (à terme : `set_time_factor` derrière une feature cargo).
+
+**c. Dépôt juste avant un `settle` gagnant.** Le fixing est public dès l'échéance, alors que `settle` est appelé plus tard : un LP peut déposer au prix plein juste avant un règlement gagnant pour le pool, puis retirer juste après. *Correctif :* délai d'entrée, ou blocage de `deposit_lp` tant qu'une couverture échue n'est pas réglée.
+
+**d. Versement poussé dans `settle`.** Si le transfert USDC au propriétaire échoue (trustline supprimée, compte désautorisé par l'émetteur), tout le `settle` échoue et le capital réservé reste bloqué tant que le propriétaire ne corrige pas. *Correctif :* modèle pull (solde réclamable + `claim()`).
+
+**e. Tranches : intérêts senior et `Reserved`.** Les intérêts senior (4,5 %/an, temps réel) sont pris sur le junior : la valeur junior peut passer sous `Reserved` (capacité négative) ou sous 20 % sans aucune opération, et `withdraw_senior` ne vérifie pas que le capital restant couvre `Reserved` (un `settle` perdant pour le pool échouerait alors en 103). *Correctif :* dans `withdraw_senior`, refuser si `total_deposits - amount < reserved` (nouveau code 113).
+
+**f. Dernière part junior.** Si toutes les parts junior sont brûlées alors qu'il reste du capital (`Reserved`), le déposant suivant en hérite (et des pertes éventuelles). *Correctif :* refuser de brûler la dernière part tant que `reserved > 0`.
+
+**g. Débordements dans `to_usdc` / `mul_div_*`.** Un notionnel démesuré fait trapper la VM au lieu de renvoyer un code (aucun risque de fonds, `vault::notional_usdc` est protégé). *Correctif :* `checked_mul` et `PricingError::Overflow = 313`.
 
 ---
 

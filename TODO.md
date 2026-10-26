@@ -59,6 +59,8 @@ Légende : ✅ fait · ⬜ à faire · 🔴 bloquant pour les autres ou pour la 
 - ✅ **Testnet redéployé sur `main`** (IDs dans `.env.testnet`, mode démo 90 j → 5 min) ; scénario exact de la vidéo rejoué : prix figé 55 012,81 USDC (taux Etherfuse figés dans `scripts/rates.snapshot`), crash +12 % (`crash.sh`), règlement au fixing sans rafraîchir le prix, fournisseur payé 1 000 000 MXN, **coût total de Lucía 56 098,72 USDC au centime**. Ne pas relancer `sync-rates.sh --snapshot` avant la vidéo. Tranche prudente testée : dépôt de 100 000 USDC, refus #111 au-delà du ratio.
 - ⬜ 🔴 **Front** : en cours (Hugo).
 - ⬜ 🔴 **Vidéo, deck, nom, soumission.**
+- ⬜ 🔴 **État du testnet avant la vidéo (Hugo, `fx-admin`)** : le mock donne MXN ≈ 0,0692 (crashs du peuplement) ; remettre `set_price --asset '{"Other":"MXN"}' --price 5500000000000` moins de 900 s avant `open_hedge` (pas `crash.sh --reset`, qui prend le cours Reflector), puis vérifier qu'une quote 1e13 / 7776000 / cap 1000 renvoie `usdc_cost` 550128136866.
+- ⚠️ **Couvertures seed 14 (BRL) et 15 (MXN) bloquées en 302** (aucun prix posé avant leur échéance, fixing absent) : marges immobilisées (75 730,32 et 64 410,13 USDC), capacity suffisante pour la démo. Ne pas les montrer dans la vidéo ; ignorer leur bouton Settle dans le front s'il apparaît.
 
 **Points ouverts à trancher :** voir `docs/points-a-trancher.md` (les trois sont réglés).
 
@@ -217,9 +219,9 @@ Touche `vault.rs` : interface à convenir avec Hugo, c'est lui qui l'intègre da
 
 ## Démo (vidéo de 3 min)
 
-1. Lucía et sa facture de 1 000 000 MXN à 90 jours, spot réel lu sur Reflector
+1. Lucía et sa facture de 1 000 000 MXN à 90 jours, spot 0,055 lu sur l'oracle de démo (mock SEP-40, même interface que Reflector)
 2. Plafond 10 %, prix figé, dépôt de marge, signature Freighter
-3. « Crash du peso » +12 % : sans protection, la facture coûte ~6 600 $ de plus ; avec, Lucía ne supporte que les 2 % au-delà de son plafond (~1 100 $)
+3. « Crash du peso » +12 % : sans protection, la facture coûte 6 587 $ de plus (61 600) ; avec, Lucía ne supporte que ce qui dépasse son plafond (+1 086 $, 56 098,72 au total)
 4. Échéance (en secondes) : `settle()` crédite l'USDC, le path payment livre 1 000 000 MXN au fournisseur, visible sur l'explorateur
 5. Pool toujours solvable ; slide « suite » : netting, Blend, affacturage, SDK anchors
 

@@ -15,9 +15,9 @@ Une grande entreprise appellerait sa banque pour bloquer le taux (un *forward de
 ## La solution
 
 1. Lucía saisit sa facture : *1 000 000 MXN dans 90 jours*.
-2. L'app lui affiche un prix figé : *« vous paierez 54 873 USDC, quoi qu'il arrive »*.
+2. L'app lui affiche un prix figé : *« vous paierez 55 013 USDC, quoi qu'il arrive »*.
 3. Elle choisit sa protection (par ex. ±10 %), dépose la marge correspondante en USDC et signe dans Freighter.
-4. Le jour J, n'importe qui peut déclencher le règlement. Le contrat lit le cours sur l'oracle Reflector :
+4. Le jour J, n'importe qui peut déclencher le règlement. Le contrat lit le cours sur un oracle SEP-40 (Reflector FX en production, mock-oracle de même interface pour la démo) :
    - le peso a monté → le pool lui verse la différence ;
    - le peso a baissé → la différence est prise sur sa marge.
 5. Dans la foulée, un **path payment Stellar** convertit ses USDC en pesos et paie le fournisseur : **1 000 000 MXN pile**, pour un coût total égal au prix figé au jour 0.
@@ -47,9 +47,9 @@ Spot et F en USD par unité de devise (convention de l'oracle Reflector) :
 F = Spot × (1 + r_USD × t) / (1 + r_devise × t)      prix proposé = F ± spread
 ```
 
-Exemple : 1 MXN = 0,055 USD, r_MXN = 7 %, r_USD = 4 %, 90 jours → F ≈ 0,05460 USD. Le peso, mieux rémunéré, cote moins cher à terme. Sans cet ajustement, des arbitragistes pourraient gagner sans risque contre le pool.
+Exemple : 1 MXN = 0,055 USD, r_MXN = 5,55 %, r_USD = 3,6 %, 90 jours → F ≈ 0,05474 USD (0,05501 spread inclus). Le peso, mieux rémunéré, cote moins cher à terme. Sans cet ajustement, des arbitragistes pourraient gagner sans risque contre le pool.
 
-`r_USD` est le taux des bons du Trésor US tokenisés (~4 %) : c'est ce que rapporterait le capital du pool s'il ne servait pas à couvrir (voir *Où dort l'argent du pool*).
+`r_USD` est le taux des bons du Trésor US tokenisés (3,6 % : USTRY d'Etherfuse, `scripts/rates.snapshot`) : c'est ce que rapporterait le capital du pool s'il ne servait pas à couvrir (voir *Où dort l'argent du pool*).
 
 Le spot vient de **Reflector FX**, l'oracle de change natif de Stellar (SEP-40, mise à jour toutes les 300 s). Sur mainnet (`CBKGPWGKSKZF52CFHMTRR23TBWTPMRDIYZ4O2P5VS65BMHYH4DXMCJZC`), il couvre **24 devises** (vérifié onchain le 25/10/2026) : EUR, GBP, CAD, JPY, CNY, HKD, KRW, INR, PHP, TRY, RUB, ZAR, MXN, BRL, ARS, COP, CLP, PEN, CRC, VES, NGN, KES, CDF, XAU.
 
@@ -69,15 +69,15 @@ Tout ce qui peut être perdu est **déjà déposé** dans le contrat : pas d'app
 
 ### Ce que paie la PME
 
-Pour 1 000 000 MXN à 90 jours, plafond 10 %, spread 0,5 % (≈ 54 873 USDC) :
+Pour 1 000 000 MXN à 90 jours, plafond 10 %, spread 0,5 % (≈ 55 013 USDC) :
 
 | Coût | Montant | % de la facture |
 |---|---|---|
-| Spread du pool | ~273 USDC | 0,50 % |
-| Rendement perdu sur la marge bloquée (5 487 USDC à ~4 %) | ~54 USDC | 0,10 % |
+| Spread du pool | ~274 USDC | 0,50 % |
+| Rendement perdu sur la marge bloquée (5 501 USDC à ~3,6 %) | ~49 USDC | 0,09 % |
 | Écart forward / spot | — | pas un frais : c'est le juste prix (en faveur d'un importateur de pesos) |
 | Frais Stellar, oracle | ~0 | ~0 |
-| **Total** | **~330 USDC** | **~0,6 %** (≈ 2,4 %/an) |
+| **Total** | **~323 USDC** | **~0,6 %** (≈ 2,4 %/an) |
 
 La conversion USDC → MXN pour payer le fournisseur n'est pas comptée : elle est due avec ou sans couverture.
 
@@ -145,7 +145,7 @@ Règles du contrat :
 2. **Cascade** : les pertes touchent le junior d'abord ; les gains paient d'abord le taux du senior, le junior prend le surplus.
 3. **La part couverte est un réglage** : plus de junior, moins de couverture et plus de levier.
 4. **Junior épuisé** : le pool n'accepte plus que des couvertures entièrement couvertes.
-5. **Ratio minimum** : tant qu'il y a des seniors, le junior reste ≥ 20 % du capital (dépôt senior ou retrait junior refusé sinon).
+5. **Ratio minimum** : tant qu'il y a des seniors, le junior reste ≥ 20 % du capital au moment de chaque dépôt senior ou retrait junior (refusés sinon) ; les intérêts senior peuvent le faire baisser ensuite.
 
 **Le rendement du senior est payé par le junior tant que le capital libre n'est pas placé** (bons du Trésor, CETES) : le prix de la part senior progresse de 4,5 %/an, et cette progression est retirée de la valeur du junior. Le placement de la trésorerie est en roadmap ; d'ici là, le junior paie le senior avec ses spreads.
 
@@ -236,13 +236,15 @@ Le MVP montre le filet (plafond + règle de capacité brute, plus prudente) ; ne
 │  panneau LP  │             │  quote / open_hedge / settle         │
 └──────┬───────┘             │  capacity                            │
        │                     └──────────────┬───────────────────────┘
-       │ path payment                       │ lastprice (SEP-40)
+       │ path payment                       │ lastprice / price(ts) (SEP-40)
        ▼                                    ▼
 ┌──────────────┐             ┌──────────────────────────────────────┐
-│ DEX Stellar  │             │ Reflector FX (spot réel affiché)     │
+│ DEX Stellar  │             │ Reflector FX (production)            │
 │ USDC → MXN   │             │ mock-oracle SEP-40 (démo : « crash ») │
 └──────────────┘             └──────────────────────────────────────┘
 ```
+
+Erreurs : Vault 100-112, Paiement 200-205, Pricing 300-312, token USDC #10 (solde insuffisant) ; table complète : `docs/payment-cli.md` (§ Erreurs à traduire).
 
 Une transaction Soroban ne peut pas contenir d'opération classique : le front enchaîne `settle()` puis le path payment, en deux transactions.
 
@@ -351,6 +353,15 @@ TODO.md                # setup et chantiers
 | Taux d'intérêt poussés par l'admin | Taux synchronisés depuis Etherfuse (push oracle, `scripts/sync-rates.sh`), lecture onchain en roadmap |
 | Oracle manipulé au fixing | TWAP sur une fenêtre, bornes de cohérence, plusieurs oracles |
 | Écart oracle / cours réel du DEX ou de l'anchor | Résidu faible, affiché à l'utilisateur |
+
+### Limites connues du contrat (MVP)
+
+Correctifs prévus après le hackathon ; détail dans `docs/points-a-trancher.md`.
+
+- **Fixing indisponible (302/312) = couverture irréglable.** `settle` règle au cours en vigueur à l'échéance (`pricing::fixing`). Si l'oracle n'a aucun prix de moins de 900 s avant l'échéance (302), ou si l'échéance dépasse son historique (312), la couverture ne peut plus être réglée : la marge de la PME et le capital réservé restent bloqués. Voie de secours `settle_fallback` (admin, après l'échéance + délai de grâce, P&L nul) en roadmap.
+- **Mode démo (`time_factor` > 1)** : le prix porte sur la durée annoncée et l'échéance est raccourcie, donc le carry n'est pas neutralisé (arbitrage possible contre le pool). `time_factor` doit valoir 1 en production (à terme : `set_time_factor` derrière une feature cargo).
+- **Dépôt juste avant un `settle` gagnant** : le fixing est connu dès l'échéance, un LP peut entrer au prix plein juste avant le règlement et ressortir juste après. À corriger par un délai d'entrée ou un blocage de `deposit_lp` tant qu'une couverture échue n'est pas réglée.
+- **Tranches** : les intérêts senior courus font baisser la valeur junior, qui peut passer sous le capital réservé (capacité négative) ou sous 20 % sans aucune opération ; `withdraw_senior` ne vérifie pas encore que le capital restant couvre le réservé.
 
 ## Concurrence
 
