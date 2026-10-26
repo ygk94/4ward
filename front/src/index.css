@@ -740,6 +740,9 @@ select {
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
+  /* le dégradé n'est peint que dans la boîte : avec l'interlettrage négatif, le dernier chiffre (et la virgule)
+     dépassent et étaient coupés ; un peu de marge intérieure les y fait rentrer */
+  padding: 0 0.1em 0.1em 0;
 }
 .about-foot {
   display: flex;
