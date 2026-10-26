@@ -55,7 +55,7 @@ Légende : ✅ fait · ⬜ à faire · 🔴 bloquant pour les autres ou pour la 
 
 ## État au 25/10 soir
 
-- ✅ **Contrat complet et mergé dans `main`** : vault (phases 1 à 6), paiement (`open` / `settle` branchés sur le vault, codes 200-204), pricing (spot, taux forward, plafonds, liste blanche des devises). 143 tests verts (0 ignoré), CI verte. Mergés aussi : fixing à l'échéance, mode démo `time_factor`, `crash.sh`, tranches prudente / dynamique (`deposit_senior`, `withdraw_senior`, `senior_balance`, `tranche_values`, codes 111-112).
+- ✅ **Contrat complet et mergé dans `main`** : vault (phases 1 à 6), paiement (`open` / `settle` branchés sur le vault, codes 200-205), pricing (spot, taux forward, plafonds, liste blanche des devises). 143 tests verts (0 ignoré), CI verte. Mergés aussi : fixing à l'échéance, mode démo `time_factor`, `crash.sh`, tranches prudente / dynamique (`deposit_senior`, `withdraw_senior`, `senior_balance`, `tranche_values`, codes 111-112).
 - ✅ **Testnet redéployé sur `main`** (IDs dans `.env.testnet`, mode démo 90 j → 5 min) ; scénario exact de la vidéo rejoué : prix figé 55 012,81 USDC (taux Etherfuse figés dans `scripts/rates.snapshot`), crash +12 % (`crash.sh`), règlement au fixing sans rafraîchir le prix, fournisseur payé 1 000 000 MXN, **coût total de Lucía 56 098,72 USDC au centime**. Ne pas relancer `sync-rates.sh --snapshot` avant la vidéo. Tranche prudente testée : dépôt de 100 000 USDC, refus #111 au-delà du ratio.
 - ⬜ 🔴 **Front** : en cours (Hugo).
 - ⬜ 🔴 **Vidéo, deck, nom, soumission.**
@@ -70,7 +70,7 @@ Légende : ✅ fait · ⬜ à faire · 🔴 bloquant pour les autres ou pour la 
 
 ### Contrat (`vault.rs`)
 
-**Principe :** le vault ne contient **que des dollars** (USDC). Chaque couverture est une jambe devise contre USD, sur les devises de Reflector testnet (EUR, GBP, CHF, CAD, MXN, ARS, BRL, THB). Couvertures croisées (MXN → EUR) : plus tard. Le rendement du capital libre (Etherfuse, indexé sur les bons du Trésor US) est **géré par Pricing (Lancelot)** ; le vault lui expose le capital libre.
+**Principe :** le vault ne contient **que des dollars** (USDC). Chaque couverture est une jambe devise contre USD ; devises ouvertes en démo : MXN, BRL, ARS, EUR (Reflector testnet couvre aussi GBP, CHF, CAD, THB). Couvertures croisées (MXN → EUR) : plus tard. Le rendement du capital libre (Etherfuse, indexé sur les bons du Trésor US) est **géré par Pricing (Lancelot)** ; le vault lui expose le capital libre.
 
 Checklist cochable : https://claude.ai/artifact/9hWHDQW8siGsCBVb3TZHmY
 
@@ -97,8 +97,8 @@ Checklist cochable : https://claude.ai/artifact/9hWHDQW8siGsCBVb3TZHmY
 #### Phase 3 — Exposition par devise (une devise par couverture pour l'instant)
 14. ✅ Suivre l'exposition **nette** par devise contre l'USD : `Exposure(Symbol)` = volume acheteur − volume vendeur, en USD
 15. ✅ API pour Paiement : `add_exposure(devise, montant_usd, sens)` / `remove_exposure(...)`, une fois par jambe
-16. ✅ Règle de capacité avec netting : `Reserved = Σ |exposition nette par devise| × plafond`, à la place de la somme brute des marges (deux couvertures opposées ne consomment plus de capital)
-17. ✅ Limite par devise : exposition nette ≤ x % du capital (ex. MXN 30 %, ARS 10 %), paramétrable par l'admin
+16. ⬜ (roadmap) Netting dans la règle de capacité (`Reserved = Σ |exposition nette par devise| × plafond` au lieu de la somme brute des marges) : `basket_max_loss` prêt et testé, non branché ; le MVP garde la règle brute
+17. ✅ Limite par devise : Σ marges de la devise ≤ x % du capital (ex. MXN 30 %, ARS 10 %), paramétrable par l'admin
 18. ✅ Tests : un acheteur et un vendeur de MXN se compensent ; limite par devise refusée
 
 #### Phase 4 — Rendement du capital libre → confié à Pricing (Lancelot)
@@ -125,7 +125,7 @@ Le vault expose `capacity()` et `total_assets()` ; si Lancelot ajoute le placeme
    - coût total réel de Lucía = prix figé, liens stellar.expert pour les deux transactions
    - comparaison « sans protection / avec protection » après le crash
    - compte à rebours jusqu'à `maturity` ; bouton « Régler » activé seulement après (sinon erreur #202 NotMatured)
-   - traduire les codes d'erreur : vault 100-110, paiement 200-204, pricing 300-311 (tables dans `docs/payment-cli.md` et `docs/todo-pricing.md`)
+   - traduire les codes d'erreur : vault 100-112, paiement 200-205, pricing 300-312, token USDC #10 (solde insuffisant) (tables dans `docs/payment-cli.md` et `docs/todo-pricing.md`)
 5. ⬜ `pricing/QuoteCard.tsx` : spot réel Reflector, prix figé, marge à déposer (appel `quote`)
 6. ⬜ `pricing/CrashButton.tsx` : `set_price` sur le mock (compte admin), le peso monte de 12 %
 7. ⬜ `vault/PoolPanel.tsx` : capital total, réservé, libre, prix de la part, position du LP, **exposition nette par devise** (graphique), indicateur « solvable », déposer / retirer (compte `fx-lp`)
@@ -141,7 +141,7 @@ Commencer avec des données factices, brancher le contrat après le merge.
 
 ### Pitch et soumission
 1. ⬜ 🔴 Nom du projet → remplacer `<NOM>` partout (README, front, deck)
-2. ⬜ Deck (8-10 slides) : problème (Lucía) → solution → démo → pourquoi Stellar → protection plafonnée et règle de capacité → pricing (slides de Pricing) → concurrence (Hedgehog) → roadmap → équipe
+2. ⬜ Deck (8-10 slides) : problème (Lucía) → solution → démo → pourquoi Stellar → slide « Built on Stellar » en deux colonnes (Unlocked : path payment strict receive USDC → MXN, USDC SAC, événements Soroban ; Composed : Reflector FX SEP-40, Stellar Wallets Kit, taux Etherfuse CETES / USTRY dans le prix à terme) → protection plafonnée et règle de capacité → pricing (slides de Pricing) → concurrence (Hedgehog) → roadmap → équipe
 3. ⬜ Slide roadmap : Blend sur le capital non réservé, parts SEP-41, netting, affacturage, SDK anchors
 4. ⬜ 🔴 Enregistrer la vidéo (3 min) sur le script de Paiement, **avant lundi 10h**
 5. ⬜ README final : nom, captures/GIF, lien vidéo, IDs à jour
@@ -153,7 +153,7 @@ Commencer avec des données factices, brancher le contrat après le merge.
 1. ✅ `settle` en premier, piloté par les tests : hausse (le pool paie), baisse (Lucía paie sur sa marge), au-delà du plafond (borné), garde-fous (pas avant l'échéance, pas deux fois)
 2. ✅ `open` : `require_auth(owner)`, `pricing::check_cap`, `locked_rate = pricing::forward_rate`, marge = `to_usdc(notional, locked_rate) × cap_bps / BPS`, transfert de la marge, `vault::reserve(marge)`, stockage + `extend_ttl`
 3. ✅ Événements `open` / `settle` (pour le front et l'explorateur)
-5. ✅ Branché sur le vault (`open_position` / `close_position`), codes `HedgeError` 200-204
+5. ✅ Branché sur le vault (`open_position` / `close_position`), codes `HedgeError` 200-205
 6. ✅ Retirer les `#[ignore]` des 13 tests d'intégration : ajouter `set_rate` / `set_min_cap` dans leur préparation (liste blanche du Pricing)
 7. ✅ Régler au **cours de fixing à l'échéance** (`pricing::fixing(currency, maturity)` de Lancelot) au lieu du spot au moment de l'appel : sinon option gratuite pour qui choisit quand régler
 4. ✅ (obsolète) Tant que Vault et Pricing ne sont pas prêts : remplacer leurs `panic!("TODO")` par des valeurs en dur en local, **sans les committer**
@@ -161,7 +161,7 @@ Commencer avec des données factices, brancher le contrat après le merge.
 ### Pour le front d'Hugo
 1. ✅ (`docs/payment-cli.md`) Valider le parcours en ligne de commande avant le merge : `open_hedge` → `settle` → path payment, sur **ton propre déploiement** (cf. Démarrage), avec les commandes `stellar contract invoke` / `stellar tx new path-payment-strict-receive` exactes, à donner à Hugo. Écrire les commandes avec les alias (`--id fx-pool`, `--source-account fx-lucia`) et non des adresses en dur : Hugo les rejoue telles quelles sur le déploiement officiel
 2. ✅ (`docs/payment-cli.md`) Préciser les montants à afficher (marge rendue, P&L, coût total) et les cas d'erreur à gérer
-3. ✅ Chiffres de `payment-cli.md` et `video-script.md` mis à jour avec le vrai Pricing (60 s : 55 275 / 56 072,50 ; répétition testnet au centime)
+3. ✅ Chiffres de `payment-cli.md` et `video-script.md` mis à jour avec le vrai Pricing (historique, 60 s, taux 400/700 : 55 275 / 56 072,50 ; répétition testnet au centime)
 4. ✅ Facteur d'accélération pour la démo (point 2, option b) : prix calculé sur 90 j, échéance réelle courte ; puis repasser la vidéo aux chiffres de 90 j
 
 ### Testnet
@@ -180,15 +180,15 @@ Un prix faux = arbitrage contre le pool : c'est ce qui rend le produit crédible
 2. ✅ 🔴 `forward_rate` : `F = S × (1 + r_USD·t) / (1 + r_dev·t)` en i128 (t = durée / 31 536 000 s), puis le spread **contre l'utilisateur** (BuyCurrency → F × (1 + spread), SellCurrency → F × (1 − spread))
 3. ✅ `quote` : `spot`, `forward_rate`, `usdc_cost = to_usdc(notional, F)`, `margin = usdc_cost × cap_bps / BPS`
 4. ✅ `check_cap` et `set_min_cap` : plafond minimum par devise (ex. MXN 5 %, BRL 7 %, ARS 15 %)
-5. ✅ `set_rate`, `set_spread` (admin, `require_auth`) avec des valeurs réalistes et sourcées : USD 4 %, MXN 7 %, BRL 10,5 %, ARS
-6. ✅ Tests du bloc Pricing : parité chiffrée (r_MXN 7 %, r_USD 4 %, 90 j → F ≈ 0,05460), sens du spread, plafond minimum
+5. ✅ `set_rate`, `set_spread` (admin, `require_auth`) avec des valeurs réalistes et sourcées : taux Etherfuse figés dans `scripts/rates.snapshot` (USD 3,6 %, MXN 5,55 %, BRL 11,48 %, ARS 22 %, EUR 2,1 %) ; repli en dur historique : USD 4 %, MXN 7 %, BRL 10,5 %, ARS
+6. ✅ Tests du bloc Pricing : parité chiffrée (r_MXN 7 %, r_USD 4 %, 90 j → F ≈ 0,05460 ; historique, remplacé par Etherfuse 3,6 % / 5,55 %, F ≈ 0,05474 hors spread), sens du spread, plafond minimum
 7. ✅ Donner à Hugo les appels `set_rate` / `set_min_cap` à ajouter au script de setup
 8. ✅ Remplacer les `panic!("...")` (`currency not enabled`, `stale price`, `rate not set`…) par `#[contracterror] enum PricingError` (codes 300-399) : les textes sont effacés dans le WASM, le front ne peut pas les distinguer
 9. ✅ `fixing(currency, maturity)` pour `settle` : lecture `price(asset, timestamp)` de Reflector ; historique des prix dans le mock-oracle (`price(asset, ts)`)
 
 ### Oracle et scripts
 1. ✅ `scripts/crash.sh` (`--refresh`, `--reset`, `--dry-run`) : `set_price` du MXN +12 % sur le mock en ligne de commande (filet de sécurité pendant la vidéo). Utiliser les alias (`fx-admin`, `fx-mock-oracle`) : tu le testes sur ton déploiement, Hugo le lance sur le sien
-2. ⬜ ⚠️ `spot` refuse un prix de plus de 900 s (`MAX_PRICE_AGE_SECS`) : pendant la démo, le prix du mock doit être frais avant `open_hedge` (le taux forward lit le spot) ET avant `settle` (le crash le fait ; sinon relancer `set_price`). Juste avant la vidéo : donner à Hugo la commande pour aligner le prix du mock sur le vrai spot Reflector (c'est lui qui la lance, avec `fx-admin`) ; prévenir Paiement pour l'offre DEX
+2. ⬜ ⚠️ `spot` refuse un prix de plus de 900 s (`MAX_PRICE_AGE_SECS`) : pendant la démo, le prix du mock doit être frais avant `open_hedge` (le taux forward lit le spot) ; au `settle`, le fixing exige un prix posé moins de 900 s avant l'échéance (le crash le fait). Juste avant la vidéo : donner à Hugo la commande pour aligner le prix du mock sur le vrai spot Reflector (c'est lui qui la lance, avec `fx-admin`) ; prévenir Paiement pour l'offre DEX
 3. ⬜ Donner à Hugo la lecture du spot Reflector côté front (contrat, `Asset::Other("MXN")`, conversion des 14 décimales) pour `QuoteCard`
 
 ### Rendement du capital libre (Etherfuse, indexé sur les bons du Trésor US)
@@ -213,8 +213,8 @@ Touche `vault.rs` : interface à convenir avec Hugo, c'est lui qui l'intègre da
 
 ## À dire dans la présentation
 
-- **Devises :** la démo utilise les devises que Reflector couvre sur testnet (EUR, GBP, CHF, CAD, MXN, ARS, BRL, THB). Sur mainnet, toute devise couverte par l'oracle s'ajoute sans changer le contrat.
-- **Etherfuse :** pas d'actifs sur le testnet Stellar, donc on émet nos propres actifs de test ; en production, le capital libre passe par Etherfuse (stablebonds indexés sur les bons du Trésor US).
+- **Devises :** devises ouvertes en démo : MXN, BRL, ARS, EUR (Reflector testnet couvre aussi GBP, CHF, CAD, THB). Sur mainnet, toute devise couverte par l'oracle s'ajoute sans changer le contrat.
+- **Etherfuse :** pas d'actifs sur le testnet Stellar, donc on émet nos propres actifs de test ; en production, le capital libre passe par Etherfuse (stablebonds indexés sur les bons du Trésor US). Les taux Etherfuse sont **déjà** dans le pricing : rendements USTRY, CETES, TESOURO et EUROB relevés sur l'API Etherfuse (`scripts/sync-rates.sh`), figés dans `scripts/rates.snapshot` et posés par le setup (argument Stellar Composed).
 - **Couvertures croisées** (ex. MXN → EUR) : en roadmap. Le modèle « une jambe par devise contre USD » les rend naturelles : chaque jambe compte dans l'exposition de sa devise.
 
 ## Démo (vidéo de 3 min)

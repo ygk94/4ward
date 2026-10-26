@@ -2,7 +2,11 @@
 
 > **Bloquez aujourd'hui le prix d'une facture fournisseur payable en devise dans 90 jours. Le jour J, votre fournisseur est payé dans sa monnaie, au taux promis.**
 
-Projet HackMeridian (Stellar, Lisbonne, 25-26/10/2026), parcours **Genesis**, tracks **Stellar Unlocked** (path payments) + **Stellar Composed** (Reflector + Freighter).
+Projet HackMeridian (Stellar, Lisbonne, 25-26/10/2026), parcours **Genesis**, tracks :
+- **Stellar Unlocked** : path payment *strict receive* USDC → MXN (le fournisseur reçoit le montant exact), USDC en SAC, événements Soroban, `require_auth`, TTL des entrées ;
+- **Stellar Composed** : oracle Reflector FX (SEP-40), Stellar Wallets Kit (Freighter et les autres wallets), taux Etherfuse (CETES, USTRY, TESOURO, EUROB) dans le prix à terme.
+
+**En place sur testnet** ([contrat pool sur stellar.expert](https://stellar.expert/explorer/testnet/contract/CAXH7TE6BA3LI237FIBK5AWDQ335JKY3KKAGQYRVAVQOIOK4VL64YPXC)) : devis à terme et ouverture de couverture (`quote`, `open_hedge`), règlement au fixing de l'échéance (`settle`), paiement du fournisseur par path payment, vault LP à deux tranches avec règle de capacité, crash du peso sur l'oracle de démo, keeper de règlement. **Roadmap** : rémunération des tranches par la trésorerie, netting, couverture du pool, paiement atomique.
 
 ---
 
@@ -16,8 +20,8 @@ Une grande entreprise appellerait sa banque pour bloquer le taux (un *forward de
 
 1. Lucía saisit sa facture : *1 000 000 MXN dans 90 jours*.
 2. L'app lui affiche un prix figé : *« vous paierez 55 013 USDC, quoi qu'il arrive »*.
-3. Elle choisit sa protection (par ex. ±10 %), dépose la marge correspondante en USDC et signe dans Freighter.
-4. Le jour J, n'importe qui peut déclencher le règlement. Le contrat lit le cours sur un oracle SEP-40 (Reflector FX en production, mock-oracle de même interface pour la démo) :
+3. Elle choisit sa protection (par ex. ±10 %), dépose la marge correspondante en USDC et signe avec son wallet (Freighter, via Stellar Wallets Kit).
+4. Le jour J, n'importe qui peut déclencher le règlement. Le contrat prend le cours **en vigueur à l'échéance** sur un oracle SEP-40 (`price(asset, timestamp)` ; Reflector FX en production, mock-oracle de même interface pour la démo), pas le cours du moment où l'on règle :
    - le peso a monté → le pool lui verse la différence ;
    - le peso a baissé → la différence est prise sur sa marge.
 5. Dans la foulée, un **path payment Stellar** convertit ses USDC en pesos et paie le fournisseur : **1 000 000 MXN pile**, pour un coût total égal au prix figé au jour 0.
@@ -51,7 +55,7 @@ Exemple : 1 MXN = 0,055 USD, r_MXN = 5,55 %, r_USD = 3,6 %, 90 jours → F ≈ 0
 
 `r_USD` est le taux des bons du Trésor US tokenisés (3,6 % : USTRY d'Etherfuse, `scripts/rates.snapshot`) : c'est ce que rapporterait le capital du pool s'il ne servait pas à couvrir (voir *Où dort l'argent du pool*).
 
-Le spot vient de **Reflector FX**, l'oracle de change natif de Stellar (SEP-40, mise à jour toutes les 300 s). Sur mainnet (`CBKGPWGKSKZF52CFHMTRR23TBWTPMRDIYZ4O2P5VS65BMHYH4DXMCJZC`), il couvre **24 devises** (vérifié onchain le 25/10/2026) : EUR, GBP, CAD, JPY, CNY, HKD, KRW, INR, PHP, TRY, RUB, ZAR, MXN, BRL, ARS, COP, CLP, PEN, CRC, VES, NGN, KES, CDF, XAU.
+En production, le spot vient de **Reflector FX**, l'oracle de change natif de Stellar (SEP-40, mise à jour toutes les 300 s). Sur testnet, la démo lit un mock-oracle de même interface, pour pouvoir provoquer le crash du peso (voir *Architecture*). Sur mainnet (`CBKGPWGKSKZF52CFHMTRR23TBWTPMRDIYZ4O2P5VS65BMHYH4DXMCJZC`), il couvre **24 devises** (vérifié onchain le 25/10/2026) : EUR, GBP, CAD, JPY, CNY, HKD, KRW, INR, PHP, TRY, RUB, ZAR, MXN, BRL, ARS, COP, CLP, PEN, CRC, VES, NGN, KES, CDF, XAU.
 
 ### Une protection plafonnée, sans risque de défaut
 
@@ -129,7 +133,7 @@ Le MVP garde la règle brute, plus prudente. Le netting sera branché quand troi
 2. des échéances arrondies à des dates de fixing ;
 3. un règlement par panier, ou la comptabilisation de ce que doit la jambe opposée.
 
-### Les LPs : tranche senior et tranche junior (roadmap)
+### Les LPs : tranche senior et tranche junior
 
 Les LPs déposent dans le même pool mais choisissent leur risque :
 
@@ -149,9 +153,9 @@ Règles du contrat :
 
 **Le rendement du senior est payé par le junior tant que le capital libre n'est pas placé** (bons du Trésor, CETES) : le prix de la part senior progresse de 4,5 %/an, et cette progression est retirée de la valeur du junior. Le placement de la trésorerie est en roadmap ; d'ici là, le junior paie le senior avec ses spreads.
 
-*Implémenté sur la branche `feat/tranches`* : un seul vault, deux catégories de parts. `deposit_lp` / `withdraw` = junior (inchangés), `deposit_senior` / `withdraw_senior` / `senior_balance` / `tranche_values` en plus. Prix senior capitalisé à chaque opération senior, valeur junior = capital − valeur senior, capacité = junior − réservé.
+*Implémenté dans le contrat (`main`, déployé sur testnet)* : un seul vault, deux catégories de parts. `deposit_lp` / `withdraw` = junior (inchangés), `deposit_senior` / `withdraw_senior` / `senior_balance` / `tranche_values` en plus. Prix senior capitalisé à chaque opération senior, valeur junior = capital − valeur senior, capacité = junior − réservé.
 
-Simulation d'un pool de démarrage : **500 k$** (400 k$ senior payé 4,5 %, 100 k$ junior utilisé à 15 % max), **contrats de 10 k$** à 90 jours dont le sens (importateur / exportateur) est tiré au hasard ; peso à 13 % de vol avec sauts de 15 % ; spread 0,4 % par 90 j dont 20 % pour le protocole ; 8 % en USDC, le reste en bons du Trésor à 4 % ; pas de Blend.
+Simulation d'un pool de démarrage : **500 k$** (400 k$ senior payé 4,5 %, 100 k$ junior utilisé à 15 % max), **contrats de 10 k$** à 90 jours dont le sens (importateur / exportateur) est tiré au hasard ; peso à 13 % de vol avec sauts de 15 % ; spread 0,4 % par 90 j (hypothèse prudente ; le contrat prend 0,5 %) dont 20 % pour le protocole ; 8 % en USDC, le reste en bons du Trésor à 4 % ; pas de Blend.
 
 | Contrats / trimestre | Volume / trimestre | Part d'importateurs | Volume compensé | Pool | **Junior (moyenne)** | Années perdantes | Pire année sur 20 |
 |---|---|---|---|---|---|---|---|
@@ -186,7 +190,7 @@ Exemple, pool de 500 k$ à 80 contrats par trimestre (60 % d'importateurs) : ~16
 
 ### Couverture du pool (roadmap)
 
-Le plafond et la règle de capacité garantissent que le pool **ne fait pas faillite**, pas qu'il est rentable de façon régulière. Le pool ne parie pas sur la tendance (le taux forward l'intègre déjà), mais il reste exposé aux mouvements de la devise : environ 6,5 % en 90 jours sur le peso, contre un spread de 0,4 %. Sans couverture, il faudrait un spread de 3 à 5 % pour rémunérer les LPs, et aucune PME n'achèterait. Le pool se couvre donc en trois étages, comme une banque qui vend un forward.
+Le plafond et la règle de capacité garantissent que le pool **ne fait pas faillite**, pas qu'il est rentable de façon régulière. Le pool ne parie pas sur la tendance (le taux forward l'intègre déjà), mais il reste exposé aux mouvements de la devise : environ 6,5 % en 90 jours sur le peso, contre un spread de 0,5 %. Sans couverture, il faudrait un spread de 3 à 5 % pour rémunérer les LPs, et aucune PME n'achèterait. Le pool se couvre donc en trois étages, comme une banque qui vend un forward.
 
 ```
 Exposition au peso
@@ -244,6 +248,8 @@ Le MVP montre le filet (plafond + règle de capacité brute, plus prudente) ; ne
 └──────────────┘             └──────────────────────────────────────┘
 ```
 
+**Intégration Reflector.** Le contrat ne parle à l'oracle que par l'interface SEP-40 (`lastprice`, `price(asset, timestamp)`, `decimals`) et a été vérifié contre Reflector FX testnet (`CCSSOHTBL3LEWUCBBEB5NJFC2OKFRC74OWEIJIZLRJBGAAU4VMU5NV4W` : 14 décimales, base USD, historique et arrondi à la période de 300 s). Le pool de démo est construit avec un mock-oracle de même interface, piloté par l'admin, pour provoquer le crash du peso pendant la vidéo ; en production, on passe l'adresse de Reflector au constructeur, sans changer de code.
+
 Erreurs : Vault 100-112, Paiement 200-205, Pricing 300-312, token USDC #10 (solde insuffisant) ; table complète : `docs/payment-cli.md` (§ Erreurs à traduire).
 
 Une transaction Soroban ne peut pas contenir d'opération classique : le front enchaîne `settle()` puis le path payment, en deux transactions.
@@ -259,6 +265,10 @@ fn lp_shares(lp: Address) -> i128;
 fn share_price() -> i128;                                // prix plein, USDC par part
 fn exit_price() -> i128;                                 // prix de sortie, USDC par part
 fn total_assets() -> i128;                               // capital des LPs
+fn deposit_senior(lp: Address, amount: i128) -> i128;    // tranche senior : USDC déposés → parts senior
+fn withdraw_senior(lp: Address, shares: i128) -> i128;   // parts senior brûlées → USDC versés
+fn senior_balance(lp: Address) -> i128;                  // valeur des parts senior du LP
+fn tranche_values() -> TrancheValues;                    // senior, junior, prix de la part senior
 fn capacity() -> i128;                                   // capital non réservé
 fn exposure(currency: Symbol) -> Exposure;               // acheteurs / vendeurs / net, marges
 fn currency_limit(currency: Symbol) -> Option<u32>;
@@ -273,6 +283,8 @@ fn open_hedge(owner: Address, supplier: Address, currency: Symbol, side: Side,
               notional: i128, duration_secs: u64, cap_bps: u32) -> u64;
 fn settle(hedge_id: u64) -> i128;                        // permissionless après l'échéance
 fn get_hedge(hedge_id: u64) -> Option<Hedge>;
+fn time_factor() -> u32;                                 // 1 = temps réel
+fn set_time_factor(factor: u32);                         // admin, démo : 25 920 → 90 j en 5 min réelles
 ```
 
 ---
@@ -290,6 +302,10 @@ fn get_hedge(hedge_id: u64) -> Option<Hedge>;
 Reflector FX testnet couvre : EUR, GBP, CHF, CAD, **MXN, ARS, BRL**, THB, XAU (base USD, 14 décimales, résolution 300 s).
 
 Le pool est redéployé à chaque `./scripts/setup-testnet.sh`, qui fait aussi le dépôt du LP (1 000 000 USDC via `deposit_lp`). Les IDs à jour sont dans `.env.testnet`.
+
+**Mode démo :** le setup pose `set_time_factor 25920` : le prix est calculé sur la durée annoncée (90 jours), mais l'échéance réelle tombe 5 minutes après l'ouverture. C'est ce qui permet de régler en direct, dans la vidéo, une couverture « à 90 jours ».
+
+**Limites du MVP testnet :** oracle de démo (mock-oracle SEP-40, pour le crash) à la place de Reflector ; USDC et MXN de test émis par le compte ISSUER, offre DEX MXN/USDC posée par nous ; règle de capacité brute (somme des marges, sans netting) ; taux d'intérêt figés dans `scripts/rates.snapshot` et poussés par l'admin.
 
 ## Lancer le projet
 
@@ -311,7 +327,7 @@ cd front && pnpm install && pnpm dev
 contracts/pool         # vault.rs (capital, parts LP, exposition) · pricing.rs (spot, taux forward, plafonds) · hedge.rs (couvertures)
 contracts/mock-oracle  # oracle SEP-40 pilotable par l'admin (démo)
 front/                 # Vite + React + TS, stellar-sdk, Stellar Wallets Kit
-scripts/               # setup testnet
+scripts/               # setup et peuplement du testnet, crash du peso, keeper de règlement, synchronisation des taux Etherfuse
 sim/                   # simulateur de pricing / risque (optionnel)
 docs/council/          # council du 25/10 : rapport + transcript
 TODO.md                # setup et chantiers
@@ -327,7 +343,7 @@ TODO.md                # setup et chantiers
 **Pool et risque**
 - Netting par devise et par échéance (PME qui paient en devise / PME qui en reçoivent)
 - Couverture automatique de l'exposition nette : détention de la devise placée en obligations d'État tokenisées (CETES) ou EURC ; une position par devise avec seuil de rééquilibrage
-- Tranches senior / junior pour les LPs, parts LP en token SEP-41
+- Rémunération de la tranche senior par la trésorerie placée, parts LP en token SEP-41
 - Gestion de trésorerie : USDC 8 %, bons du Trésor tokenisés pour le reste ; Blend en option (≤ 20 %, ~+0,5 pt)
 - Limites par devise, skew de prix, spread dynamique
 - Taux d'intérêt lus onchain, fixing sur les cotations SEP-38 des anchors

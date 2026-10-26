@@ -21,11 +21,11 @@
 
 ---
 
-## 2. ✅ Durée de la démo vs prix affiché (réglé : `set_time_factor 25920`, posé par le script de setup ; prix à 90 jours, échéance réelle 5 min ; scénario de la vidéo validé à 56 112,69 USDC au centime)
+## 2. ✅ Durée de la démo vs prix affiché (réglé : `set_time_factor 25920`, posé par le script de setup ; prix à 90 jours, échéance réelle 5 min ; scénario de la vidéo validé au centime : 56 098,72 USDC (taux Etherfuse) ; 56 112,69 avec les anciens taux 400/700)
 
 **Qui :** Hugo (vidéo, front) + Clément + Lancelot
 
-**Le problème.** La vidéo raconte une facture à **90 jours** : prix figé **54 873 USDC**. Mais pour régler en direct, on ouvre la couverture avec une échéance de **60 s**, et le prix figé devient ≈ cours du jour + spread : **55 275 USDC**. Le chiffre à l'écran ne correspond plus à l'histoire.
+**Le problème.** La vidéo raconte une facture à **90 jours** : prix figé **54 873 USDC** (à l'époque, taux 400/700 ; 55 012,81 avec les taux Etherfuse). Mais pour régler en direct, on ouvre la couverture avec une échéance de **60 s**, et le prix figé devient ≈ cours du jour + spread : **55 275 USDC**. Le chiffre à l'écran ne correspond plus à l'histoire.
 
 **Options.**
 
@@ -37,17 +37,17 @@
 
 **Recommandation :** b si Clément a 30 min, sinon a.
 
-**Décision (25/10 soir) : option b, prise en charge par Clément.** Conséquence : les chiffres de la vidéo repasseront à ceux de 90 jours (prix figé 54 873,05, avec protection 56 112,69). Le script actuel (`docs/video-script.md`) utilise ceux de 60 s, à mettre à jour une fois le facteur en place.
+**Décision (25/10 soir) : option b, prise en charge par Clément.** Conséquence : les chiffres de la vidéo repasseront à ceux de 90 jours (prix figé 55 012,81, avec protection 56 098,72, taux Etherfuse ; 54 873,05 / 56 112,69 avec les anciens taux 400/700). Le script actuel (`docs/video-script.md`) utilise ceux de 60 s, à mettre à jour une fois le facteur en place.
 
 ---
 
-## 3. ✅ Codes d'erreur du Pricing (réglé le 25/10 : PricingError 300-311, mergé)
+## 3. ✅ Codes d'erreur du Pricing (réglé le 25/10 : PricingError 300-312, mergé)
 
 **Qui :** Lancelot
 
 **Le problème.** Les refus du Pricing sont des `panic!("currency not enabled")`, `"stale price"`, `"rate not set"`, `"cap below minimum"`… Les textes sont effacés dans le contrat compilé : le front reçoit une erreur générique et ne peut pas afficher « protection minimale pour le peso : 5 % ».
 
-**Le correctif.** `#[contracterror] enum PricingError` avec des codes 300-399, comme le vault (100-110) et le paiement (200-204).
+**Le correctif.** `#[contracterror] enum PricingError` avec des codes 300-399, comme le vault (100-112) et le paiement (200-205).
 
 ---
 
