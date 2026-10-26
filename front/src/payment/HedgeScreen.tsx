@@ -14,7 +14,7 @@ const DURATIONS = [
   { label: '90 days', secs: 90 * 86_400 },
 ]
 
-export function HedgeScreen({ onDone }: { onDone: () => void }) {
+export function HedgeScreen({ onDone, onPick }: { onDone: () => void; onPick?: (currency: string, side: SideTag) => void }) {
   const [amount, setAmount] = useState('1000000')
   const [currency, setCurrency] = useState('MXN')
   const [side, setSide] = useState<SideTag>('BuyCurrency')
@@ -25,6 +25,11 @@ export function HedgeScreen({ onDone }: { onDone: () => void }) {
   const [quoteErr, setQuoteErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const { state, run } = useTx()
+
+  // le globe du panneau pool relie le dollar à la devise choisie (cf. VaultGlobe)
+  useEffect(() => {
+    onPick?.(currency, side)
+  }, [currency, side, onPick])
 
   // Saisie tolérante (espaces, « _ ») mais validée : toUnits/BigInt lèveraient pendant le rendu sur « 1,000,000 » ou « 1e6 ».
   const clean = amount.replace(/[\s_]/g, '')

@@ -1,6 +1,7 @@
 // [FRONT — Hugo] Page vault : infos du pool à gauche (2/3), choix du rôle et formulaire à droite (1/3).
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { HedgeScreen } from '../payment/HedgeScreen'
+import type { SideTag } from '../shared/contract'
 import { useActivity, usePoolStats } from '../shared/usePool'
 import { clearPendingRole, pendingRole, type Role } from './entry'
 import { LpForm } from './LpForm'
@@ -10,6 +11,9 @@ export function VaultPage() {
   const { stats, demo, refresh } = usePoolStats()
   const { activity, refresh: refreshActivity } = useActivity()
   const [role, setRole] = useState<Role>(pendingRole)
+  // devise et sens choisis dans « Hedge an invoice » : le globe du panneau pool trace le trajet
+  const [pick, setPick] = useState<{ currency: string; side: SideTag } | null>(null)
+  const onPick = useCallback((currency: string, side: SideTag) => setPick({ currency, side }), [])
   // Le rôle venu d'un lien ne vaut que pour cette ouverture ; « Vaults » dans la barre repart du choix.
   useEffect(() => {
     clearPendingRole()
@@ -21,7 +25,13 @@ export function VaultPage() {
 
   return (
     <div className="vault-page">
-      <PoolPanel stats={stats} demo={demo} activity={activity} />
+      <PoolPanel
+        stats={stats}
+        demo={demo}
+        activity={activity}
+        globe={role === 'sme'}
+        link={role === 'sme' && pick ? (pick.side === 'BuyCurrency' ? ['USD', pick.currency] : [pick.currency, 'USD']) : undefined}
+      />
 
       <aside className="side-panel">
         {role === null ? (
@@ -46,7 +56,7 @@ export function VaultPage() {
               ← Switch role{role === 'lp' && <span className="muted"> · Supply USDC</span>}
             </button>
             {role === 'sme' && <h2>Hedge an invoice</h2>}
-            {role === 'lp' ? <LpForm onDone={onDone} /> : <HedgeScreen onDone={onDone} />}
+            {role === 'lp' ? <LpForm onDone={onDone} /> : <HedgeScreen onDone={onDone} onPick={onPick} />}
           </div>
         )}
       </aside>

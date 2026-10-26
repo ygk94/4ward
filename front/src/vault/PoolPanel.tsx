@@ -1,13 +1,22 @@
 // [FRONT — Hugo] Panneau pool (2/3 gauche de la page vault), tout tient dans l'écran :
 // capital, usage (fournisseurs, PME, volume, encours), utilisation, équilibre du pool par devise, dernières couvertures.
+// En haut à droite, le petit vault devient un globe quand la PME couvre une facture (cf. VaultGlobe).
 import { useEffect, useState } from 'react'
 import { hedgeUsdc, type Activity } from '../shared/activity'
 import { fmtUsdc, fromUnits, pool, read, type Exposure, type PoolStats } from '../shared/contract'
 import { shortAddress, useWallet } from '../shared/wallet'
-import { InkVault } from '../visual/InkVault'
+import { VaultGlobe } from '../visual/VaultGlobe'
 import { readSplit } from './poolApi'
 
-export function PoolPanel({ stats, demo, activity }: { stats: PoolStats | null; demo: boolean; activity: Activity | null }) {
+interface Props {
+  stats: PoolStats | null
+  demo: boolean
+  activity: Activity | null
+  globe?: boolean
+  link?: [string, string]
+}
+
+export function PoolPanel({ stats, demo, activity, globe = false, link }: Props) {
   const { address } = useWallet()
   const [mine, setMine] = useState<{ balance: bigint; shares: bigint } | null>(null)
   // Capital réellement bloqué par les couvertures (pris sur la tranche Dynamic), relu à chaque rafraîchissement.
@@ -71,7 +80,7 @@ export function PoolPanel({ stats, demo, activity }: { stats: PoolStats | null; 
             )}
           </p>
         </div>
-        <InkVault className="pool-vault" />
+        <VaultGlobe className={`pool-vault ${globe ? 'is-globe' : ''}`} globe={globe} from={link?.[0]} to={link?.[1]} />
       </header>
 
       <div className="kpis">
