@@ -53,4 +53,4 @@ Total : environ 340 mots, soit 2:15 de parole, plus le temps des actions à l'é
 - **Signatures Freighter (3, toutes à faire par toi)** : Lock my price, Settle, Pay my supplier. Le script s'arrête et attend à chaque fois, et on coupe au montage.
 - **Attente de l'échéance** : 5 minutes réelles entre D3 et D5. On filme le compte à rebours, puis on coupe. Le crash (`crash.sh 12` puis l'offre DEX à 0,0616) se lance hors champ pendant ce temps, avant l'échéance.
 - **Avant chaque prise** : `crash.sh --demo MXN`, offre DEX à 0,055, clés `fx.*` vidées du localStorage, keepalive actif, Ne pas déranger.
-- **Après la vidéo** : `seed-testnet.sh`, puis keepalive avec `--keeper`, pour que les jurés trouvent un site plein.
+- **Après la vidéo** : `seed-testnet.sh`, puis keepalive avec `--live --keeper` (cours Reflector recopié dans le mock, offre DEX réalignée, couvertures échues réglées) et `VITE_LIVE_SPOT=1` sur Vercel, pour que les jurés trouvent un site plein, au cours du jour. Pour refaire une prise : arrêter le keepalive, puis `crash.sh --demo MXN` et `dex-align.sh`.

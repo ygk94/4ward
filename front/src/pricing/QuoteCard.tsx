@@ -1,5 +1,6 @@
 // [FRONT — Hugo] (logique fournie par Pricing) Devis : spot de l'oracle du pool (mock en démo), prix figé, marge à déposer (appel quote).
 // Sous le devis : taux Etherfuse lus en direct et taux réellement utilisé par le pool (retrouvé depuis le devis).
+import { LIVE_SPOT } from '../shared/config'
 import { fmtRate, fmtUsdc, type Quote, type SideTag } from '../shared/contract'
 import { ETHERFUSE_SITE, RATE_TOKEN, fmtBps, impliedRateBps, useEtherfuseRates, type EtherfuseRates } from '../shared/etherfuse'
 
@@ -32,7 +33,7 @@ export function QuoteCard({
           <dd>1 {currency} = {quote ? fmtRate(quote.forward_rate) : '—'} USD</dd>
         </div>
         <div>
-          <dt>Today’s rate (demo oracle)</dt>
+          <dt>Today’s rate ({LIVE_SPOT ? 'Reflector FX' : 'demo oracle'})</dt>
           <dd>{quote ? fmtRate(quote.spot) : '—'} USD</dd>
         </div>
         <div className="strong">
