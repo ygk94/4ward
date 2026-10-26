@@ -8,7 +8,7 @@ Conventions : montants en **stroops** (7 décimales : 1 USDC = `10000000`), prix
 ## 0. Préparation
 
 ```sh
-cd fistea-hackmeridian
+cd 4ward
 source .env.testnet          # ISSUER, USDC_SAC, POOL_ID, … du déploiement
 ```
 

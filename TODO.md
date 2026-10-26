@@ -37,14 +37,14 @@ Légende : ✅ fait · ⬜ à faire · 🔴 bloquant pour les autres ou pour la 
 
 ## Démarrage (chaque membre)
 
-1. `git clone https://github.com/ygk94/fistea-hackmeridian && cd fistea-hackmeridian && git checkout feat/<ta-partie>`
+1. `git clone https://github.com/ygk94/4ward && cd 4ward && git checkout feat/<ta-partie>`
 2. `rustup target add wasm32v1-none` · `brew install stellar-cli` (≥ 28) · `stellar contract build && cargo test`
 3. Testnet : **chacun monte son propre environnement** avec `./scripts/setup-testnet.sh` (génère tes propres comptes `fx-*` dans ta config `stellar` locale et déploie ton propre pool + mock-oracle). Ensuite `git checkout .env.testnet` : **ne jamais committer ton `.env.testnet`**, celui du repo est le déploiement d'Hugo, celui du front et de la démo. Extension **Freighter** sur **Testnet** si tu veux tester des signatures (`stellar keys secret fx-lucia` → import)
 4. Lire `README.md` (le produit) et sa section du tableau ci-dessus
 
 ## Déjà en place
 
-- ✅ Repo public `ygk94/fistea-hackmeridian`, collaborateurs LancelotWA et cda1712, branches `feat/vault` / `feat/payment` / `feat/pricing`, CI GitHub Actions
+- ✅ Repo public `ygk94/4ward`, collaborateurs LancelotWA et cda1712, branches `feat/vault` / `feat/payment` / `feat/pricing`, CI GitHub Actions
 - ✅ Contrat `pool` découpé en 3 modules, 10 tests de départ (`#[ignore]`, un bloc par personne)
 - ✅ `mock-oracle` : même interface de lecture que Reflector FX, prix pilotable par l'admin
 - ✅ Front Vite + React + TS (composants vides par écran), `@stellar/stellar-sdk` 17.4, `@creit.tech/stellar-wallets-kit` 2.7.1
