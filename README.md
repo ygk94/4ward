@@ -2,6 +2,8 @@
 
 > **Bloquez aujourd'hui le prix d'une facture fournisseur payable en devise dans 90 jours. Le jour J, votre fournisseur est payé dans sa monnaie, au taux promis.**
 
+**Démo en ligne : [4ward-fx.vercel.app](https://4ward-fx.vercel.app)** (testnet, wallet Freighter)
+
 Projet HackMeridian (Stellar, Lisbonne, 25-26/10/2026), parcours **Genesis**, tracks :
 - **Stellar Unlocked** : path payment *strict receive* USDC → MXN (le fournisseur reçoit le montant exact), USDC en SAC, événements Soroban, `require_auth`, TTL des entrées ;
 - **Stellar Composed** : oracle Reflector FX (SEP-40), Stellar Wallets Kit (Freighter et les autres wallets), taux Etherfuse (CETES, USTRY, TESOURO, EUROB) dans le prix à terme.
