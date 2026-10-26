@@ -17,7 +17,7 @@ Total : environ 340 mots, soit 2:15 de parole, plus le temps des actions à l'é
 | # | Temps | Fond (carte plein écran) | Texte à lire | Mots |
 |---|---|---|---|---|
 | P1 | 0:00 → 0:15 | Une facture : « Tequila Jalisco → Lucía, Lisbon · 1,000,000 MXN · due in 90 days ». En dessous, une courbe du peso qui monte, et « +$5,500 » en orange. | Lucía imports tequila into Lisbon. She owes her supplier in Guadalajara one million pesos, due in ninety days. If the peso rises ten percent before then, she pays fifty-five hundred dollars more. Her margin is gone. | 38 |
-| P2 | 0:15 → 0:32 | Trois lignes barrées : « Bank forward · needs a credit line », « FX fintechs · deposit + KYC, few currencies », « Options · ~2.6% of the invoice ». En bas : « Most SMEs stay unhedged. » | Big companies lock the rate with a bank forward. Small businesses can't. Banks want a credit line, fintechs want deposits and paperwork, and options cost almost three percent. So most of them simply stay exposed. | 36 |
+| P2 | 0:15 → 0:32 | Trois lignes barrées : « Bank forward · needs a credit line », « FX fintechs · deposit + KYC, few currencies », « Options · ~2.6% of the invoice ». En bas : « Most SMEs stay unhedged. » | Big companies lock the rate with a bank forward. Small businesses can't. Banks want a credit line, fintechs want deposits and paperwork, and options cost a few percent. So most of them simply stay exposed. | 36 |
 | P3 | 0:32 → 0:47 | Logo Stellar et trois pastilles « Native USDC », « Path payments », « Seconds, near-zero fees ». Dessous, en gros : « …but only at today’s rate. » | Stellar already moves money across borders in seconds, with native USDC and path payments. But only at today’s rate. Nothing lets a small business lock today’s rate for a payment it will make later. | 35 |
 | P4 | 0:47 → 1:05 | Logo 4ward, puis trois étapes : « 1 · Lock a fair 90-day price », « 2 · Deposit a guarantee = max loss », « 3 · Settle at the due date, pay in pesos ». | 4ward does. Lucía locks a fair ninety-day price and deposits a small guarantee, which is also the most she can lose. At the due date the contract settles at that day’s rate, and a path payment pays her supplier in pesos. | 41 |
 | P5 | 1:05 → 1:20 | Schéma : PME ↔ contrat Soroban ↔ pool de LPs, avec quatre logos ou étiquettes : « Reflector (SEP-40) », « Etherfuse rates », « USDC », « Path payments ». | It all runs on one Soroban contract: Reflector-compatible prices, Etherfuse rates inside the price, USDC and path payments. Liquidity providers back the hedges, and the contract never promises more than their capital covers. | 34 |
@@ -40,7 +40,7 @@ Total : environ 340 mots, soit 2:15 de parole, plus le temps des actions à l'é
 
 | Phrase | Statut | Remarque |
 |---|---|---|
-| « options cost almost three percent » | estimation | 2,6 % vient de notre modèle (prime à la monnaie, volatilité 13 %), pas d'une cotation de marché. On peut dire « options cost a few percent » pour être prudent. |
+| « options cost a few percent » | ✅ prudent | Le modèle donne 2,6 % ; on ne cite pas de chiffre précis. |
 | « Reflector-compatible prices » | ✅ exact | La démo lit un oracle mock de même interface. Ne pas dire « live Reflector prices ». |
 | « Etherfuse rates inside the price » | ✅ exact | Ce sont des valeurs figées (snapshot du 25/10) poussées par l'admin. |
 | « never promises more than their capital covers » | ✅ exact | Règle de capacité : réservé ≤ capital Dynamic. |
