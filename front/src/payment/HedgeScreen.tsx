@@ -134,7 +134,7 @@ export function HedgeScreen({ onDone, onPick }: { onDone: () => void; onPick?: (
         </label>
       )}
 
-      <QuoteCard quote={quote} loading={loading} error={quoteErr} currency={currency} side={side} />
+      <QuoteCard quote={quote} loading={loading} error={quoteErr} currency={currency} side={side} durationSecs={duration} />
 
       <button className="btn btn-primary wide" disabled={!quote || loading || notional <= 0 || state.step === 'signing' || (side === 'BuyCurrency' && !supplier)} onClick={submit}>
         {state.step === 'signing' ? 'Waiting for wallet…' : 'Lock my price'}

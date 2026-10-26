@@ -55,7 +55,9 @@ F = Spot × (1 + r_USD × t) / (1 + r_devise × t)      prix proposé = F ± spr
 
 Exemple : 1 MXN = 0,055 USD, r_MXN = 5,55 %, r_USD = 3,6 %, 90 jours → F ≈ 0,05474 USD (0,05501 spread inclus). Le peso, mieux rémunéré, cote moins cher à terme. Sans cet ajustement, des arbitragistes pourraient gagner sans risque contre le pool.
 
-`r_USD` est le taux des bons du Trésor US tokenisés (3,6 % : USTRY d'Etherfuse, `scripts/rates.snapshot`) : c'est ce que rapporterait le capital du pool s'il ne servait pas à couvrir (voir *Où dort l'argent du pool*).
+`r_USD` est le taux des bons du Trésor US tokenisés (3,6 % : USTRY d'Etherfuse) : c'est ce que rapporterait le capital du pool s'il ne servait pas à couvrir (voir *Où dort l'argent du pool*).
+
+Les taux sont **lus en direct sur l'API publique d'Etherfuse** (`current_basis_points` : USD ← USTRY, MXN ← CETES, BRL ← TESOURO, EUR ← EUROB ; ARS en dur) **et poussés dans le pool par l'admin** (`scripts/sync-rates.sh`, `--loop 3600` pour une synchro horaire). Le contrat ne lit pas Etherfuse lui-même. Sous chaque devis, l'app affiche les taux Etherfuse du moment et le taux réellement utilisé par le pool, retrouvé en inversant la formule sur le devis (pas de getter de taux) ; au-delà de 5 bps d'écart, elle affiche « pool rate out of sync ». `scripts/rates.snapshot` ne sert plus qu'au setup et de repli si l'API ne répond pas.
 
 En production, le spot vient de **Reflector FX**, l'oracle de change natif de Stellar (SEP-40, mise à jour toutes les 300 s). Sur testnet, la démo lit un mock-oracle de même interface, pour pouvoir provoquer le crash du peso (voir *Architecture*). Sur mainnet (`CBKGPWGKSKZF52CFHMTRR23TBWTPMRDIYZ4O2P5VS65BMHYH4DXMCJZC`), il couvre **24 devises** (vérifié onchain le 25/10/2026) : EUR, GBP, CAD, JPY, CNY, HKD, KRW, INR, PHP, TRY, RUB, ZAR, MXN, BRL, ARS, COP, CLP, PEN, CRC, VES, NGN, KES, CDF, XAU.
 
@@ -369,7 +371,7 @@ TODO.md                # setup et chantiers
 | Saut de cours entre deux rééquilibrages | Limites par devise, tranche junior en première perte |
 | LP qui retire avant un règlement perdant | Retraits différés à l'échéance suivante, ou prix des parts incluant les contrats ouverts |
 | Protocoles tiers (émetteurs des CETES et bons du Trésor, Blend si activé) | Plafond par protocole, réserve d'USDC dans le contrat |
-| Taux d'intérêt poussés par l'admin | Taux Etherfuse poussés à la main par l'admin (`scripts/sync-rates.sh`, snapshot figé pour la démo), lecture onchain en roadmap |
+| Taux d'intérêt poussés par l'admin | Taux lus en direct sur l'API Etherfuse et poussés par l'admin (`scripts/sync-rates.sh --loop`), écart affiché dans l'app au-delà de 5 bps ; lecture onchain en roadmap |
 | Oracle manipulé au fixing | TWAP sur une fenêtre, bornes de cohérence, plusieurs oracles |
 | Écart oracle / cours réel du DEX ou de l'anchor | Résidu faible, affiché à l'utilisateur |
 
