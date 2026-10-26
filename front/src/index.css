@@ -452,6 +452,50 @@ select {
   touch-action: none;
   overscroll-behavior: none;
 }
+/* Premier affichage de l'accueil (cf. Home.tsx) : le vault se construit seul (~2 s), puis le texte arrive. */
+.display .line {
+  display: block;
+  overflow: hidden;
+  padding-bottom: 0.06em; /* garde les jambages (y, g) dans le cache */
+}
+.display .line > span {
+  display: inline-block;
+}
+.home-first .home-copy .eyebrow {
+  animation: home-fade-up 0.8s 1.7s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.home-first .display .line > span {
+  animation: home-line-up 1s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.home-first .display .line:nth-child(1) > span {
+  animation-delay: 1.85s;
+}
+.home-first .display .line:nth-child(2) > span {
+  animation-delay: 2s;
+}
+.home-first .home-gauge > * {
+  animation: home-fade-up 0.8s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.home-first .home-gauge > :nth-child(1) {
+  animation-delay: 2.2s;
+}
+.home-first .home-gauge > :nth-child(2) {
+  animation-delay: 2.3s;
+}
+.home-first .home-gauge > :nth-child(3) {
+  animation-delay: 2.9s;
+}
+@keyframes home-line-up {
+  from {
+    transform: translateY(105%);
+  }
+}
+@keyframes home-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+}
 /* Bouton d'entrée : se remplit avec le scroll (cf. Home.tsx, variable --p de 0 à 1), cliquable. */
 .enter-btn {
   position: relative;
@@ -696,6 +740,9 @@ select {
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
+  /* le dégradé n'est peint que dans la boîte : avec l'interlettrage négatif, le dernier chiffre (et la virgule)
+     dépassent et étaient coupés ; un peu de marge intérieure les y fait rentrer */
+  padding: 0 0.1em 0.1em 0;
 }
 .about-foot {
   display: flex;
