@@ -1,170 +1,82 @@
-# 4ward — submission form
+# 4ward, submission form
 
-> Draft of every field of the HackMeridian submission form. Character counts are given for the fields that have a limit.
->
-> Links: live demo https://4ward-fx.vercel.app · repo https://github.com/ygk94/4ward · pool contract https://stellar.expert/explorer/testnet/contract/CACSMEBQLBR73CH6BRPGY7LDDE2P63C6WPZEJPZNIP5DLT5IN6O5VWA4
+Live demo: https://4ward-fx.vercel.app
+Repo: https://github.com/ygk94/4ward
+Pool contract: https://stellar.expert/explorer/testnet/contract/CACSMEBQLBR73CH6BRPGY7LDDE2P63C6WPZEJPZNIP5DLT5IN6O5VWA4
 
----
 
-## Tagline (≤ 120 characters)
+## Tagline (112 characters)
 
-**Lock today's exchange rate for an invoice you pay in 90 days. No bank, no credit line: just a wallet on Stellar.**
+Lock today's exchange rate for an invoice you pay in 90 days. No bank, no credit line: just a wallet on Stellar.
 
-*(112 characters)*
 
-Alternatives:
-- `Capped FX forwards for small businesses on Stellar: lock your supplier's price today, pay them in their currency later.` (119)
-- `FX hedging for SMEs that banks ignore: lock a rate on Soroban, settle on time, pay your supplier in pesos.` (106)
+## Description
 
----
+4ward lets a small business lock today's price for a foreign-currency invoice it will pay in the future, then pay its supplier in that currency on the due date, all on Stellar.
 
-## Description (~6 000 characters)
+Lucía imports tequila into Lisbon. She owes her supplier in Guadalajara 1,000,000 Mexican pesos in 90 days. If the peso rises 10% by then, her invoice costs her about $5,500 more and her margin is gone. A large company would call its bank and buy a currency forward. Lucía has no credit line, and her bank will never offer her that product. Stellar already lets her pay abroad in seconds, but only at today's rate. Nothing lets her fix a rate for a payment she will make later.
 
-**4ward lets a small business lock today's price for a foreign-currency invoice it will pay in the future, and then pay its supplier in that currency on the due date, all on Stellar.**
+With 4ward, Lucía enters her invoice and immediately sees a locked price: she will pay 55,013 USDC, whatever happens. This is the fair 90-day forward rate, meaning today's rate adjusted for the interest-rate gap between the dollar and the peso, plus a 0.5% spread. She picks a protection level, for example ±10%, deposits the matching margin of 5,501 USDC and signs once with her wallet.
 
-Lucía imports tequila into Lisbon. She owes her supplier in Guadalajara **1,000,000 Mexican pesos in 90 days**. If the peso rises 10% by then, her invoice costs her about $5,500 more and her margin is gone. A large company would call its bank and buy a currency forward. Lucía has no credit line, and her bank will never offer her that product. Stellar already lets her pay abroad in seconds, but only at today's rate: nothing lets her fix a rate for a payment she will make later.
+On the due date anyone can trigger settlement. The contract reads the rate in force at maturity from a SEP-40 oracle (Reflector FX in production), not the rate at the moment someone clicks, so nobody can game the timing. If the peso went up, the pool pays her the difference. If it went down, the difference comes out of her margin. A Stellar strict-receive path payment then converts her USDC into pesos, and the supplier receives exactly 1,000,000 MXN. Her total cost equals the price she locked on day one.
 
-**How it works for the business**
+In our demo the peso jumps 12% before maturity. Without 4ward, Lucía would pay 61,600 USDC. With 4ward she pays 56,099 USDC in total, because the pool pays her 11,002.56 USDC at settlement.
 
-1. Lucía enters her invoice: 1,000,000 MXN, due in 90 days.
-2. 4ward shows a locked price: *"you will pay 55,013 USDC, whatever happens"*. This is the fair 90-day forward rate (today's rate adjusted for the interest-rate gap between the dollar and the peso) plus a 0.5% spread.
-3. She chooses her protection level (for example ±10%), deposits the matching margin in USDC (5,501 USDC) and signs once with her wallet (Freighter or any wallet through Stellar Wallets Kit).
-4. On the due date anyone can trigger settlement. The contract reads the rate **in force at maturity** from a SEP-40 oracle (Reflector FX in production), not the rate at the moment someone clicks, so nobody can game the timing. If the peso went up, the pool pays her the difference. If it went down, the difference comes out of her margin.
-5. A Stellar **strict-receive path payment** converts her USDC into pesos: the supplier receives **exactly 1,000,000 MXN**, and her total cost equals the price she locked on day 0.
+The margin she chooses is both her maximum loss and her maximum protection. Everything that can be lost is already deposited in the contract when the hedge opens, so there are no margin calls, no liquidations, no credit risk and no server watching prices around the clock. Financially it is a collar centred on the forward rate. Because protection is capped in both directions, it costs about 0.6% of the invoice, roughly four times less than an option and about the price of a bank forward, without needing a bank. Plans change, so Lucía can also close early: the contract prices her exit at the market forward for the remaining time, the losing side pays, and the exit fee is the spread.
 
-In our recorded scenario the peso jumps 12% before maturity. Without 4ward, Lucía pays 61,600 USDC. With 4ward she pays 56,099 USDC in total, and the pool pays out 11,002.56 USDC at settlement.
+On the other side, liquidity providers deposit USDC into a Soroban vault and act as the counterparty, earning the spreads. The vault issues shares with two prices. Entering uses the full price, while leaving uses an exit price that excludes the capital reserved for open hedges, so nobody can walk away and leave potential losses to the others. A capacity rule makes the pool unable to go bankrupt: the maximum losses of all open hedges can never exceed pool capital, and the contract refuses any hedge that would break it. LPs choose their risk through two tranches in the same vault. The Safe tranche earns a fixed priority rate and is protected from FX losses, while the Dynamic tranche takes the first loss and keeps the upside. The pool also tracks exposure per currency, with limits set by the admin, and our tests check after every operation that the contract's USDC balance equals LP capital plus the margins of open hedges.
 
-**A capped hedge with no default risk**
+Everything described here runs on Stellar testnet today. A single Soroban contract written in Rust handles quotes, opening, settlement at the maturity fixing, early close, the two-tranche vault and per-currency exposure, and emits events for every action. Four currencies are open (MXN, BRL, ARS, EUR), each with its own minimum protection. Interest rates come from Etherfuse tokenized bonds (USTRY at 3.6%, CETES at 5.55%, TESOURO, EUROB). The contract only talks to the standard SEP-40 oracle interface and was checked against Reflector FX on testnet. For the demo we plug in a mock oracle with the same interface so we can crash the peso live, and in production Reflector's address is simply passed to the constructor.
 
-The margin Lucía picks is both her maximum loss and her maximum protection. Everything that can be lost is already deposited in the contract when the hedge opens: no margin calls, no liquidations, no credit risk, and no back-end monitoring prices around the clock. Financially it is a collar centred on the forward rate. Because protection is capped in both directions, it costs about 0.6% of the invoice (spread plus the yield lost on the locked margin), roughly four times cheaper than an option, and about the price of a bank forward without needing a bank.
+The React front end, deployed on Vercel, covers the quote and hedge screen, a positions page with settle and close early, the LP vault, and a Risk lab that runs a Monte-Carlo simulation of the pool in a web worker. Operator scripts set up the whole testnet in one command, seed it with six businesses and two LPs, run a settlement keeper, crash the peso for the video and keep the oracle fresh. The contract has 152 tests, including property tests.
 
-Plans change, so Lucía can also **close early**. The contract prices her exit at the market forward for the remaining duration, on the opposite side. Whoever is losing pays, the exit fee is the spread, and the pool releases its reserve.
+We chose Stellar because the hedge and the payment in the supplier's currency run on the same rail. USDC is native, Reflector publishes FX prices on-chain, path payments convert to pesos in one operation, and fees are low enough that hedging a few thousand dollars makes sense, which no bank offers today.
 
-**The liquidity pool**
+Some things were left out on purpose. Netting, where opposite clients offset each other so only the net exposure uses capital, is already computed exactly and property-tested in the contract but not yet switched on. Hedging the pool by holding the currency in tokenized government bonds, earning yield on idle treasury, and an atomic settle-and-pay are next. The MVP shows the safety net: capped hedges, a strict capacity rule and settlement at the maturity fixing.
 
-Liquidity providers deposit USDC into a Soroban vault and act as the counterparty. They earn the spreads. The vault issues shares with two prices: a full price to enter, and an exit price that excludes capital reserved for open hedges, so nobody can leave and dump potential losses on the others. A **capacity rule** makes the pool unable to go bankrupt: the sum of the maximum losses of open hedges can never exceed pool capital, and the contract refuses any hedge that would break it. LPs choose their risk through two tranches in the same vault:
-- **Senior (Safe):** a fixed priority rate, protected from FX losses.
-- **Junior (Dynamic):** takes the first loss and keeps the upside.
-
-The pool also tracks exposure per currency, with admin limits per currency. After every operation the tests check the invariant *contract USDC balance = LP capital + margins of open hedges*.
-
-**What is live on testnet**
-
-- A single Soroban pool contract (Rust):
-  - forward quotes;
-  - opening, settlement at the maturity fixing, and early close of hedges;
-  - the two-tranche vault with the capacity rule;
-  - per-currency exposure and limits;
-  - Soroban events for every action.
-- Four hedgeable currencies (MXN, BRL, ARS, EUR), each with its own minimum protection level.
-- Interest rates come from **Etherfuse** tokenized bonds (USTRY 3.6%, CETES 5.55%, TESOURO, EUROB).
-- Prices come from a SEP-40 oracle. The contract talks only to the SEP-40 interface and was checked against **Reflector FX testnet**. For the demo we plug in a mock oracle with the same interface, so we can crash the peso live. In production, Reflector's address is passed to the constructor without any code change.
-- A React front end deployed on Vercel:
-  - quote and hedge screen;
-  - My positions, with settle and close early;
-  - the LP vault;
-  - a Risk lab running a Monte-Carlo simulation of the pool in a web worker.
-- Operator scripts: one-command testnet setup, a seeding script (6 businesses, 2 LPs, hedges in 4 currencies), a settlement keeper, a peso-crash script and an oracle keepalive.
-- 152 contract tests, including property tests.
-
-**Why Stellar**
-
-The hedge and the payment in the supplier's currency run on the same rail. USDC is native, Reflector publishes FX prices on-chain, and path payments convert to pesos in a single operation. Fees are negligible, so a hedge of a few thousand dollars makes sense, which no bank offers today.
-
-**What we deliberately left for later**
-
-- **Netting.** Opposite clients would offset each other so that only the net exposure uses capital. The exact max-loss computation for a basket of hedges is already written and property-tested.
-- **Pool hedging.** Holding the currency in tokenized government bonds such as CETES or EURC, with one position per currency and a rebalancing threshold.
-- **Yield on idle treasury.**
-- **Atomic settle-and-pay.**
-
-The MVP shows the safety net: capped hedges, a gross capacity rule, and settlement at the maturity fixing. The economics of a production pool are modelled in our simulator: the junior tranche earns about 13–14% a year at roughly 80 contracts of $10k per quarter.
-
----
 
 ## Problem solved
 
-**Who faces it.** Small and medium businesses that buy or sell across borders in emerging-market currencies face this problem:
-- importers paying suppliers in Mexico, Brazil or Argentina;
-- exporters invoicing in dollars while their costs are in local currency;
-- European SMEs paying in dollars.
+Small and medium businesses that trade across borders in emerging-market currencies face this problem every day. Think of importers paying suppliers in Mexico, Brazil or Argentina, exporters invoicing in dollars while their costs are local, or European companies paying in dollars. Their invoices are typically due in 30 to 120 days. A 6 to 10% currency move over 90 days is common for the Mexican peso and routine for the Brazilian real or the Argentine peso. For a business running 5 to 10% margins, one move can wipe out the profit on a whole order.
 
-Their invoices are often due in 30 to 120 days. A 6–10% currency move over 90 days is common on the peso and routine on the Brazilian real or the Argentine peso. For a business running 5–10% margins, a single move can erase the profit of the whole order.
+Large companies handle this with bank forwards. Small ones are mostly locked out. Banks want a credit line and minimum sizes, FX fintechs ask for KYC, an upfront deposit and only cover a short list of currencies, and options cost around 2.6% of the invoice for 90 days. So most small businesses stay unhedged and simply absorb the risk. Crypto rails made cross-border payments fast and cheap, but only at today's rate.
 
-Large companies solve this with bank forwards. SMEs are mostly locked out:
-- banks require a credit line and minimum sizes, and rarely offer forwards to small clients;
-- FX fintechs ask for KYC, an initial deposit, and cover a limited list of currencies;
-- options are expensive (about 2.6% of the invoice for 90 days).
+4ward solves this with a capped, fully collateralized FX forward on Soroban, tied to the payment itself. The business deposits a margin of 5 to 20% of the invoice, which is both its maximum loss and its maximum protection, so there is no credit to underwrite and no bank involved. The price is fair and transparent: the forward rate follows interest-rate parity using tokenized bond yields from Etherfuse, plus a visible 0.5% spread, for a total cost of about 0.6% of the invoice. Settlement uses the oracle rate at maturity and anyone can trigger it. The supplier is then paid in their own currency through a strict-receive path payment, so the business pays exactly the price it locked. If plans change, it can close early at the market price. The other side of every hedge is an open liquidity pool whose solvency is enforced by the contract itself rather than by trust.
 
-Most SMEs therefore stay unhedged and simply absorb the risk. Crypto rails made cross-border payments fast and cheap, but only spot: nothing lets a small business fix a rate for a payment it will make later.
-
-**How we solve it.** 4ward is a capped, fully collateralized FX forward (an NDF) on Soroban, connected to the payment itself:
-- **No bank and no credit line.** The business deposits a margin between 5% and 20% of the invoice. That margin is both its maximum loss and its maximum protection, so there is no counterparty or credit risk to underwrite.
-- **A fair, transparent price.** The forward rate follows interest-rate parity, using live tokenized-bond yields from Etherfuse, plus a visible 0.5% spread. Total cost is about 0.6% of the invoice.
-- **Settlement nobody can game.** Settlement uses the oracle rate in force at maturity (SEP-40 `price(asset, timestamp)`), and anyone can trigger it.
-- **The supplier is paid in their own currency.** A strict-receive path payment delivers exactly the invoiced amount. The business's total cost is the price it locked on day 0.
-- **An exit is always possible.** Early close at the market forward, where the losing side pays.
-- **Counterparty liquidity comes from an open pool.** Its solvency is enforced by the contract (capacity rule, two tranches), not by trust.
-
----
 
 ## Challenges
 
-**Making a 90-day product demoable in 3 minutes.** A forward is priced on its duration. If we had opened a hedge expiring in 60 seconds, the price on screen would have collapsed to spot and lost the interest-rate gap that is the core of the product. We added an admin-only `time_factor`: the price is computed on the announced 90 days while the real maturity falls 5 minutes later. That way the video shows the real 90-day price and settles it live. We documented why `time_factor` must be 1 in production, since otherwise the carry could be arbitraged.
+The first challenge was making a 90-day product demonstrable in three minutes. A forward is priced on its duration, so a hedge expiring in 60 seconds would show a price close to spot and lose the interest-rate gap that is the heart of the product. We added an admin-only time factor: the price is computed on the announced 90 days while the real maturity falls five minutes later. The video therefore shows the true 90-day price and settles it live. We documented why this factor must stay at 1 in production, since otherwise the carry could be arbitraged.
 
-**Settling at the right price.** Our first version of `settle` read the oracle price at the moment someone called it. Since settlement is permissionless, whoever settles could pick their moment: a free option the pool never charged for. We moved settlement to the fixing at maturity through SEP-40 `price(asset, timestamp)`. That meant adding price history and timestamp lookup to our mock oracle so it behaves exactly like Reflector, and handling the edge cases (no price within 900 s before maturity, maturity beyond the oracle's history).
+The second was settling at the right price. Our first version of settle read the oracle at the moment it was called. Since settlement is open to anyone, whoever settles could pick their moment, which gave a free option the pool never charged for. We moved settlement to the fixing at maturity using the SEP-40 price-at-timestamp call. That meant adding price history to our mock oracle so it behaves exactly like Reflector, and handling the edge cases where no recent price exists before maturity.
 
-**Keeping the pool solvent by construction.** We had to make sure the vault can never owe more than it holds, and that an LP cannot withdraw just before a losing hedge settles. That led to the two share prices (entry versus exit, which excludes reserved capital), the gross capacity rule, rounding in favour of the pool everywhere, and an invariant test run after every operation. We also wrote the exact netting computation and found through property tests that the "naive net of margins" approach underestimates losses when caps or locked rates differ. That is why netting stays on the roadmap instead of shipping half-right.
+The third was keeping the pool solvent by construction. The vault must never owe more than it holds, and an LP must not be able to withdraw just before a losing hedge settles. This led to the two share prices, the capacity rule, rounding in favour of the pool everywhere, and an invariant test run after every operation. While writing the netting logic, our property tests showed that the intuitive "net of margins" approach underestimates losses when caps or locked rates differ. We kept the exact computation in the code but left it switched off rather than ship something half right.
 
-**Soroban versus classic operations.** A Soroban transaction cannot contain a classic Stellar operation, so settlement and the path payment to the supplier cannot be atomic yet. The front end chains two transactions, and we kept the atomic swap through a Soroban DEX on the roadmap.
+We also hit platform limits. A Soroban transaction cannot contain a classic Stellar operation, so settlement and the path payment to the supplier cannot be atomic yet, and the front end chains two transactions. On testnet the mock oracle does not publish by itself and the contract rejects prices older than 15 minutes, so the live site started failing with stale price errors. We wrote a keepalive script that refreshes all four currencies every ten minutes, a settlement keeper, and a one-command crash script for the video.
 
-**Testnet realities.** The mock oracle does not publish on its own and the contract refuses prices older than 900 s, so the live site started failing with "stale price" errors. We wrote a keepalive script that refreshes all four currencies every 10 minutes, a settlement keeper, and a one-command crash script for the video. Liquidity on the testnet DEX is our own offer, so we reset it between takes.
+Finally, we were three people with less than 48 hours. We split the contract into three modules with clear interfaces: Hugo on the vault and the front end, Lancelot on pricing, Clément on hedges and settlement. Each of us worked on our own branch and git worktree, with CI running the contract tests and the front-end build on every push, and integration used real cross-module tests instead of mocks. Before submitting we ran a full consistency pass so that every figure in the README, the deck and the video matches what the contract actually returns.
 
-**Working as three in under 48 hours.** We split the contract into three modules with explicit interfaces: Hugo on the vault and front end, Lancelot on pricing, Clément on hedges and settlement. Each person worked in their own git worktree and branch with CI (cargo test plus the front-end build) on every push. Integration was done with real cross-module tests instead of mocks. Before submission we ran a coherence pass across code, docs, scripts and demo figures, so that every number in the README, the deck and the video (55,012.81 / 56,098.72) matches what the contract returns.
-
----
 
 ## What's next
 
-**Short term (after the hackathon)**
-- **Atomic settle-and-pay:** settle the hedge and pay the supplier in a single transaction through a Soroban DEX.
-- **Productive margin:** the business's margin earns tokenized T-bill yield while the hedge is open.
-- **Robust fixing:** TWAP over a window, sanity bounds, multiple oracles, and an admin fallback that settles at zero P&L if the oracle has no price at maturity.
-- **Hardening:** an entry delay for LPs before a winning settlement, and checks on tranche ratios.
+In the short term we want to make settlement and the supplier payment a single atomic transaction through a Soroban DEX, let the business's margin earn tokenized T-bill yield while the hedge is open, and make the fixing more robust with a TWAP, sanity bounds, several oracles and an admin fallback for the rare case where no price exists at maturity. We would also add an entry delay for LPs before a winning settlement and stricter checks on the tranche ratio.
 
-**Pool and risk**
-- **Netting** per currency and per maturity date: importers and exporters offset each other, so only net exposure consumes capital. The exact basket computation is already written and tested.
-- **Automatic hedging of the net exposure:** hold the currency in tokenized government bonds (Etherfuse CETES, EURC), with one position per currency and a rebalancing threshold, so the spread pays costs instead of risk.
-- **Treasury management:** 8% USDC in the contract, the rest in tokenized T-bills, which pays the senior tranche from real yield.
-- **Pricing controls:** price skew to attract the missing side, a dynamic spread, interest rates read on-chain, and fixings based on anchor SEP-38 quotes.
+On the pool side, the big step is netting per currency and maturity, so that importers and exporters offset each other and only the net exposure consumes capital. The exact computation already exists and is tested. After that comes automatic hedging of the net exposure, holding the currency in tokenized government bonds such as Etherfuse CETES or EURC with one position per currency and a rebalancing threshold, so the spread pays for costs rather than risk. The idle treasury would sit mostly in tokenized T-bills, which would pay the Safe tranche from real yield. Price skew, a dynamic spread and interest rates read on-chain would complete the picture.
 
-**Product and distribution**
-- Direct delivery in local currency to the supplier from the pool's hedge position, saving two conversions.
-- Transferable hedged invoices for factoring.
-- A "Lock the rate" SDK for wallets and anchors.
-- KYC through anchors (SEP-12).
-- An audit, then mainnet. Reflector FX on mainnet already covers 24 currencies.
+On the product side, we want to deliver local currency to the supplier straight from the pool's hedge position, make hedged invoices transferable for factoring, offer a simple "lock the rate" SDK to wallets and anchors, and plug KYC through anchors with SEP-12. Then an audit and mainnet, where Reflector FX already covers 24 currencies.
 
----
 
-## Tech stack (≤ 25 words)
+## Tech stack (24 words)
 
-**Rust, Soroban (soroban-sdk), Stellar CLI, Reflector FX (SEP-40), USDC SAC, path payments, Etherfuse rates, React, TypeScript, Vite, stellar-sdk, Stellar Wallets Kit, Freighter, Vercel, Python.**
+Rust, Soroban (soroban-sdk), Stellar CLI, Reflector FX (SEP-40), USDC SAC, path payments, Etherfuse rates, React, TypeScript, Vite, stellar-sdk, Stellar Wallets Kit, Freighter, Vercel, Python.
 
-*(24 words)*
-
----
 
 ## AI tooling note
 
-**Claude Code (Anthropic) was our main AI tool, used throughout the 48 hours.**
+We used Claude Code from Anthropic throughout the hackathon.
 
-- **As a project manager across the team.** One Claude Code session held the full picture: the architecture, each teammate's module, the deadlines and the demo figures. It prepared each workstream (git worktree, branch, written brief with the expected interface), merged the branches, redeployed the testnet and kept the TODO current. That let three people work in parallel on vault, pricing and settlement without stepping on each other.
-- **For implementation and tests.** It wrote and refactored Soroban code alongside us. For example it implemented `close_early` with a shared closing helper reused by `settle`, plus eight new tests. It also wrote the property tests for the capacity rule and the invariant checks. Every change went through `cargo test` (152 tests) before being merged.
-- **For review and consistency.** We used multi-agent review passes: independent agents audited contract comments, error codes, scripts, front-end copy and demo numbers, then verified each other's findings. It flagged real issues, such as a settlement price read at call time instead of at maturity, and stale figures that would have contradicted the video.
-- **For ops.** It wrote the testnet scripts (setup, seeding with real accounts, keeper, crash, oracle keepalive), diagnosed issues such as stale-oracle errors and a misaligned DEX offer, and prepared the Vercel deployment.
-- **For product thinking.** An "LLM council" of five agents with different perspectives stress-tested the idea, the pitch and the MVP scope early on. It pushed us to cap the hedge (no margin calls) and to tie it to the supplier payment.
+One Claude Code session acted as a project manager for the team. It held the full picture of the architecture, each person's module, the deadlines and the demo figures. It prepared each workstream with its own git worktree, branch and written brief, merged the branches, redeployed the testnet and kept the task list up to date. That is what allowed three people to build the vault, the pricing and the settlement in parallel without stepping on each other.
 
-**Why it helped:** in 48 hours the bottleneck is not typing code. It is keeping a financial contract, a front end, scripts, docs and a video script consistent with each other while three people change them at the same time. AI let us spend our time on the product decisions (pricing model, risk rules, demo story) and verify more than we could have by hand. All financial logic and design decisions were reviewed and decided by the team.
+It also wrote and refactored code with us. For example, it implemented early close with a closing routine shared with settle, along with eight new tests, and it wrote the property tests for the capacity rule and the solvency invariant. Nothing was merged without the full test suite passing. We used multi-agent review passes, where independent agents audited contract comments, error codes, scripts, front-end copy and demo numbers and then checked each other's findings. They flagged real issues, such as settlement reading the price at call time instead of at maturity, and outdated figures that would have contradicted the video. Claude Code also wrote our testnet scripts, diagnosed problems like stale oracle prices and a misaligned DEX offer, and prepared the Vercel deployment. Early on, a council of five agents with different viewpoints stress-tested the idea and the MVP scope, which pushed us toward a capped hedge with no margin calls tied directly to the supplier payment.
 
-*(Lancelot, Clément: add any other AI tools you used here.)*
+In 48 hours the bottleneck is not typing code. It is keeping a financial contract, a front end, scripts, documentation and a video script consistent while three people change them at the same time. AI let us spend our time on the decisions that matter, like the pricing model, the risk rules and the demo story, and verify far more than we could have by hand. Every financial rule and design choice was reviewed and decided by the team.
