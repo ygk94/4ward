@@ -1,8 +1,10 @@
 // [FRONT — Hugo] Histogramme du Risk lab, grammaire des graphiques de data.morpho.org dans notre DA :
-// grille de points, barres qui montent au premier rendu, infobulle HTML au survol, tirage précédent en fantôme.
+// grille de points, infobulle HTML au survol, tirage précédent en fantôme. Au premier rendu, ce sont les arêtes du vault
+// de fond qui dessinent les barres (cf. burst.ts) : on leur publie la position des barres, puis on les révèle.
 // Focus sur un repère (Safe ou Dynamic avg) : au survol de sa ligne ou au clic dans la légende, les barres
 // s'écartent de part et d'autre et la place libérée accueille une petite carte d'infos.
 import { useEffect, useId, useRef, useState, type CSSProperties, type PointerEvent as RPointerEvent } from 'react'
+import { risk, riskProgress } from '../visual/burst'
 import { pct } from './format'
 import { BIN_MAX, BIN_MIN, BIN_W, SENIOR_RATE, type Summary } from './montecarlo'
 
@@ -12,10 +14,11 @@ const PAD = { l: 8, r: 8, t: 12, b: 30 }
 const IW = W - PAD.l - PAD.r
 const IH = H - PAD.t - PAD.b
 const BASE = PAD.t + IH
+/** Les barres sont des groupes de points sur une grille régulière : COLS colonnes par barre (cf. PolyVault, éclats). */
+const COLS = 4
 const TICKS = [-0.5, -0.25, 0, 0.25, 0.5]
-/** Décalage d'apparition par barre et durée de l'animation (cf. risk.css). */
-const STAGGER_MS = 15
-const INTRO_MS = 500
+/** Avancement de la cinématique (0 → 1) à partir duquel les vraies barres apparaissent. */
+const REVEAL_AT = 0.8
 /** Largeur libérée autour du repère en focus (unités du viewBox), et distance de « prise » de la ligne. */
 const GAP = 200
 const GRAB = 14
@@ -58,17 +61,16 @@ export function Histogram({
   showPrev: boolean
   pinned: Focus | null
 }) {
-  const dots = `dots-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
+  const uid = useId().replace(/[^a-zA-Z0-9_-]/g, '')
+  const dots = `dots-${uid}`
+  const gainDots = `gain-${uid}`
+  const lossDots = `loss-${uid}`
   const wrap = useRef<HTMLDivElement>(null)
   const svg = useRef<SVGSVGElement>(null)
   const [tip, setTip] = useState<Tip | null>(null)
   const [hover, setHover] = useState<Focus | null>(null)
-  // Animation d'entrée au premier rendu seulement ; ensuite, seule la transition y/height joue.
-  const [intro, setIntro] = useState(true)
-  useEffect(() => {
-    const t = setTimeout(() => setIntro(false), s.bins.length * STAGGER_MS + INTRO_MS + 50)
-    return () => clearTimeout(t)
-  }, [s.bins.length])
+  const [reveal, setReveal] = useState(false)
+  const geom = useRef({ bins: s.bins, max: 0, bw: 0 })
 
   const ghost = showPrev && prev ? prev : null
   // Échelle commune : le fantôme et le tirage courant se comparent à la même hauteur.
@@ -76,13 +78,47 @@ export function Histogram({
   const total = s.bins.reduce((a, b) => a + b, 0)
   const bw = IW / s.bins.length
   const h = (c: number) => (max ? (c / max) * IH : 0)
+  // pas de la grille de points ; la hauteur d'une barre est arrondie à un nombre entier de rangées
+  const cell = bw / COLS
+  const hRows = (c: number) => Math.floor(h(c) / cell + 1e-6) * cell
+  useEffect(() => {
+    geom.current = { bins: s.bins, max, bw }
+  })
+
+  // Publie la position des barres tant que dure la cinématique (la page bouge encore à son entrée), puis les révèle.
+  useEffect(() => {
+    let raf = 0
+    setReveal(false) // la cinématique repart de zéro (rechargement à chaud, ré-exécution de l'effet) : les vraies barres se recachent
+    const tick = () => {
+      const ctm = svg.current?.getScreenCTM()
+      const { bins, max, bw } = geom.current
+      if (ctm && max) {
+        risk.rects = bins.map((c, i) => {
+          const x0 = PAD.l + i * bw
+          const tl = new DOMPoint(x0, BASE - (c / max) * IH).matrixTransform(ctm)
+          const br = new DOMPoint(x0 + bw, BASE).matrixTransform(ctm)
+          return { x0: tl.x / window.innerWidth, x1: br.x / window.innerWidth, top: tl.y / window.innerHeight, bottom: br.y / window.innerHeight }
+        })
+        if (!risk.start) risk.start = performance.now()
+      }
+      const p = riskProgress()
+      if (p >= REVEAL_AT) setReveal(true)
+      if (p < 1) raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => {
+      cancelAnimationFrame(raf)
+      risk.rects = []
+      risk.start = 0
+    }
+  }, [])
 
   const value = (f: Focus) => (f === 'safe' ? SENIOR_RATE : s.mean)
   const focus = hover ?? pinned
   // La barre qui contient le repère reste du côté où se trouve son centre.
   const split = focus ? PAD.l + Math.round((xOf(value(focus)) - PAD.l) / bw) * bw : null
   const sp = spreadOf(split)
-  const bx = (i: number) => sp.map(PAD.l + i * bw + 1)
+  const bx = (i: number) => sp.map(PAD.l + i * bw)
   const markerX = (f: Focus) => (f === focus && sp.gap ? (sp.gap.x0 + sp.gap.x1) / 2 : sp.map(xOf(value(f))))
 
   /** Coordonnée x du pointeur dans le viewBox. */
@@ -97,7 +133,7 @@ export function Histogram({
     const box = wrap.current?.getBoundingClientRect()
     const ctm = el?.getScreenCTM()
     if (!el || !box || !ctm) return
-    const p = new DOMPoint(bx(i) - 1 + (bw * sp.k) / 2, PAD.t).matrixTransform(ctm)
+    const p = new DOMPoint(bx(i) + (bw * sp.k) / 2, PAD.t).matrixTransform(ctm)
     const left = p.x - box.left
     setTip({ i, left, top: Math.max(0, p.y - box.top), flip: left > box.width - 220 })
   }
@@ -153,7 +189,7 @@ export function Histogram({
     <div className="histo-wrap" ref={wrap}>
       <svg
         ref={svg}
-        className={`histo ${intro ? 'intro' : ''} ${tip ? 'hovering' : ''} ${focus ? `focus-${focus}` : ''}`}
+        className={`histo ${reveal ? 'drawn' : ''} ${tip ? 'hovering' : ''} ${focus ? `focus-${focus}` : ''}`}
         viewBox={`0 0 ${W} ${H}`}
         role="img"
         aria-label="Distribution of the Dynamic tranche annual return"
@@ -169,25 +205,30 @@ export function Histogram({
           <pattern id={dots} width="16" height="16" patternUnits="userSpaceOnUse">
             <circle className="dot" cx="1" cy="1" r="1" />
           </pattern>
+          {/* grille des barres : cellule bw / COLS alignée sur la ligne de base, comme les éclats de l'entrée */}
+          {[gainDots, lossDots].map((id) => (
+            <pattern key={id} id={id} x={PAD.l} y={BASE - cell} width={cell} height={cell} patternUnits="userSpaceOnUse">
+              <circle className={id === gainDots ? 'pd gain' : 'pd loss'} cx={cell / 2} cy={cell / 2} r={1.8} />
+            </pattern>
+          ))}
         </defs>
         <rect x={PAD.l} y={PAD.t} width={IW} height={IH} fill={`url(#${dots})`} />
 
         {ghost?.bins.map((c, i) =>
-          c ? <rect key={`g${i}`} className="ghost" x={bx(i)} y={BASE - h(c)} width={bw * sp.k - 2} height={h(c)} rx={2} /> : null,
+          c ? <rect key={`g${i}`} className="ghost" x={bx(i) + 1} y={BASE - h(c)} width={bw * sp.k - 2} height={h(c)} rx={2} /> : null,
         )}
 
-        {tip && <Vline className="cursor" x={bx(tip.i) - 1 + (bw * sp.k) / 2} />}
+        {tip && <Vline className="cursor" x={bx(tip.i) + (bw * sp.k) / 2} />}
 
         {s.bins.map((c, i) => (
           <rect
             key={i}
             className={`bar ${BIN_MIN + i * BIN_W < 0 ? 'loss' : 'gain'} ${tip?.i === i ? 'on' : ''}`}
-            style={{ '--i': i } as CSSProperties}
+            style={{ fill: `url(#${BIN_MIN + i * BIN_W < 0 ? lossDots : gainDots})` }}
             x={bx(i)}
-            y={BASE - h(c)}
-            width={bw * sp.k - 2}
-            height={h(c)}
-            rx={2}
+            y={BASE - hRows(c)}
+            width={bw * sp.k}
+            height={hRows(c)}
           />
         ))}
 
@@ -243,7 +284,7 @@ function FocusCard({ focus, s, total, style }: { focus: Focus; s: Summary; total
         <>
           <p className="eyebrow">Safe</p>
           <p className="focus-big">{pct(SENIOR_RATE)}</p>
-          <p>fixed, every year</p>
+          <p>contract target rate, not guaranteed</p>
           <p>paid before Dynamic</p>
           <p className="muted">Dynamic beats it {Math.round(beats * 100)}% of years</p>
         </>

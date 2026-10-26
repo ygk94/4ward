@@ -6,7 +6,11 @@
 // `burst` (0 → 1) : les arêtes éclatent en tournoyant, sans quitter l'écran ; onde de choc, rotation qui
 // s'emballe. `chart` (0 → 1) : chaque arête rejoint une colonne d'un graphique en points sur une grille de
 // points (façon Morpho) ; au survol, les colonnes proches de la souris se soulèvent et foncent.
+// `rebuild` (avancement 0 → 1) : cinématique du Risk lab. Des éclats d'arête tombent du haut de l'écran et s'empilent
+// dans chaque barre de l'histogramme (positions publiées dans burst.ts), puis s'effacent devant les vraies barres.
+// Au changement d'onglet, les colonnes du graphique glissent dans le sens du menu, en retard sur la page (burst.slide).
 import { useEffect, useRef } from 'react'
+import { risk, SLIDE_MS, slide } from './burst'
 
 type V = [number, number, number]
 interface Shape {
@@ -183,16 +187,36 @@ interface Props {
   className?: string
   burst?: () => number
   chart?: () => number
+  rebuild?: () => number
 }
 
-export function PolyVault({ className, burst, chart }: Props) {
+/** Passes de couleur des éclats du Risk lab : gains en bleu, pertes en violet (comme les barres). */
+const SHARD_LAYERS = {
+  gain: [
+    { color: '#2f6bff', width: 2.2, opacity: 0.95 },
+    { color: '#6fd3ff', width: 1, opacity: 0.6 },
+    { color: '#6fd3ff', width: 4, opacity: 0.12 },
+  ],
+  loss: [
+    { color: '#8c7bff', width: 2.2, opacity: 0.95 },
+    { color: '#b9a8ff', width: 1, opacity: 0.6 },
+    { color: '#8c7bff', width: 4, opacity: 0.12 },
+  ],
+}
+/** Colonnes de points par barre (même grille que Histogram.tsx) et nombre maximal d'éclats par couleur. */
+const SHARD_COLS = 4
+const SH = 900
+
+export function PolyVault({ className, burst, chart, rebuild }: Props) {
   const ref = useRef<HTMLCanvasElement>(null)
   const burstRef = useRef(burst)
   const chartRef = useRef(chart)
+  const rebuildRef = useRef(rebuild)
   useEffect(() => {
     burstRef.current = burst
     chartRef.current = chart
-  }, [burst, chart])
+    rebuildRef.current = rebuild
+  }, [burst, chart, rebuild])
 
   useEffect(() => {
     const canvas = ref.current!
@@ -288,6 +312,22 @@ export function PolyVault({ className, burst, chart }: Props) {
     window.addEventListener('pointermove', onMove)
     document.addEventListener('pointerleave', onLeave)
 
+    // Éclats du Risk lab : tirages fixes par éclat (retard, dérive) et tremblement de chaque passe.
+    const shardRnd = Float32Array.from({ length: SH * 2 }, () => Math.random())
+    const shardJitter = Float32Array.from({ length: SH * 4 }, () => Math.random() * Math.PI * 2)
+
+    // Changement d'onglet : les colonnes partent du côté d'où arrive la page, en retard (les colonnes en tête d'abord),
+    // dépassent un peu leur place puis s'y calent exactement.
+    const slideOff = (i: number, n: number, w: number) => {
+      if (!slide.dir) return 0
+      const age = (performance.now() - slide.start) / SLIDE_MS
+      if (age >= 1) return 0
+      const delay = 0.15 + (slide.dir > 0 ? 1 - i / n : i / n) * 0.3 // la page est déjà là : les colonnes arrivent après
+      const u = Math.min(1, Math.max(0, (age - delay) / 0.55))
+      const back = 1 + 2.2 * (u - 1) ** 3 + 1.2 * (u - 1) ** 2 // easeOutBack : 0 → 1 avec un léger dépassement
+      return -slide.dir * w * 0.1 * (1 - back)
+    }
+
     const outerPhase = outer.shape.verts.map(() => Math.random() * Math.PI * 2)
     const innerPhase = inner.shape.verts.map(() => Math.random() * Math.PI * 2)
     const start = performance.now()
@@ -334,7 +374,7 @@ export function PolyVault({ className, burst, chart }: Props) {
       const px = pointer.x * wWorld
       const reachX = wWorld * 0.07
       for (let i = 0; i < NB; i++) {
-        colX[i] = (-wWorld / 2 + ((i + 0.5) / NB) * wWorld) * 0.96
+        colX[i] = (-wWorld / 2 + ((i + 0.5) / NB) * wWorld) * 0.96 + slideOff(i, NB, wWorld)
         lift[i] = hover * Math.exp(-(((colX[i] - px) / reachX) ** 2))
         colTop[i] = bottom + hWorld * 0.56 * series[i] * (1 + 0.05 * Math.sin(t * 0.9 + i * 0.35)) + hWorld * 0.14 * lift[i]
       }
@@ -505,6 +545,61 @@ export function PolyVault({ className, burst, chart }: Props) {
             ctx.rect(toX(colX[i] + Math.sin(t * 11 + k * 1.3) * amp) - 1.2, toY(y + Math.cos(t * 8.1 + k * 1.9) * amp) - 1.2, 2.4, 2.4)
           }
           ctx.fill()
+        }
+      }
+
+      // Cinématique du Risk lab, en pixels : les barres sont publiées en fractions du viewport (le canvas le couvre).
+      const rbP = rebuildRef.current?.()
+      if (rbP !== undefined && rbP < 1 && risk.rects.length) {
+        const fadeOut = 1 - clamp01((rbP - 0.78) / 0.17) // les vraies barres (points) prennent le relais
+        const counts = { gain: 0, loss: 0 }
+        const poses: Record<'gain' | 'loss', number[]> = { gain: [], loss: [] }
+        risk.rects.forEach((r, bin) => {
+          const x0 = r.x0 * W
+          const x1 = r.x1 * W
+          const slot = (x1 - x0) / SHARD_COLS
+          if (slot <= 0) return
+          const rows = Math.floor(((r.bottom - r.top) * H) / slot + 1e-6)
+          const kind = bin < risk.rects.length / 2 ? 'loss' : 'gain'
+          for (let row = 0; row < rows; row++) {
+            const k = counts[kind]++
+            if (k >= SH) continue
+            const [r1, r2] = [shardRnd[k * 2], shardRnd[k * 2 + 1]]
+            // les rangées du bas tombent d'abord : la barre se remplit de bas en haut
+            const delay = (row / rows) * 0.45 + r1 * 0.12
+            const fall = clamp01((rbP - delay * 0.8) / 0.3)
+            if (fall <= 0) continue
+            // chute qui accélère puis ralentit à l'arrivée (l'éclat se pose sans à-coup)
+            const e = 0.35 * fall * fall + 0.65 * fall * fall * (3 - 2 * fall)
+            const ty = r.bottom * H - (row + 0.5) * slot
+            const startY = -slot * 2 - r1 * H * 0.3
+            poses[kind].push(
+              k,
+              (x0 + x1) / 2 + (1 - e) * (r2 - 0.5) * slot * 4,
+              startY + (ty - startY) * e,
+              (1 - e) * (1 - e) * (r2 - 0.5) * 8, // tournoie, puis se redresse en douceur
+              ((x1 - x0) / 2) * 0.88 * (1 + (1 - e) * 0.6),
+            )
+          }
+        })
+        for (const kind of ['loss', 'gain'] as const) {
+          const pose = poses[kind]
+          SHARD_LAYERS[kind].forEach((l, layer) => {
+            ctx.globalAlpha = l.opacity * fadeOut
+            ctx.strokeStyle = l.color
+            ctx.lineWidth = l.width
+            const amp = layer === 0 ? 0.6 : 1.8
+            ctx.beginPath()
+            for (let n = 0; n < pose.length; n += 5) {
+              const [k, sx, sy, ang, len] = [pose[n], pose[n + 1], pose[n + 2], pose[n + 3], pose[n + 4]]
+              const jx = Math.sin(t * 0.6 + shardJitter[k * 4 + layer]) * amp
+              const jy = Math.cos(t * 0.77 + shardJitter[k * 4 + layer]) * amp
+              const [ex, ey] = [Math.cos(ang) * len, Math.sin(ang) * len]
+              ctx.moveTo(sx - ex + jx, sy - ey + jy)
+              ctx.lineTo(sx + ex + jx, sy + ey + jy)
+            }
+            ctx.stroke()
+          })
         }
       }
       ctx.globalAlpha = 1

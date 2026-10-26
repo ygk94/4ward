@@ -13,7 +13,7 @@ export const config = {
 
 /** Objectif de collecte du vault (USDC) : la jauge de la page d'accueil se remplit en proportion. */
 export const VAULT_TARGET_USDC = Number(import.meta.env.VITE_VAULT_TARGET_USDC ?? 2_000_000)
-/** Nom du projet. */
+/** Nom du projet (logo : public/logo-4ward.svg, favicon : public/favicon.svg). */
 export const BRAND = '4ward'
 /** Devises ouvertes à la cotation sur le pool (set_min_cap dans scripts/setup-testnet.sh). */
 export const TRADABLE = ['MXN', 'BRL', 'ARS', 'EUR']

@@ -126,6 +126,25 @@ select {
     transform: translateY(10px);
   }
 }
+/* entre onglets : la page glisse dans le sens du menu (App.tsx) ; les billes du fond suivent en retard */
+.page.slide-fwd {
+  animation: slide-fwd 1s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.page.slide-back {
+  animation: slide-back 1s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+@keyframes slide-fwd {
+  from {
+    opacity: 0;
+    transform: translateX(-72px);
+  }
+}
+@keyframes slide-back {
+  from {
+    opacity: 0;
+    transform: translateX(72px);
+  }
+}
 
 /* ---------- typo ---------- */
 .eyebrow {
