@@ -66,9 +66,9 @@ On the pool side, the big step is netting per currency and maturity, so that imp
 On the product side, we want to deliver local currency to the supplier straight from the pool's hedge position, make hedged invoices transferable for factoring, offer a simple "lock the rate" SDK to wallets and anchors, and plug KYC through anchors with SEP-12. Then an audit and mainnet, where Reflector FX already covers 24 currencies.
 
 
-## Tech stack (24 words)
+## Tech stack (18 words)
 
-Rust, Soroban (soroban-sdk), Stellar CLI, Reflector FX (SEP-40), USDC SAC, path payments, Etherfuse rates, React, TypeScript, Vite, stellar-sdk, Stellar Wallets Kit, Freighter, Vercel, Python.
+Rust, Soroban, Reflector FX, SEP-40, USDC, path payments, Etherfuse, React, TypeScript, Vite, stellar-sdk, Stellar Wallets Kit, Freighter, Vercel
 
 
 ## AI tooling note
