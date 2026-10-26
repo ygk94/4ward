@@ -1,7 +1,7 @@
 """Chiffres de la démo (crash +12 %, protection ±10 %, 1 000 000 MXN à 90 jours) → out/chiffres-demo.md.
 
 Trois colonnes : spot 0,055 (chiffres de la vidéo) et spot aligné sur Reflector (0,05325) avec le jeu de taux actif
-(run_all.py --rates), puis spot Reflector avec l'autre jeu de taux, pour comparaison.
+(run_all.py --rates, défaut : scripts/rates.snapshot), puis spot Reflector avec l'autre jeu de taux, pour comparaison.
 Vérifie aussi que les chiffres cités dans README.md et docs/video-script.md sont à jour.
 """
 import re
@@ -43,11 +43,13 @@ def rows(s):
 
 # Chiffres périmés connus (anciens textes, 60 s ou approximations) → valeur juste à 90 jours.
 STALE = [
-    (r"6 ?600", "≈ +6 600 $ (ancienne approximation) au lieu de +6 727"),
-    (r"1 ?100 ?\$|~1 ?100", "≈ 1 100 $ (ancienne approximation) au lieu de +1 240"),
-    (r"55 ?275", "prix figé à 60 s (55 275) au lieu de 54 873,05 à 90 jours"),
-    (r"56 ?072", "payé total à 60 s (56 072,50) au lieu de 56 112,69"),
-    (r"5 ?527,50", "dépôt à 60 s (5 527,50) au lieu de 5 487,31"),
+    (r"6 ?600", "≈ +6 600 $ (ancienne approximation) au lieu de +6 587"),
+    (r"1 ?100 ?\$|~1 ?100", "≈ 1 100 $ (ancienne approximation) au lieu de +1 086"),
+    (r"55 ?275", "prix figé à 60 s (55 275) au lieu de 55 012,81 à 90 jours"),
+    (r"56 ?072", "payé total à 60 s (56 072,50) au lieu de 56 098,72"),
+    (r"5 ?527,50", "dépôt à 60 s (5 527,50) au lieu de 5 501,28"),
+    (r"54 ?873", "prix figé des anciens taux 400/700 (54 873) au lieu de 55 012,81"),
+    (r"56 ?112", "payé total des anciens taux 400/700 (56 112,69) au lieu de 56 098,72"),
 ]
 
 
@@ -87,13 +89,14 @@ def main():
         "",
         "Lecture : avec la protection, Lucía ne paie que ce qui dépasse ses 10 % ; sans, elle paie tout le mouvement.",
         "La 2ᵉ colonne sert si le mock est réaligné sur Reflector avant l'enregistrement (`scripts/crash.sh --reset`) ; "
-        "la 3ᵉ compare avec l'autre jeu de taux (`scripts/sync-rates.sh` pousse les taux Etherfuse ; "
-        "`python sim/run_all.py --rates etherfuse` régénère tout avec eux).",
+        "la 3ᵉ compare avec l'autre jeu de taux (les taux par défaut sont ceux de `scripts/rates.snapshot`, poussés sur "
+        "le pool déployé ; `python sim/run_all.py --rates en-dur` régénère tout avec les anciens taux 400/700).",
         "",
         "## Cohérence avec les textes",
         "",
-        "Chiffres de la vidéo avec les taux en dur (ceux du script vidéo) : prix figé 54 873,05 · dépôt 5 487,31 · "
-        "sans protection 61 600 (+6 726,95) · avec 56 112,69 (+1 239,64) · crédité 10 974,61.",
+        f"Chiffres de la vidéo ({c.rates_label()}) : prix figé {table[0][2][1].strip('*')} · dépôt {table[0][3][1]} · "
+        f"sans protection {table[0][5][1].strip('*')} ({table[0][6][1]}) · avec {table[0][9][1].strip('*')} "
+        f"({table[0][10][1]}) · crédité {table[0][8][1]}.",
         "",
     ]
     stale = stale_mentions()

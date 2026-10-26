@@ -24,7 +24,7 @@ BUY, SELL = "BuyCurrency", "SellCurrency"
 REF = dict(
     notional=1_000_000 * AMOUNT_ONE,   # 1 000 000 MXN
     spot=5_500_000_000_000,            # 0,055 USD / MXN
-    r_usd=400, r_dev=700,              # USD 4 %, MXN 7 % (taux en dur du setup)
+    r_usd=360, r_dev=555,              # USD 3,6 %, MXN 5,55 % (scripts/rates.snapshot, pool déployé)
     spread=50,                         # 0,5 %
     duration=90 * 86_400,              # 90 jours
     cap=1_000,                         # plafond 10 %
@@ -38,7 +38,7 @@ RATE_SETS = {
     "en-dur": {"USD": 400, "MXN": 700, "BRL": 1_050, "ARS": 2_200, "EUR": 200},
     "etherfuse": {"USD": 360, "MXN": 555, "BRL": 1_148, "ARS": 2_200, "EUR": 210},
 }
-RATES = "en-dur"   # jeu actif, changé par use_rates()
+RATES = "etherfuse"   # jeu actif (= scripts/rates.snapshot, celui du pool déployé), changé par use_rates()
 
 
 def use_rates(name):
@@ -144,11 +144,14 @@ def fr(x, dec=2):
 
 
 def self_test():
-    """Valeurs de référence du contrat (tests Rust, testnet au centime), toujours avec les taux en dur.
-    Lève AssertionError si un chiffre diffère."""
+    """Valeurs de référence du contrat : taux en dur 400/700 (tests Rust historiques) et taux du snapshot
+    360/555 (chiffres de la vidéo, testnet au centime). Lève AssertionError si un chiffre diffère."""
     hard = RATE_SETS["en-dur"]
     s = scenario(r_usd=hard["USD"], r_dev=hard["MXN"])
     q = s["quote"]
+    snap = RATE_SETS["etherfuse"]
+    d = scenario(r_usd=snap["USD"], r_dev=snap["MXN"])
+    dq = d["quote"]
     checks = [
         ("forward_rate", q["forward_rate"], 5_487_305_413_412),
         ("usdc_cost", q["usdc_cost"], 548_730_541_341),
@@ -156,6 +159,11 @@ def self_test():
         ("spot après +12 %", s["spot_end"], 6_160_000_000_000),
         ("sans protection", s["unprotected"], 616_000_000_000),        # 61 600,00
         ("avec protection", round(usdc(s["protected"]), 2), 56_112.69),
+        ("démo forward", dq["forward_rate"], 5_501_281_368_668),
+        ("démo usdc_cost", dq["usdc_cost"], 550_128_136_866),       # 55 012,81
+        ("démo margin", dq["margin"], 55_012_813_687),              # 5 501,28
+        ("démo payout", d["payout"], 110_025_627_374),              # 11 002,56
+        ("démo avec protection", round(usdc(d["protected"]), 2), 56_098.72),
     ]
     bad = [(name, got, want) for name, got, want in checks if got != want]
     if bad:

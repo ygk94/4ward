@@ -12,14 +12,14 @@ python3 -m venv ~/.venvs/fistea-sim
 # à chaque fois
 ~/.venvs/fistea-sim/bin/python sim/run_all.py
 
-# si l'équipe adopte les taux Etherfuse (USD 3,60 % / MXN 5,55 % / BRL 11,48 % / EUR 2,10 %, ARS inchangé)
-~/.venvs/fistea-sim/bin/python sim/run_all.py --rates etherfuse
+# comparaison avec les anciens taux en dur (USD 4 % / MXN 7 %)
+~/.venvs/fistea-sim/bin/python sim/run_all.py --rates en-dur
 ```
 
-`--rates` choisit le jeu de taux de la démo (`contract.RATE_SETS`) : `en-dur` par défaut (`scripts/setup-testnet.sh`),
-`etherfuse` (`scripts/sync-rates.sh`). Il réécrit `out/` (chiffres de la démo, courbe, coût de la protection, LP) ;
-l'auto-test du contrat reste sur les taux en dur, les tranches (modèle du README) et la calibration n'en dépendent pas.
-Avec les taux Etherfuse, la démo à 0,055 donne : prix figé 55 012,81 · avec protection 56 098,72 (+1 085,90).
+`--rates` choisit le jeu de taux de la démo (`contract.RATE_SETS`) : `etherfuse` par défaut (`scripts/rates.snapshot`,
+taux du pool déployé et de la vidéo), `en-dur` (anciens taux 400/700). Il réécrit `out/` (chiffres de la démo, courbe, coût de la protection, LP) ;
+l'auto-test du contrat vérifie les deux jeux (400/700 des tests Rust, 360/555 de la démo), les tranches (modèle du README) et la calibration n'en dépendent pas.
+Avec les taux du snapshot (défaut), la démo à 0,055 donne : prix figé 55 012,81 · avec protection 56 098,72 (+1 085,90).
 
 `run_all.py` s'arrête si le portage du contrat ne retrouve pas les valeurs de référence, et sort en erreur si
 les tranches ne reproduisent plus le tableau du README. Il liste aussi les chiffres périmés trouvés dans les textes.

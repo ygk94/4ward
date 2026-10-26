@@ -1,7 +1,7 @@
 """Régénère tout sim/out/ en une commande :  python sim/run_all.py [--rates en-dur|etherfuse]
 
---rates : jeu de taux d'intérêt de la démo (défaut : en-dur = scripts/setup-testnet.sh ; etherfuse = rendements
-poussés par scripts/sync-rates.sh). Les tranches (modèle du README) et la calibration n'en dépendent pas.
+--rates : jeu de taux d'intérêt de la démo (défaut : etherfuse = scripts/rates.snapshot, celui du pool déployé et
+de la vidéo ; en-dur = anciens taux 400/700, pour comparaison). Les tranches (modèle du README) et la calibration n'en dépendent pas.
 
 S'arrête si le portage du contrat ne retrouve pas les valeurs de référence ; sort en erreur (code 1) si les
 tranches ne reproduisent plus le tableau du README. Les cours historiques viennent de sim/data/ (fetch_fx.py).
@@ -29,14 +29,14 @@ import tranches
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Régénère sim/out/.")
-    parser.add_argument("--rates", choices=sorted(contract.RATE_SETS), default="en-dur",
-                        help="jeu de taux d'intérêt (défaut : en-dur)")
+    parser.add_argument("--rates", choices=sorted(contract.RATE_SETS), default="etherfuse",
+                        help="jeu de taux d'intérêt (défaut : etherfuse = scripts/rates.snapshot)")
     args = parser.parse_args(argv)
     try:
         contract.self_test()
     except AssertionError as e:
         sys.exit(f"ARRÊT : {e}")
-    print("contrat      : valeurs de référence retrouvées (forward 5487305413412, marge 54873054135, 56 112,69)")
+    print("contrat      : valeurs de référence retrouvées (démo : forward 5501281368668, marge 55012813687, 56 098,72)")
     contract.use_rates(args.rates)
     print(f"taux         : {contract.rates_label()}")
 
