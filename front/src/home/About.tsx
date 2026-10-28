@@ -198,6 +198,7 @@ export function About() {
         <span>{BRAND}</span>
         <span className="muted">HackMeridian · Lisbon · 2026</span>
         <span className="muted">Reflector · Soroban · Freighter</span>
+        <span className="muted">© 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved.</span>
       </footer>
     </div>
   )
