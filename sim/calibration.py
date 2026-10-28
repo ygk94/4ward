@@ -1,3 +1,4 @@
+# Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 """Calibration des plafonds minimums et du spread → out/calibration.md.
 
 Pour MXN, BRL, ARS, EUR :

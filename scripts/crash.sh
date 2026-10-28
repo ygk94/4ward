@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 # Filet de sécurité de la vidéo : fait bouger le prix d'une devise sur le mock-oracle (bouton crash du front en panne).
 #   ./scripts/crash.sh [PCT] [DEVISE]      crash : prix × (1 + PCT %), PCT défaut 12 (accepte -8, 12.5 ou 12,5), DEVISE défaut MXN
 #   ./scripts/crash.sh --refresh [DEVISE]  repose le même prix (horodatage à maintenant, prix de moins de 900 s)

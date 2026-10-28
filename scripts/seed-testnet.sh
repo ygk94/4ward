@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 # Peuple le déploiement testnet avec de vrais comptes et de vraies transactions, pour tester le front et le contrat.
 #   ./scripts/seed-testnet.sh            tout : comptes, dépôts LP, couvertures, refus attendus, mouvements de cours,
 #                                        règlements par le keeper, retraits, contrôle de l'invariant

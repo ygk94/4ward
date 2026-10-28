@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 // [FRONT — Hugo] Statistiques d'usage de la page vault.
 // - Couvertures : parcourues avec get_hedge (pas de limite de rétention) → PME, volume, encours, protection et durée moyennes.
 // - Fournisseurs : déposants uniques des événements `lp_deposited` (le RPC garde ~7 jours), filtrés sur les parts actuelles.

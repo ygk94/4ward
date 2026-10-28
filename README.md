@@ -389,3 +389,9 @@ Fixes planned after the hackathon; details in `docs/points-a-trancher.md`.
 ## Competition
 
 *FX Swap by Hedgehog* (SCF #21) offers currency swaps with physical delivery (USDC/EURC/AUDD) for DeFi users. 4ward targets SMEs: a hedge on any currency covered by the oracle, without mandatory physical delivery (the pool only holds the currency to hedge its net exposure), tied to the supplier payment.
+
+## License
+
+Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved.
+
+4ward is proprietary software. The code is shared for evaluation only (hackathon judges, prospective partners): any copy, modification, redistribution, deployment or commercial use requires our prior written consent. See [LICENSE](LICENSE). Third-party components remain under their own licenses.

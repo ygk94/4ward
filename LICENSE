@@ -1,0 +1,61 @@
+4ward — Proprietary License
+
+Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle.
+All rights reserved.
+
+This repository, including its source code, smart contracts, scripts,
+simulations, documentation, designs, pitch materials and any other content
+(the "Software"), is the exclusive property of the copyright holders named
+above and is protected by copyright law and international treaties.
+
+1. Limited permission to view and evaluate
+
+   The copyright holders permit you to view, download and run the Software
+   solely to evaluate it, including evaluation by hackathon organizers and
+   judges, and by prospective partners, investors or customers considering a
+   collaboration with the copyright holders. This permission is personal,
+   non-exclusive, non-transferable, revocable at any time, and royalty-free.
+
+2. Restrictions
+
+   Except as expressly permitted in section 1, or with the prior written
+   consent of all copyright holders, you may not:
+
+   a. copy, reproduce or modify the Software, in whole or in part;
+   b. create derivative works based on the Software or its design, pricing
+      model, risk rules or contract architecture;
+   c. distribute, publish, sublicense, sell, rent or otherwise make the
+      Software available to any third party;
+   d. use the Software, or any part of it, in production, for commercial
+      purposes, or to provide a service to others;
+   e. deploy the smart contracts, or any modified version of them, to any
+      public network (mainnet or otherwise) other than for evaluation;
+   f. remove or alter any copyright notice or this license.
+
+3. Third-party components
+
+   Third-party libraries, components and data included in or used by the
+   Software remain under their own licenses, which prevail for those parts.
+   This license does not claim ownership of them.
+
+4. Feedback
+
+   If you provide suggestions or feedback about the Software, the copyright
+   holders may use them freely, without obligation to you.
+
+5. No warranty
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT. THE SOFTWARE IS A
+   PROTOTYPE RUNNING ON TESTNET AND HAS NOT BEEN AUDITED. IN NO EVENT SHALL THE
+   COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY ARISING
+   FROM OR IN CONNECTION WITH THE SOFTWARE OR ITS USE.
+
+6. Governing law
+
+   This license is governed by French law. Any dispute shall be submitted to
+   the competent courts of Paris, France.
+
+For any other use, licensing or partnership request, contact:
+Hugo Thomas <hugo.thomas.perso@gmail.com>

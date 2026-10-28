@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 // [FRONT — Hugo] (logique fournie par Pricing) Devis : spot de l'oracle du pool (mock en démo), prix figé, marge à déposer (appel quote).
 // Sous le devis : taux Etherfuse lus en direct et taux réellement utilisé par le pool (retrouvé depuis le devis).
 import { LIVE_SPOT } from '../shared/config'

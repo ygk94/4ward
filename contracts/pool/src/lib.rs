@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 #![no_std]
 //! Contrat principal : pool USDC des LPs + couvertures de change plafonnées.
 //!

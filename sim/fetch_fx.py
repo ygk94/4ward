@@ -1,3 +1,4 @@
+# Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 """Rafraîchit les cours historiques de sim/data/ (pas lancé par run_all : les CSV versionnés rendent tout reproductible).
 
   python sim/fetch_fx.py [AAAA-MM-JJ]     fin de la fenêtre (défaut : hier), 5 ans d'historique

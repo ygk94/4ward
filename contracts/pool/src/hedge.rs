@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 //! PAIEMENT — ouverture et règlement des couvertures.
 //!
 //! open : prix bloqué (pricing::forward_rate), contrôle du plafond (pricing::check_cap),

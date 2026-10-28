@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 // [FRONT — Hugo] Bouclier « protected » : contour au dégradé Glacier, tracé en deux passes comme l'encre du vault,
 // avec une coche qui se dessine. Version grande (About) et badge compact (Mes positions).
 import { useId } from 'react'

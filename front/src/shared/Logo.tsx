@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 // [FRONT] Logo 4ward : deux barres de même longueur, la seconde décalée vers l'avant
 // (« même prix, plus tard »), barre du haut à l'encre, barre du bas en bleu.
 export function LogoMark({ className }: { className?: string }) {

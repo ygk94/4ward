@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 //! VAULT — dépôts / retraits des LPs en parts, capital réservé, flux USDC du pool.
 //!
 //! Compta : `TotalDeposits` = capital du pool (bouge avec le P&L des couvertures).

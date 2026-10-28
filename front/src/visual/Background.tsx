@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 // [FRONT — Hugo] Fond plein écran. Sur le crème du body, le vault filaire (PolyVault, en Canvas 2D), qui
 // éclate quand on défile sur l'accueil ; sur les autres pages, ses barres deviennent un graphique (cf. burst.ts).
 // Les carreaux Acid Squares ne sont plus affichés.

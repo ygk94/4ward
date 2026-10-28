@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 # Push oracle des taux : remplace les taux d'intérêt en dur du pool par le rendement des stablebonds Etherfuse (set_rate).
 #   ./scripts/sync-rates.sh            USD ← USTRY, MXN ← CETES, BRL ← TESOURO, EUR ← EUROB ; ARS garde son taux en dur
 #   ./scripts/sync-rates.sh --all      ajoute GBP ← GILTS

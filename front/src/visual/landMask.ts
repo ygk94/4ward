@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 // [FRONT] Masque terre / mer du globe : cellules de 2° (180 × 90, ligne 0 au nord, colonne 0 à −180°),
 // un bit par cellule, encodé en base64. Calculé une fois depuis Natural Earth 1:110m (paquet world-atlas,
 // domaine public) ; rien n'est chargé à l'exécution.

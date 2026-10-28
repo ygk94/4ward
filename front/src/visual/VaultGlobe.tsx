@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 // [FRONT] Petit vault du panneau pool (page Vaults), en Canvas 2D. Quand on choisit « Hedge an invoice »,
 // il se transforme en globe de points (façon Ondo : terres en bleu foncé, côtes en bleu moyen, mer pâle),
 // et un arc relie le dollar (New York) à la devise choisie : il se trace, un point le parcourt, le globe

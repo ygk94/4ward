@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 //! PRICING — spot oracle, taux forward, spread, plafonds minimum.
 //!
 //! Convention : prix en USD par unité de devise, 14 décimales (format Reflector FX).

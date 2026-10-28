@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 // [FRONT — Hugo] Barre du haut : navigation à gauche, wallet à droite.
 // L'onglet actif est marqué par une pastille bleue qui glisse d'un bouton à l'autre.
 import { useState } from 'react'

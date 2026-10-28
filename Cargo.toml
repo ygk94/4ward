@@ -4,6 +4,10 @@ members = [
   "contracts/*",
 ]
 
+[workspace.package]
+authors = ["Hugo Thomas", "Clément Darmon", "Lancelot Watelle"]
+license-file = "LICENSE"
+
 [workspace.dependencies]
 soroban-sdk = "28"
 

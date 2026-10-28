@@ -1,3 +1,4 @@
+# Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 """Rendement des tranches senior / junior d'un pool de démarrage → out/tranches.md.
 
 1. Tableau du README (« Les LPs : tranche senior et tranche junior ») : pool de 500 k$ (400 k$ senior à 4,5 %,

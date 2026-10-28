@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 // [FRONT — Hugo] Page « Risk lab » : Monte-Carlo du pool de démarrage (modèle du README, sim/tranches.py).
 // Vue simple : Safe contre Dynamic, l'histogramme et trois climats de marché. « Advanced » ouvre les curseurs,
 // les indicateurs détaillés et les hypothèses. Recalcul dans un Web Worker.

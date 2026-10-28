@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 // [FRONT — Hugo] Mise en page générale et navigation entre les écrans.
 import { useEffect, useRef } from 'react'
 import { About } from './home/About'

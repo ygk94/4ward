@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 // [FRONT — Hugo] IDs testnet, générés par ../scripts/setup-testnet.sh dans .env.local
 export const config = {
   rpcUrl: import.meta.env.VITE_RPC_URL as string,

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 # Monte tout l'environnement de démo sur le testnet Stellar.
 # ATTENTION : chaque lancement redéploie mock-oracle et pool (nouveaux IDs, .env.testnet et front/.env.local réécrits,
 # couvertures et historique perdus pour le front). Pour remettre un prix : ./scripts/crash.sh --demo (set_price).

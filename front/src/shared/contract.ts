@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 // [FRONT — Hugo] Client du contrat pool.
 // Le client est construit à partir de la spec lue on-chain (contract.Client.from) : pas besoin de régénérer
 // les bindings à chaque redéploiement. Les types ci-dessous reprennent ceux de contracts/pool/src/lib.rs.

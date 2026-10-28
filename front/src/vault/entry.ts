@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 // [FRONT — Hugo] Ouvrir la page vault directement sur un rôle (liens de la page About).
 import { go } from '../shared/router'
 

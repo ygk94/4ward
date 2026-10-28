@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 # Keeper : règle tout seul les couvertures arrivées à échéance (settle est ouvert à tous, sans signature de la PME).
 #   ./scripts/keeper.sh                boucle : un passage toutes les 10 s (Ctrl+C pour arrêter)
 #   ./scripts/keeper.sh --once         un seul passage, puis s'arrête

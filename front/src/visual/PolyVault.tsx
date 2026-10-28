@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 // [FRONT] Vault de fond en Canvas 2D, à la manière du composant Framer « Polyhedron » : sommets projetés
 // à la main, arêtes qui s'arrêtent net sur les sommets, un point sur chaque sommet, et l'arrière plus pâle
 // que l'avant. On garde le vault à l'encre : icosaèdre en six passes de couleur qui tremblent, dodécaèdre

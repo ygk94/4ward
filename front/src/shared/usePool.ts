@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 // [FRONT — Hugo] Lecture des chiffres du pool, rafraîchis toutes les 15 s.
 // Si le RPC ne répond pas, on affiche des chiffres de démo (signalés par `demo: true`).
 import { useCallback, useEffect, useState } from 'react'

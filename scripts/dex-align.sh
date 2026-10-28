@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 # Réaligne l'offre DEX MXN/USDC (celle du setup, vendue par fx-admin) sur le prix MXN du mock-oracle.
 # Sans ça, le path payment du fournisseur se fait à l'ancien prix et le coût total ne retombe plus sur le prix figé.
 #   ./scripts/dex-align.sh            lit le prix MXN du mock, met à jour l'offre (manage-sell-offer, même id)

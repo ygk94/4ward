@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 // [FRONT — Hugo] Taux Etherfuse en direct (API publique, sans clé ; CORS ouvert à 4ward-fx.vercel.app) et taux
 // réellement utilisé par le pool, retrouvé depuis un devis (le contrat n'a pas de getter de taux).
 // Le contrat ne lit pas Etherfuse : l'admin pousse ces taux avec scripts/sync-rates.sh (set_rate).

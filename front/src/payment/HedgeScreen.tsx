@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 // [FRONT — Hugo] (logique fournie par Paiement) Écran Lucía : facture, blocage du taux (open_hedge).
 // Le règlement (settle) puis le paiement du fournisseur (path payment, payment/supplierPayment.ts) se font depuis « Mes positions ».
 import { useEffect, useState } from 'react'

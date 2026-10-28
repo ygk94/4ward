@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 # Garde le testnet utilisable sans intervention (site Vercel, jury) : le mock-oracle ne publie rien tout seul et le
 # contrat refuse un prix de plus de 900 s (erreur 302). Toutes les 10 min, repose le prix courant de chaque devise
 # (crash.sh --refresh : même prix, nouvel horodatage ; un crash en cours est conservé).

@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 // [FRONT] Pastille qui glisse d'un bouton à l'autre dans un groupe (onglets, choix du marché…).
 // Le conteneur porte la classe `has-pill` et contient un <span className="slide-pill" /> ; la pastille
 // se cale sur le bouton enfant `.active` ou `.on` (position et taille), avec une transition CSS.

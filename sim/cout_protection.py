@@ -1,3 +1,4 @@
+# Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 """Coût de la protection pour la PME, comparé aux alternatives → out/cout-protection.png (+ .svg) et out/cout-protection.md.
 
 Notre coût (calculé avec le contrat) : rémunération du pool (spread) + rendement perdu sur le dépôt (taux USD du pricing).

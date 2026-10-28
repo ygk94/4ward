@@ -1,3 +1,4 @@
+# Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 """Chiffres de la démo (crash +12 %, protection ±10 %, 1 000 000 MXN à 90 jours) → out/chiffres-demo.md.
 
 Trois colonnes : spot 0,055 (chiffres de la vidéo) et spot aligné sur Reflector (0,05325) avec le jeu de taux actif

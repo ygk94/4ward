@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 // [FRONT — Hugo] Paiement du fournisseur après le règlement : path payment strict receive USDC → devise.
 // Opération Stellar classique (pas Soroban) : une transaction séparée de settle, signée par la PME dans son wallet.
 // Strict receive : le fournisseur reçoit exactement le notionnel, la PME paie au plus sendMax.

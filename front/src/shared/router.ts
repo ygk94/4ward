@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 // [FRONT — Hugo] Routage par hash (#/, #/about, #/vault, #/positions, #/risk) : pas de config serveur pour le déploiement statique.
 import { useSyncExternalStore } from 'react'
 

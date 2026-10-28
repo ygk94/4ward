@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 // [FRONT — Hugo] Page d'accueil : titre, capital déposé ; le fond plein écran (Background) sert de décor.
 // Au premier affichage, le vault se construit seul, puis le texte arrive (titre ligne par ligne, TVL qui compte).
 // On entre en scrollant (molette, trackpad, ou swipe vers le haut sur mobile) : le bouton « Enter » se

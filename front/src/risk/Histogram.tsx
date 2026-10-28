@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 // [FRONT — Hugo] Histogramme du Risk lab, grammaire des graphiques de data.morpho.org dans notre DA :
 // grille de points, infobulle HTML au survol, tirage précédent en fantôme. Au premier rendu, ce sont les arêtes du vault
 // de fond qui dessinent les barres (cf. burst.ts) : on leur publie la position des barres, puis on les révèle.

@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 // [FRONT — Hugo] Mes positions : protections (en cours / à régler / fermées) et position LP.
 import { useCallback, useEffect, useState } from 'react'
 import { explainError, fmtRate, fmtUsdc, pool, read, readHedges, PRICE_DECIMALS, type Hedge } from '../shared/contract'

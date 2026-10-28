@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 // [FRONT] Éclatement du vault de fond (0 = assemblé, 1 = en morceaux).
 // L'accueil ne défile pas (il capte la molette) : il pousse sa propre progression dans `burst.home`.
 // Sur les autres pages, le vault reste ouvert et devient un graphique (cf. Background).

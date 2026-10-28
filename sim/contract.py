@@ -1,3 +1,4 @@
+# Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 """Portage exact, en entiers Python, des formules du contrat pool.
 
 Sources : contracts/pool/src/pricing.rs (forward_rate, to_usdc, margin_for), hedge.rs (pnl),

@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 // [FRONT — Hugo] Page de présentation, à défilement : ce qu'on propose aux PME et aux fournisseurs de liquidité.
 import Lenis from 'lenis'
 import { useEffect, useRef } from 'react'

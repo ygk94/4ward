@@ -1,3 +1,4 @@
+# Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 """Rendement annuel d'un LP dans un pool SANS tranches (ex-lp_annual.py, exploration) → out/lp-annuel.md.
 
 Pool de 500 k$, volumes d'importateurs (B) et d'exportateurs (V) imposés par scénario, 4 échéances de 90 jours

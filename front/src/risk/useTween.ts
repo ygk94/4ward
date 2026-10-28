@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 // [FRONT — Hugo] Chiffre qui défile de l'ancienne à la nouvelle valeur (requestAnimationFrame, sans librairie).
 import { useEffect, useRef, useState } from 'react'
 

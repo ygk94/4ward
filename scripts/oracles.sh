@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 # Compare le cours MXN du mock-oracle de la démo au vrai Reflector FX testnet (même interface SEP-40).
 #   ./scripts/oracles.sh [DEVISE]   (MXN par défaut)
 set -euo pipefail

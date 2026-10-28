@@ -1,3 +1,4 @@
+# Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 """Régénère tout sim/out/ en une commande :  python sim/run_all.py [--rates en-dur|etherfuse]
 
 --rates : jeu de taux d'intérêt de la démo (défaut : etherfuse = scripts/rates.snapshot, celui du pool déployé et

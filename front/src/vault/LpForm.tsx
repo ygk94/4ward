@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 // [FRONT — Hugo] Formulaire fournisseur de liquidité : deux façons de déposer, Safe (tranche senior) et Dynamic (junior).
 // Barre de répartition du pool au-dessus ; tous les appels passent par ./poolApi.
 import { useCallback, useEffect, useState } from 'react'

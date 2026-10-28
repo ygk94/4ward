@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 // [FRONT — Hugo] Monte-Carlo du pool de démarrage : portage de sim/tranches.py (small_pool), mêmes hypothèses.
 // Un an = 4 échéances de 90 jours ; à chaque trimestre, n contrats de 10 k$ dont le sens est tiré au hasard
 // (importateur avec la probabilité p), le peso bouge (normale + sauts), le pool encaisse spread et bons du Trésor,

@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 // [FRONT — Hugo] Adaptateur des appels LP du panneau « Safe / Dynamic » (tranches senior / junior).
 // Seul ce fichier connaît les noms des fonctions du contrat : quand feat/tranches sera mergé (ou renommé),
 // c'est ici qu'on ajuste. Tranches Safe/Dynamic déployées (deposit_senior, withdraw_senior, senior_balance, tranche_values) ;

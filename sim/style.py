@@ -1,3 +1,4 @@
+# Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 """Style commun des graphiques du deck : 16:9, grosses polices, palette sobre, export PNG + SVG."""
 from pathlib import Path
 

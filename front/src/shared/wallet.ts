@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 // [FRONT — Hugo] Connexion wallet via Stellar Wallets Kit (Freighter, xBull, Albedo, Lobstr, Hana…).
 import { StellarWalletsKit } from '@creit.tech/stellar-wallets-kit/sdk'
 import { defaultModules } from '@creit.tech/stellar-wallets-kit/modules/utils'

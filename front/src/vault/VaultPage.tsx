@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 // [FRONT — Hugo] Page vault : infos du pool à gauche (2/3), choix du rôle et formulaire à droite (1/3).
 import { useCallback, useEffect, useState } from 'react'
 import { HedgeScreen } from '../payment/HedgeScreen'

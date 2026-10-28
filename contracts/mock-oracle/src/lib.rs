@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 #![no_std]
 //! Oracle de démo, même interface de lecture que Reflector (SEP-40) :
 //! `base`, `decimals`, `resolution`, `assets`, `lastprice`, `price`.

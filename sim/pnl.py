@@ -1,3 +1,4 @@
+# Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 """Coût total de la facture selon le mouvement du peso, sans et avec protection → out/cout-total.png (+ .svg).
 
 Facture de la démo : 1 000 000 MXN à 90 jours, spot 0,055, jeu de taux actif (en dur par défaut), spread 0,5 %.

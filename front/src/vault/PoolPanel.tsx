@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 // [FRONT — Hugo] Panneau pool (2/3 gauche de la page vault), tout tient dans l'écran :
 // capital, usage (fournisseurs, PME, volume, encours), utilisation, équilibre du pool par devise, dernières couvertures.
 // En haut à droite, le petit vault devient un globe quand la PME couvre une facture (cf. VaultGlobe).
