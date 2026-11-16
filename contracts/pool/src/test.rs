@@ -12,7 +12,9 @@ mod pricing_tests {
     //! Oracle de test minimal, même interface de lecture SEP-40 que Reflector FX et que `contracts/mock-oracle`
     //! (`lastprice(Asset::Other(sym))`, `decimals()` = 14). Réutilise les types `Asset` / `PriceData` du client
     //! déclaré dans `pricing.rs`, ce qui vérifie au passage que l'encodage coïncide.
-    use crate::pricing::{self, Asset, PriceData, PricingError, MAX_CAP_BPS, MAX_PRICE_AGE_SECS, SECS_PER_YEAR};
+    use crate::pricing::{
+        self, Asset, PriceData, PricingError, MAX_CAP_BPS, MAX_FIXING_AGE_SECS, MAX_PRICE_AGE_SECS, SECS_PER_YEAR,
+    };
     use crate::{Pool, PoolClient, Quote, Side, BPS, PRICE_DECIMALS};
     use soroban_sdk::testutils::{Address as _, Ledger as _};
     use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol};
@@ -173,15 +175,91 @@ mod pricing_tests {
         let s = setup();
         let mxn = mxn(&s.env);
         set_price(&s, &mxn, MXN_SPOT);
-        // 600 s : deux périodes Reflector manquées, encore acceptable.
-        s.env.ledger().set_timestamp(T0 + 600);
+        // 330 s : âge normal d'un prix Reflector juste avant la publication suivante.
+        s.env.ledger().set_timestamp(T0 + 330);
         assert_eq!(spot(&s, &mxn), MXN_SPOT);
-        // Exactement à la limite : accepté.
-        s.env.ledger().set_timestamp(T0 + MAX_PRICE_AGE_SECS);
+        // Exactement à la limite (600 s, une période manquée) : accepté.
+        assert_eq!(MAX_PRICE_AGE_SECS, 600);
+        s.env.ledger().set_timestamp(T0 + 600);
         assert_eq!(spot(&s, &mxn), MXN_SPOT);
         // Oracle « en avance » sur le ledger : pas périmé.
         s.env.ledger().set_timestamp(T0 - 10);
         assert_eq!(spot(&s, &mxn), MXN_SPOT);
+    }
+
+    /// L'ancienne limite (900 s) n'est plus acceptée : à 601 s le devis est refusé.
+    #[test]
+    fn pricing_quote_refused_past_600_s() {
+        let (s, mxn) = setup_mxn_full();
+        let pool = PoolClient::new(&s.env, &s.pool);
+        s.env.ledger().set_timestamp(T0 + 600);
+        assert!(pool.try_quote(&mxn, &Side::BuyCurrency, &NOTIONAL_1M, &D90, &1000).is_ok());
+        s.env.ledger().set_timestamp(T0 + 601);
+        assert_eq!(
+            pool.try_quote(&mxn, &Side::BuyCurrency, &NOTIONAL_1M, &D90, &1000),
+            Err(Ok(err(PricingError::StalePrice)))
+        );
+    }
+
+    // ---- dépassements de capacité : code 313, jamais de panique sans numéro ----
+
+    /// Notionnel démesuré : `to_usdc` (notional × taux) déborde.
+    #[test]
+    fn pricing_quote_huge_notional_returns_overflow() {
+        let (s, mxn) = setup_mxn_full();
+        let pool = PoolClient::new(&s.env, &s.pool);
+        assert_eq!(
+            pool.try_quote(&mxn, &Side::BuyCurrency, &i128::MAX, &D90, &1000),
+            Err(Ok(err(PricingError::Overflow)))
+        );
+        // Le plus grand notionnel qui passe encore à ce taux, puis le premier qui déborde.
+        let rate = pool.quote(&mxn, &Side::BuyCurrency, &NOTIONAL_1M, &D90, &1000).forward_rate;
+        let max_ok = i128::MAX / rate;
+        assert!(pool.try_quote(&mxn, &Side::BuyCurrency, &max_ok, &D90, &1000).is_ok());
+        assert_eq!(
+            pool.try_quote(&mxn, &Side::BuyCurrency, &(max_ok + 1), &D90, &1000),
+            Err(Ok(err(PricingError::Overflow)))
+        );
+    }
+
+    /// Cours démesuré renvoyé par l'oracle (contrat externe) : le taux forward déborde.
+    #[test]
+    fn pricing_forward_huge_oracle_price_returns_overflow() {
+        let (s, mxn) = setup_mxn_full();
+        set_price(&s, &mxn, i128::MAX / 1_000);
+        assert_eq!(
+            PoolClient::new(&s.env, &s.pool).try_quote(&mxn, &Side::BuyCurrency, &NOTIONAL_1M, &D90, &1000),
+            Err(Ok(err(PricingError::Overflow)))
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #313)")]
+    fn pricing_margin_for_overflow_panics_with_code() {
+        let s = setup();
+        s.env.as_contract(&s.pool, || pricing::margin_for(&s.env, i128::MAX, 1000));
+    }
+
+    /// Arrondi vers le haut dont l'addition déborde alors que le produit tient encore.
+    #[test]
+    #[should_panic(expected = "Error(Contract, #313)")]
+    fn pricing_margin_for_ceil_addition_overflow_panics_with_code() {
+        let s = setup();
+        s.env.as_contract(&s.pool, || pricing::margin_for(&s.env, i128::MAX, 1));
+    }
+
+    #[test]
+    fn pricing_to_usdc_and_margin_unchanged_on_normal_values() {
+        let s = setup();
+        s.env.as_contract(&s.pool, || {
+            // 1 000 000 MXN à 0,055 → 55 000 USDC ; marge 10 % → 5 500 USDC.
+            assert_eq!(pricing::to_usdc(&s.env, NOTIONAL_1M, MXN_SPOT), 550_000_000_000);
+            assert_eq!(pricing::margin_for(&s.env, 550_000_000_000, 1000), 55_000_000_000);
+            // Arrondis : conversion vers le bas, marge vers le haut.
+            assert_eq!(pricing::to_usdc(&s.env, 1, MXN_SPOT), 0);
+            assert_eq!(pricing::margin_for(&s.env, 1, 1), 1);
+            assert_eq!(pricing::margin_for(&s.env, 0, 1000), 0);
+        });
     }
 
     #[test]
@@ -449,7 +527,7 @@ mod pricing_tests {
         let (env, pool, oracle) = setup_mock_oracle();
         mock_price_at(&env, &oracle, T0, MXN_SPOT);
         env.ledger().set_timestamp(T0 + 2_000);
-        assert_eq!(fixing(&env, &pool, T0 + MAX_PRICE_AGE_SECS), MXN_SPOT);
+        assert_eq!(fixing(&env, &pool, T0 + MAX_FIXING_AGE_SECS), MXN_SPOT);
     }
 
     /// Dernier prix avant l'échéance trop ancien : l'oracle n'était pas à jour, on ne règle pas dessus.
@@ -459,7 +537,7 @@ mod pricing_tests {
         let (env, pool, oracle) = setup_mock_oracle();
         mock_price_at(&env, &oracle, T0, MXN_SPOT);
         env.ledger().set_timestamp(T0 + 2_000);
-        fixing(&env, &pool, T0 + MAX_PRICE_AGE_SECS + 1);
+        fixing(&env, &pool, T0 + MAX_FIXING_AGE_SECS + 1);
     }
 
     #[test]

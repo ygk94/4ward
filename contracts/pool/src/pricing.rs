@@ -43,14 +43,22 @@ pub enum PricingError {
     /// Pas de cours de fixing à l'échéance : aucun prix à cette date (ou échéance trop ancienne
     /// pour l'historique de l'oracle, ~12 h sur Reflector testnet).
     NoFixing = 312,
+    /// Dépassement de capacité dans un calcul de prix (`to_usdc`, `margin_for`, taux forward) :
+    /// montant ou cours hors de toute plage réaliste. Un code plutôt qu'une panique sans numéro.
+    Overflow = 313,
 }
 
 // ---- client SEP-40 (Reflector FX et mock-oracle) ----
 
-/// Âge maximum accepté pour un prix, en secondes.
-/// Reflector FX publie toutes les 300 s (`resolution`) ; on tolère 3 périodes manquées.
-/// Au-delà, le prix est jugé périmé et toute cotation est refusée (un prix faux = arbitrage contre le pool).
-pub const MAX_PRICE_AGE_SECS: u64 = 900;
+/// Âge maximum accepté pour le dernier prix (`spot` : devis, ouverture, clôture anticipée), en secondes.
+/// Reflector FX publie toutes les 300 s (`resolution`) : un prix a normalement moins de 330 s environ.
+/// 600 s tolère une période manquée. Au-delà, le prix est jugé périmé et toute cotation est refusée
+/// (un prix en retard sur le marché = arbitrage contre le pool).
+pub const MAX_PRICE_AGE_SECS: u64 = 600;
+
+/// Âge maximum, à l'échéance, du cours de règlement lu par `fixing` : 3 périodes Reflector.
+/// Inchangé ici ; la lecture du cours d'échéance est revue dans le lot B1.
+pub const MAX_FIXING_AGE_SECS: u64 = 900;
 
 /// Année de 365 jours (convention ACT/365 simplifiée) : t = durée / SECS_PER_YEAR.
 /// C'est aussi la durée maximale d'une couverture.
@@ -115,8 +123,8 @@ pub(crate) fn quote(
     env.storage().instance().extend_ttl(INSTANCE_TTL_THRESHOLD, INSTANCE_TTL_EXTEND_TO);
     let spot = spot(env, currency);
     let forward_rate = forward_rate(env, currency, side, duration_secs);
-    let usdc_cost = to_usdc(notional, forward_rate);
-    let margin = margin_for(usdc_cost, cap_bps);
+    let usdc_cost = to_usdc(env, notional, forward_rate);
+    let margin = margin_for(env, usdc_cost, cap_bps);
     Quote { spot, forward_rate, usdc_cost, margin }
 }
 
@@ -171,7 +179,7 @@ pub(crate) fn spot(env: &Env, currency: &Symbol) -> i128 {
 /// Sans ça, celui qui règle choisit son moment (option gratuite contre le pool ou contre la PME), et un
 /// `set_price` posé après l'échéance changerait le règlement. USD par unité de devise, 14 décimales.
 /// Panique `NoFixing` si l'oracle n'a pas de prix à cette date, `InvalidPrice` si prix ≤ 0, `StalePrice`
-/// si le dernier prix avant l'échéance a plus de `MAX_PRICE_AGE_SECS` (oracle non mis à jour).
+/// si le dernier prix avant l'échéance a plus de `MAX_FIXING_AGE_SECS` (oracle non mis à jour).
 /// Appelée par `hedge::settle` avec l'échéance réelle (`hedge.maturity`).
 pub(crate) fn fixing(env: &Env, currency: &Symbol, maturity: u64) -> i128 {
     let oracle: Address = env.storage().instance().get(&DataKey::Oracle).unwrap();
@@ -181,7 +189,7 @@ pub(crate) fn fixing(env: &Env, currency: &Symbol, maturity: u64) -> i128 {
     if data.price <= 0 {
         panic_with_error!(env, PricingError::InvalidPrice);
     }
-    if maturity.saturating_sub(data.timestamp) > MAX_PRICE_AGE_SECS {
+    if maturity.saturating_sub(data.timestamp) > MAX_FIXING_AGE_SECS {
         panic_with_error!(env, PricingError::StalePrice);
     }
     data.price
@@ -195,7 +203,8 @@ pub(crate) fn fixing(env: &Env, currency: &Symbol, maturity: u64) -> i128 {
 ///   F   = S × num / den
 /// Overflow : S ≈ 5,5e12 × num ≈ 3,2e11 → 1,8e24. Pire cas (S = 1e14, durée 1 an, taux 100 %) :
 /// S × num = 1e14 × 6,3e11 = 6,3e25. Le spread ensuite : F ≤ 2 × S = 2e14, × (BPS + spread) ≤ 10_500
-/// → 2,1e18. Tout reste très loin de i128::MAX ≈ 1,7e38.
+/// → 2,1e18. Tout reste très loin de i128::MAX ≈ 1,7e38 avec un cours réaliste ; les produits sont
+/// quand même vérifiés (`Overflow`, 313), car le cours vient d'un contrat externe.
 ///
 /// Arrondis : le spread arrondit du côté du pool ; la troncature de F (floor) peut avantager
 /// l'acheteur de moins de 1e-14 USD par unité, sans effet mesurable. Le spread arrondit
@@ -215,12 +224,12 @@ pub(crate) fn forward_rate(env: &Env, currency: &Symbol, side: Side, duration_se
     let duration = duration_secs as i128;
     let num = year + r_usd * duration;
     let den = year + r_dev * duration;
-    let f = mul_div_floor(s, num, den);
+    let f = mul_div_floor(env, s, num, den);
 
     let spread = spread as i128;
     match side {
-        Side::BuyCurrency => mul_div_ceil(f, crate::BPS + spread, crate::BPS),
-        Side::SellCurrency => mul_div_floor(f, crate::BPS - spread, crate::BPS),
+        Side::BuyCurrency => mul_div_ceil(env, f, crate::BPS + spread, crate::BPS),
+        Side::SellCurrency => mul_div_floor(env, f, crate::BPS - spread, crate::BPS),
     }
 }
 
@@ -235,13 +244,19 @@ fn rate(env: &Env, currency: &Symbol) -> i128 {
 }
 
 /// a × b / c arrondi vers le bas. Valeurs positives ; multiplier avant de diviser.
-fn mul_div_floor(a: i128, b: i128, c: i128) -> i128 {
-    a * b / c
+/// `Overflow` (313) si a × b dépasse i128, au lieu d'une panique sans code.
+fn mul_div_floor(env: &Env, a: i128, b: i128, c: i128) -> i128 {
+    a.checked_mul(b)
+        .and_then(|p| p.checked_div(c))
+        .unwrap_or_else(|| panic_with_error!(env, PricingError::Overflow))
 }
 
-/// a × b / c arrondi vers le haut. Valeurs positives.
-fn mul_div_ceil(a: i128, b: i128, c: i128) -> i128 {
-    (a * b + c - 1) / c
+/// a × b / c arrondi vers le haut. Valeurs positives. `Overflow` (313) comme `mul_div_floor`.
+fn mul_div_ceil(env: &Env, a: i128, b: i128, c: i128) -> i128 {
+    a.checked_mul(b)
+        .and_then(|p| p.checked_add(c - 1))
+        .and_then(|p| p.checked_div(c))
+        .unwrap_or_else(|| panic_with_error!(env, PricingError::Overflow))
 }
 
 /// Panique si la devise n'est pas ouverte (pas de plafond minimum = hors liste blanche), si `cap_bps`
@@ -262,11 +277,13 @@ pub(crate) fn check_cap(env: &Env, currency: &Symbol, cap_bps: u32) {
 
 /// Marge USDC (7 décimales) pour un plafond : usdc_cost × cap_bps / BPS, arrondi vers le haut (côté pool).
 /// `hedge::open` doit appeler cette fonction : la marge déposée est alors identique à celle affichée par `quote`.
-pub(crate) fn margin_for(usdc_cost: i128, cap_bps: u32) -> i128 {
-    mul_div_ceil(usdc_cost, cap_bps as i128, crate::BPS)
+/// `Overflow` (313) si le produit dépasse i128.
+pub(crate) fn margin_for(env: &Env, usdc_cost: i128, cap_bps: u32) -> i128 {
+    mul_div_ceil(env, usdc_cost, cap_bps as i128, crate::BPS)
 }
 
-/// Conversion devise → USDC : notional (7 déc.) × rate (14 déc.) → USDC (7 déc.).
-pub(crate) fn to_usdc(notional: i128, rate: i128) -> i128 {
-    notional * rate / 10i128.pow(crate::PRICE_DECIMALS)
+/// Conversion devise → USDC : notional (7 déc.) × rate (14 déc.) → USDC (7 déc.), arrondi vers le bas.
+/// `Overflow` (313) si notional × rate dépasse i128.
+pub(crate) fn to_usdc(env: &Env, notional: i128, rate: i128) -> i128 {
+    mul_div_floor(env, notional, rate, 10i128.pow(crate::PRICE_DECIMALS))
 }

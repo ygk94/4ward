@@ -1311,7 +1311,7 @@ mod tests {
 
     /// Couverture construite comme hedge::open : marge = to_usdc × plafond, arrondie vers le haut.
     fn make_hedge(s: &Setup, currency: Symbol, side: Side, notional: i128, locked_rate: i128, cap_bps: u32) -> Hedge {
-        let margin = (pricing::to_usdc(notional, locked_rate) * cap_bps as i128 + BPS - 1) / BPS;
+        let margin = (pricing::to_usdc(&s.env, notional, locked_rate) * cap_bps as i128 + BPS - 1) / BPS;
         Hedge {
             owner: Address::generate(&s.env),
             supplier: Address::generate(&s.env),
@@ -1583,7 +1583,7 @@ mod tests {
     const ONE: i128 = 100_000_000_000_000;
 
     fn leg(side: Side, notional: i128, locked_rate: i128, cap_bps: u32) -> Leg {
-        let margin = (pricing::to_usdc(notional, locked_rate) * cap_bps as i128 + BPS - 1) / BPS;
+        let margin = (notional * locked_rate / 10i128.pow(PRICE_DECIMALS) * cap_bps as i128 + BPS - 1) / BPS;
         Leg { side, notional, locked_rate, margin }
     }
 

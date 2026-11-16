@@ -126,7 +126,7 @@ pub(crate) fn open(
 
     let locked_rate = pricing::forward_rate(env, currency, side, duration_secs);
     // même calcul que `quote` : la marge déposée est celle affichée (arrondie vers le haut)
-    let margin = pricing::margin_for(pricing::to_usdc(notional, locked_rate), cap_bps);
+    let margin = pricing::margin_for(env, pricing::to_usdc(env, notional, locked_rate), cap_bps);
 
     let usdc: Address = env.storage().instance().get(&DataKey::Usdc).unwrap();
     token::TokenClient::new(env, &usdc).transfer(owner, &env.current_contract_address(), &margin);
