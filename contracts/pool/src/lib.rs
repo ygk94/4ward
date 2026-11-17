@@ -67,6 +67,35 @@ pub struct Hedge {
     pub settled: bool,
 }
 
+/// Liste blanche concernée par `set_allowed` / `is_allowed` / `set_allowlist_enabled` (B9).
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Role {
+    /// Apporteur de capital (dépôts junior et senior) : vault.rs.
+    Lp,
+    /// PME qui ouvre des couvertures : hedge.rs (moitié de Clément, pas encore branchée).
+    Sme,
+}
+
+/// Réglages et compteurs du pilote (B9), en lecture pour le front.
+/// Les champs côté couvertures (liste PME, plafonds par couverture et de durée, nombre maximal
+/// de couvertures ouvertes) seront ajoutés par la moitié hedge de B9.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PilotLimits {
+    /// Liste blanche des LP active (true par défaut : pilote fermé).
+    pub lp_allowlist_on: bool,
+    /// Plafond du notionnel total ouvert, USDC 7 décimales ; `None` = sans plafond.
+    pub notional_cap: Option<i128>,
+    /// Σ notionnels des couvertures ouvertes, USDC 7 décimales au taux bloqué.
+    pub total_notional: i128,
+}
+
+/// Branche PME de la liste blanche : à écrire avec la moitié hedge de B9.
+fn sme_not_implemented() -> ! {
+    panic!("Role::Sme : liste blanche PME pas encore implementee (B9 hedge)")
+}
+
 #[contracttype]
 pub enum DataKey {
     Admin,
@@ -193,6 +222,52 @@ impl Pool {
     /// 0 = plus de nouvelles couvertures sur cette devise.
     pub fn set_currency_limit(env: Env, currency: Symbol, limit_bps: u32) {
         vault::set_currency_limit(&env, &currency, limit_bps)
+    }
+
+    // ---- Pilote (B9) ----
+
+    /// Admin : ajoute (`true`) ou retire (`false`) `who` de la liste blanche du rôle.
+    /// Un LP retiré garde ses parts et peut toujours retirer.
+    pub fn set_allowed(env: Env, role: Role, who: Address, allowed: bool) {
+        match role {
+            Role::Lp => vault::set_lp_allowed(&env, &who, allowed),
+            Role::Sme => sme_not_implemented(),
+        }
+    }
+
+    /// `who` peut-il agir pour ce rôle ? Toujours vrai quand la liste du rôle est désactivée.
+    pub fn is_allowed(env: Env, role: Role, who: Address) -> bool {
+        match role {
+            Role::Lp => vault::is_lp_allowed(&env, &who),
+            Role::Sme => sme_not_implemented(),
+        }
+    }
+
+    /// Admin : active (pilote fermé, par défaut) ou désactive la liste blanche du rôle.
+    pub fn set_allowlist_enabled(env: Env, role: Role, enabled: bool) {
+        match role {
+            Role::Lp => vault::set_lp_allowlist_enabled(&env, enabled),
+            Role::Sme => sme_not_implemented(),
+        }
+    }
+
+    /// Admin : plafond du notionnel total ouvert (USDC, 7 décimales), `None` = sans plafond.
+    /// Contrôlé à l'ouverture seulement : un règlement n'est jamais bloqué.
+    pub fn set_notional_cap(env: Env, cap: Option<i128>) {
+        vault::set_notional_cap(&env, cap)
+    }
+
+    /// Σ notionnels des couvertures ouvertes, USDC 7 décimales au taux bloqué.
+    pub fn total_notional(env: Env) -> i128 {
+        vault::total_notional(&env)
+    }
+
+    pub fn pilot_limits(env: Env) -> PilotLimits {
+        PilotLimits {
+            lp_allowlist_on: vault::lp_allowlist_on(&env),
+            notional_cap: vault::notional_cap(&env),
+            total_notional: vault::total_notional(&env),
+        }
     }
 
     // ---- Pricing ----

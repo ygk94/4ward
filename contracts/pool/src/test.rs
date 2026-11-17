@@ -646,7 +646,7 @@ mod pricing_tests {
 use crate::hedge::{self, HedgeError};
 use crate::pricing::PricingError;
 use crate::vault::VaultError;
-use crate::{Hedge, Pool, PoolClient, Side};
+use crate::{Hedge, Pool, PoolClient, Role, Side};
 use mock_oracle::{Asset as OracleAsset, MockOracle, MockOracleClient};
 use soroban_sdk::testutils::{Address as _, Events as _, Ledger, MockAuth, MockAuthInvoke};
 use soroban_sdk::token::{StellarAssetClient, TokenClient};
@@ -694,6 +694,7 @@ fn setup<'a>() -> Setup<'a> {
 
     let pool_id = env.register(Pool, (&admin, &usdc_id, &oracle_id, 50u32));
     let pool = PoolClient::new(&env, &pool_id);
+    pool.set_allowed(&Role::Lp, &lp, &true); // liste blanche des LP active par défaut (B9)
     // taux de test arbitraires (anciens taux 400/700, ≠ snapshot 360/555 : voir `demo_figures`)
     // et MXN ouverte (plafond minimum 5 %)
     pool.set_rate(&Symbol::new(&env, "USD"), &400);
@@ -1425,4 +1426,25 @@ fn close_early_emits_event() {
     let expected = hedge::HedgeClosedEarly { hedge_id: id, owner: s.lucia.clone(), close_rate: rate, pnl, payout: HEDGE_MARGIN + pnl };
     let events = s.env.events().all().filter_by_contract(&s.pool.address);
     assert_eq!(events.events().last(), Some(&expected.to_xdr(&s.env, &s.pool.address)));
+}
+
+// ---- B9 : notionnel total sur le vrai parcours ----
+
+#[test]
+fn total_notional_back_to_zero_after_settle() {
+    let s = setup();
+    let id = open_funded(&s, Side::BuyCurrency);
+    assert_eq!(s.pool.total_notional(), HEDGE_COST);
+    at_maturity(&s, SPOT_0);
+    s.pool.settle(&id);
+    assert_eq!(s.pool.total_notional(), 0);
+}
+
+#[test]
+fn total_notional_back_to_zero_after_close_early() {
+    let s = setup();
+    let id = open_funded(&s, Side::BuyCurrency);
+    assert_eq!(s.pool.total_notional(), HEDGE_COST);
+    s.pool.close_early(&id);
+    assert_eq!(s.pool.total_notional(), 0);
 }

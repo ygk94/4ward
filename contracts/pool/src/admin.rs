@@ -182,7 +182,7 @@ pub(crate) fn upgrade(env: &Env, new_wasm_hash: &BytesN<32>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Pool, PoolClient, Side};
+    use crate::{Pool, PoolClient, Role, Side};
     use mock_oracle::{Asset as OracleAsset, MockOracle, MockOracleClient};
     use soroban_sdk::testutils::{Address as _, Events as _, MockAuth, MockAuthInvoke};
     use soroban_sdk::token::StellarAssetClient;
@@ -422,6 +422,7 @@ mod tests {
         let s = setup();
         let c = s.client();
         let lp = Address::generate(&s.env);
+        c.set_allowed(&Role::Lp, &lp, &true);
         let owner = Address::generate(&s.env);
         let usdc_admin = StellarAssetClient::new(&s.env, &s.usdc);
         usdc_admin.mint(&lp, &2_000_000_000_000);

@@ -36,6 +36,13 @@
 //!   un dépôt senior ou un retrait junior qui passerait dessous est refusé (contrôlé à ces
 //!   opérations seulement : les intérêts senior courus peuvent faire baisser le junior ensuite).
 //!
+//! Pilote (B9, côté vault) :
+//! - liste blanche des LP, active par défaut : seuls les LP autorisés par l'admin déposent
+//!   (junior et senior). Les retraits ne la consultent jamais : un LP retiré récupère son argent ;
+//! - `TotalNotional` = Σ notionnels des couvertures ouvertes (USDC au taux bloqué, même calcul
+//!   que l'exposition), tenu dans `open_position` / `close_position`. Plafond optionnel de
+//!   l'admin, contrôlé à l'ouverture seulement.
+//!
 //! Netting : `basket_max_loss` calcule la perte maximale exacte d'un panier de couvertures,
 //! mais n'est PAS branché sur la réserve. Conditions pour le brancher :
 //! 1. fixing commun : déjà fait (`settle` lit le cours à l'échéance via `pricing::fixing`) ;
@@ -45,7 +52,7 @@
 //! 3. règlement par panier (toutes les jambes dans la même transaction) ou comptabilisation
 //!    de ce que doit le vendeur au fixing : sinon, si le perdant du pool est réglé en premier,
 //!    `book_loss` passe avant le gain de la jambe opposée et le capital tombe sous la réserve.
-use crate::{DataKey, Hedge, Side, BPS, PRICE_DECIMALS};
+use crate::{DataKey, Hedge, Role, Side, BPS, PRICE_DECIMALS};
 use soroban_sdk::{
     contracterror, contractevent, contracttype, panic_with_error, token, Address, Env, IntoVal, Symbol,
     TryFromVal, Val,
@@ -83,6 +90,11 @@ pub enum VaultError {
     JuniorRatioTooLow = 111,
     /// Retrait de plus de parts senior que le LP n'en détient.
     InsufficientSeniorShares = 112,
+    // 113 : réservé (refus de `withdraw_senior` sous Reserved, voir B3).
+    /// Dépôt (junior ou senior) d'un LP absent de la liste blanche, liste active.
+    LpNotAllowed = 114,
+    /// Ouverture refusée : le notionnel total ouvert dépasserait le plafond de l'admin.
+    NotionalCapExceeded = 115,
 }
 
 /// Clés de stockage propres au vault.
@@ -105,6 +117,14 @@ pub enum VaultKey {
     SeniorPrice,
     /// Horodatage (secondes) de la dernière capitalisation du prix senior (instance).
     SeniorUpdatedAt,
+    /// LP autorisé à déposer (persistent) : présent = autorisé, retiré = clé supprimée.
+    LpAllowed(Address),
+    /// Liste blanche des LP active (instance) ; absente = active (pilote fermé par défaut).
+    LpAllowlistOn,
+    /// Σ notionnels des couvertures ouvertes, USDC au taux bloqué (instance).
+    TotalNotional,
+    /// Plafond de `TotalNotional` (instance) ; absent = sans plafond.
+    NotionalCap,
 }
 
 /// Valeur des deux tranches en USDC (7 décimales). senior + junior = TotalDeposits.
@@ -200,6 +220,31 @@ pub struct CurrencyLimitSet {
     #[topic]
     pub currency: Symbol,
     pub limit_bps: u32,
+}
+
+/// L'admin a ajouté (`allowed = true`) ou retiré un LP de la liste blanche.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LpAllowedSet {
+    #[topic]
+    pub lp: Address,
+    pub allowed: bool,
+}
+
+/// L'admin a activé ou désactivé une liste blanche.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AllowlistToggled {
+    #[topic]
+    pub role: Role,
+    pub enabled: bool,
+}
+
+/// L'admin a changé le plafond du notionnel total (`None` = sans plafond).
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NotionalCapSet {
+    pub cap: Option<i128>,
 }
 
 /// 1 part = 1 USDC au premier dépôt : prix exprimé en 7 décimales.
@@ -370,10 +415,11 @@ fn check_junior_ratio(env: &Env, junior: i128, total: i128) {
 /// (Reserved laissé par le dernier LP sorti), le déposant suivant reçoit des parts à 1:1 et
 /// hérite de ce capital (et des pertes des couvertures encore ouvertes). À terme : refuser
 /// dans `withdraw` de brûler la dernière part tant que `reserved > 0`.
-/// Erreurs : `InvalidAmount`, `PoolDepleted`, `DepositTooSmall`, `Overflow`.
+/// Erreurs : `LpNotAllowed`, `InvalidAmount`, `PoolDepleted`, `DepositTooSmall`, `Overflow`.
 pub(crate) fn deposit(env: &Env, lp: &Address, amount: i128) -> i128 {
     lp.require_auth();
     bump_instance(env);
+    require_lp_allowed(env, lp);
     if amount <= 0 {
         panic_with_error!(env, VaultError::InvalidAmount);
     }
@@ -497,10 +543,11 @@ pub(crate) fn capacity(env: &Env) -> i128 {
 
 /// Dépose `amount` USDC contre des parts senior au prix courant (capitalisé à cet instant),
 /// arrondi vers le bas. Retourne les parts senior du LP après le dépôt.
-/// Erreurs : `InvalidAmount`, `DepositTooSmall`, `JuniorRatioTooLow`, `Overflow`.
+/// Erreurs : `LpNotAllowed`, `InvalidAmount`, `DepositTooSmall`, `JuniorRatioTooLow`, `Overflow`.
 pub(crate) fn deposit_senior(env: &Env, lp: &Address, amount: i128) -> i128 {
     lp.require_auth();
     bump_instance(env);
+    require_lp_allowed(env, lp);
     if amount <= 0 {
         panic_with_error!(env, VaultError::InvalidAmount);
     }
@@ -644,7 +691,8 @@ pub(crate) fn book_loss(env: &Env, amount: i128) {
 
 /// Ouverture d'une couverture : réserve la marge, contrôle la limite de la devise et ajoute
 /// l'exposition. À appeler par hedge::open une fois la `Hedge` construite.
-/// Erreurs : `InvalidAmount`, `InsufficientCapacity`, `CurrencyLimitExceeded`, `Overflow`.
+/// Erreurs : `InvalidAmount`, `InsufficientCapacity`, `CurrencyLimitExceeded`,
+/// `NotionalCapExceeded`, `Overflow`.
 pub(crate) fn open_position(env: &Env, hedge: &Hedge) {
     if hedge.notional <= 0 {
         panic_with_error!(env, VaultError::InvalidAmount);
@@ -662,6 +710,13 @@ pub(crate) fn open_position(env: &Env, hedge: &Hedge) {
 
     // Même calcul à l'ouverture et à la clôture : le compteur retombe à zéro pile.
     let notional_usd = notional_usdc(env, hedge);
+    let total_notional_after = add(env, total_notional(env), notional_usd);
+    if let Some(cap) = notional_cap(env) {
+        if total_notional_after > cap {
+            panic_with_error!(env, VaultError::NotionalCapExceeded);
+        }
+    }
+    set_total_notional(env, total_notional_after);
     match hedge.side {
         Side::BuyCurrency => {
             e.buy_notional = add(env, e.buy_notional, notional_usd);
@@ -692,6 +747,9 @@ pub(crate) fn close_position(env: &Env, hedge: &Hedge) {
     *notional -= notional_usd;
     *margin -= hedge.margin;
     set_exposure(env, &hedge.currency, e);
+    // Borné à 0 plutôt qu'une panique : une couverture ouverte avant B9 (contrat mis à jour par
+    // `upgrade`) n'a pas été comptée, et son règlement ne doit jamais être bloqué.
+    set_total_notional(env, (total_notional(env) - notional_usd).max(0));
 
     release(env, hedge.margin);
     PositionReleased { currency: hedge.currency.clone(), side: hedge.side, margin: hedge.margin }.publish(env);
@@ -726,6 +784,73 @@ pub(crate) fn set_currency_limit(env: &Env, currency: &Symbol, limit_bps: u32) {
     bump_instance(env);
     write_persistent(env, &VaultKey::CurrencyLimit(currency.clone()), &limit_bps);
     CurrencyLimitSet { currency: currency.clone(), limit_bps }.publish(env);
+}
+
+// ---- pilote (B9, côté vault) ----
+
+/// Liste blanche des LP active ? Vrai tant que l'admin ne l'a pas désactivée.
+pub(crate) fn lp_allowlist_on(env: &Env) -> bool {
+    bump_instance(env);
+    env.storage().instance().get(&VaultKey::LpAllowlistOn).unwrap_or(true)
+}
+
+/// Admin : active ou désactive la liste blanche des LP.
+pub(crate) fn set_lp_allowlist_enabled(env: &Env, enabled: bool) {
+    crate::admin(env).require_auth();
+    bump_instance(env);
+    env.storage().instance().set(&VaultKey::LpAllowlistOn, &enabled);
+    AllowlistToggled { role: Role::Lp, enabled }.publish(env);
+}
+
+/// Le LP peut-il déposer ? Toujours vrai quand la liste est désactivée.
+pub(crate) fn is_lp_allowed(env: &Env, lp: &Address) -> bool {
+    !lp_allowlist_on(env) || read_persistent::<bool>(env, &VaultKey::LpAllowed(lp.clone())).is_some()
+}
+
+/// Admin : ajoute ou retire un LP. Le retrait ne touche pas à ses parts.
+pub(crate) fn set_lp_allowed(env: &Env, lp: &Address, allowed: bool) {
+    crate::admin(env).require_auth();
+    bump_instance(env);
+    let key = VaultKey::LpAllowed(lp.clone());
+    if allowed {
+        write_persistent(env, &key, &true);
+    } else {
+        env.storage().persistent().remove(&key);
+    }
+    LpAllowedSet { lp: lp.clone(), allowed }.publish(env);
+}
+
+fn require_lp_allowed(env: &Env, lp: &Address) {
+    if !is_lp_allowed(env, lp) {
+        panic_with_error!(env, VaultError::LpNotAllowed);
+    }
+}
+
+pub(crate) fn total_notional(env: &Env) -> i128 {
+    bump_instance(env);
+    env.storage().instance().get(&VaultKey::TotalNotional).unwrap_or(0)
+}
+
+fn set_total_notional(env: &Env, value: i128) {
+    env.storage().instance().set(&VaultKey::TotalNotional, &value);
+}
+
+pub(crate) fn notional_cap(env: &Env) -> Option<i128> {
+    bump_instance(env);
+    env.storage().instance().get(&VaultKey::NotionalCap)
+}
+
+/// Admin : plafond du notionnel total, `None` le supprime. `InvalidAmount` si négatif.
+/// Un plafond sous le notionnel déjà ouvert bloque seulement les nouvelles ouvertures.
+pub(crate) fn set_notional_cap(env: &Env, cap: Option<i128>) {
+    crate::admin(env).require_auth();
+    bump_instance(env);
+    match cap {
+        Some(c) if c < 0 => panic_with_error!(env, VaultError::InvalidAmount),
+        Some(c) => env.storage().instance().set(&VaultKey::NotionalCap, &c),
+        None => env.storage().instance().remove(&VaultKey::NotionalCap),
+    }
+    NotionalCapSet { cap }.publish(env);
 }
 
 // ---- netting : calcul exact, NON branché (voir l'en-tête) ----
@@ -842,9 +967,16 @@ mod tests {
             token::StellarAssetClient::new(&self.env, &self.usdc).mint(to, &amount);
         }
 
+        /// LP généré et autorisé par l'admin (liste blanche active par défaut, B9).
+        fn allowed_lp(&self) -> Address {
+            let lp = Address::generate(&self.env);
+            self.client().set_allowed(&Role::Lp, &lp, &true);
+            lp
+        }
+
         /// Nouveau LP : reçoit `amount` USDC puis les dépose via `deposit_lp`.
         fn new_lp(&self, amount: i128) -> Address {
-            let lp = Address::generate(&self.env);
+            let lp = self.allowed_lp();
             self.mint(&lp, amount);
             self.client().deposit_lp(&lp, &amount);
             lp
@@ -1143,7 +1275,7 @@ mod tests {
         settle_pool_gains_margin(&s, 100 * USDC);
 
         // 10 stroops × 1 000 / 1 100 = 9,09 → 9 parts : la fraction reste au pool.
-        let lp = Address::generate(&s.env);
+        let lp = s.allowed_lp();
         s.mint(&lp, 10);
         assert_eq!(s.client().deposit_lp(&lp, &10), 9);
         s.assert_invariant(0);
@@ -1275,7 +1407,7 @@ mod tests {
     #[should_panic(expected = "Error(Contract, #100)")]
     fn deposit_zero_panics() {
         let s = setup();
-        let lp = Address::generate(&s.env);
+        let lp = s.allowed_lp();
         s.client().deposit_lp(&lp, &0);
     }
 
@@ -1286,7 +1418,7 @@ mod tests {
         s.new_lp(1_000 * USDC);
         settle_pool_gains_margin(&s, 100 * USDC);
         // 1 stroop × 1 000 / 1 100 = 0 part.
-        let lp = Address::generate(&s.env);
+        let lp = s.allowed_lp();
         s.mint(&lp, 1);
         s.client().deposit_lp(&lp, &1);
     }
@@ -1839,7 +1971,7 @@ mod tests {
         let s = setup();
         s.new_lp(1_000 * USDC);
         // montant × TotalShares dépasse i128 : erreur 110 avant tout transfert.
-        let lp = Address::generate(&s.env);
+        let lp = s.allowed_lp();
         s.client().deposit_lp(&lp, &(i128::MAX / 1_000));
     }
 
@@ -1904,7 +2036,7 @@ mod tests {
     impl Setup {
         /// Nouveau LP senior : reçoit `amount` USDC puis les dépose via `deposit_senior`.
         fn new_senior(&self, amount: i128) -> Address {
-            let lp = Address::generate(&self.env);
+            let lp = self.allowed_lp();
             self.mint(&lp, amount);
             self.client().deposit_senior(&lp, &amount);
             lp
@@ -2092,7 +2224,7 @@ mod tests {
     #[should_panic(expected = "Error(Contract, #100)")]
     fn deposit_senior_zero_panics() {
         let (s, _, _) = tranched();
-        let lp = Address::generate(&s.env);
+        let lp = s.allowed_lp();
         s.client().deposit_senior(&lp, &0);
     }
 
@@ -2137,5 +2269,230 @@ mod tests {
         let s = setup();
         assert_eq!(s.client().senior_balance(&Address::generate(&s.env)), 0);
         assert_eq!(s.client().tranche_values(), TrancheValues { senior: 0, junior: 0, senior_price: PRICE_ONE });
+    }
+
+    // ---- B9 : liste blanche des LP ----
+
+    fn assert_admin_only(s: &Setup, name: &str) {
+        let auths = s.env.auths();
+        assert_eq!(auths.len(), 1);
+        assert_eq!(auths[0].0, s.admin);
+        match &auths[0].1.function {
+            AuthorizedFunction::Contract((contract, f, _)) => {
+                assert_eq!(contract, &s.pool);
+                assert_eq!(f, &Symbol::new(&s.env, name));
+            }
+            _ => panic!("autorisation inattendue"),
+        }
+    }
+
+    #[test]
+    fn allowlist_is_on_by_default() {
+        let s = setup();
+        let lp = Address::generate(&s.env);
+        assert!(s.client().pilot_limits().lp_allowlist_on);
+        assert!(!s.client().is_allowed(&Role::Lp, &lp));
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #114)")]
+    fn unlisted_lp_cannot_deposit_junior() {
+        let s = setup();
+        let lp = Address::generate(&s.env);
+        s.mint(&lp, 1_000 * USDC);
+        s.client().deposit_lp(&lp, &(1_000 * USDC));
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #114)")]
+    fn unlisted_lp_cannot_deposit_senior() {
+        let (s, _, _) = tranched();
+        let lp = Address::generate(&s.env);
+        s.mint(&lp, 1_000 * USDC);
+        s.client().deposit_senior(&lp, &(1_000 * USDC));
+    }
+
+    #[test]
+    fn removed_lp_can_no_longer_deposit_but_withdraws_everything() {
+        let (s, junior, senior) = tranched();
+        let c = s.client();
+        let j_shares = c.lp_shares(&junior);
+        c.set_allowed(&Role::Lp, &junior, &false);
+        c.set_allowed(&Role::Lp, &senior, &false);
+        assert!(!c.is_allowed(&Role::Lp, &junior));
+
+        s.mint(&junior, USDC);
+        s.mint(&senior, USDC);
+        assert_eq!(c.try_deposit_lp(&junior, &USDC).err(), Some(Ok(VaultError::LpNotAllowed.into())));
+        assert_eq!(c.try_deposit_senior(&senior, &USDC).err(), Some(Ok(VaultError::LpNotAllowed.into())));
+
+        // Les retraits ne consultent jamais la liste : senior d'abord (ratio junior), puis junior.
+        let senior_shares = s.vault(|env| senior_shares(env, &senior));
+        assert!(c.withdraw_senior(&senior, &senior_shares) > 0);
+        assert!(c.withdraw(&junior, &j_shares) > 0);
+        assert_eq!(c.lp_shares(&junior), 0);
+        assert_eq!(c.senior_balance(&senior), 0);
+    }
+
+    #[test]
+    fn disabled_allowlist_lets_anyone_deposit() {
+        let s = setup();
+        s.client().set_allowlist_enabled(&Role::Lp, &false);
+        assert!(!s.client().pilot_limits().lp_allowlist_on);
+        let lp = Address::generate(&s.env);
+        assert!(s.client().is_allowed(&Role::Lp, &lp));
+        s.mint(&lp, 1_000 * USDC);
+        assert_eq!(s.client().deposit_lp(&lp, &(1_000 * USDC)), 1_000 * USDC);
+
+        // Réactivée : le même LP est de nouveau refusé.
+        s.client().set_allowlist_enabled(&Role::Lp, &true);
+        s.mint(&lp, USDC);
+        assert_eq!(s.client().try_deposit_lp(&lp, &USDC).err(), Some(Ok(VaultError::LpNotAllowed.into())));
+    }
+
+    #[test]
+    fn set_allowed_requires_admin_and_emits_event() {
+        let s = setup();
+        let lp = Address::generate(&s.env);
+        s.client().set_allowed(&Role::Lp, &lp, &true);
+        assert_admin_only(&s, "set_allowed");
+        assert_eq!(
+            s.env.events().all().filter_by_contract(&s.pool),
+            [LpAllowedSet { lp: lp.clone(), allowed: true }.to_xdr(&s.env, &s.pool)]
+        );
+        assert_eq!(persistent_ttl(&s, &VaultKey::LpAllowed(lp.clone())), TTL_EXTEND_TO);
+
+        s.client().set_allowed(&Role::Lp, &lp, &false);
+        assert_admin_only(&s, "set_allowed");
+        assert_eq!(
+            s.env.events().all().filter_by_contract(&s.pool),
+            [LpAllowedSet { lp, allowed: false }.to_xdr(&s.env, &s.pool)]
+        );
+    }
+
+    #[test]
+    fn set_allowlist_enabled_requires_admin_and_emits_event() {
+        let s = setup();
+        s.client().set_allowlist_enabled(&Role::Lp, &false);
+        assert_admin_only(&s, "set_allowlist_enabled");
+        assert_eq!(
+            s.env.events().all().filter_by_contract(&s.pool),
+            [AllowlistToggled { role: Role::Lp, enabled: false }.to_xdr(&s.env, &s.pool)]
+        );
+    }
+
+    #[test]
+    fn non_admin_cannot_change_the_lists_or_the_cap() {
+        let env = Env::default();
+        let admin = Address::generate(&env);
+        let usdc = env.register_stellar_asset_contract_v2(admin.clone()).address();
+        let oracle = env.register(mock_oracle::MockOracle, (&admin,));
+        let c = PoolClient::new(&env, &env.register(Pool, (&admin, &usdc, &oracle, &50u32)));
+        // Pas de mock_all_auths : l'admin n'a rien signé.
+        let lp = Address::generate(&env);
+        assert!(c.try_set_allowed(&Role::Lp, &lp, &true).is_err());
+        assert!(c.try_set_allowlist_enabled(&Role::Lp, &false).is_err());
+        assert!(c.try_set_notional_cap(&Some(USDC)).is_err());
+        assert!(!c.is_allowed(&Role::Lp, &lp));
+    }
+
+    // ---- B9 : notionnel total ----
+
+    #[test]
+    fn total_notional_follows_open_and_close() {
+        let s = setup();
+        s.new_lp(LP_CAPITAL);
+        assert_eq!(s.client().total_notional(), 0);
+        let a = make_hedge(&s, symbol_short!("MXN"), Side::BuyCurrency, MXN_1M, RATE_055, 1000);
+        let b = make_hedge(&s, symbol_short!("EUR"), Side::SellCurrency, MXN_1M / 4, RATE_055, 1000);
+        open_pos(&s, &a);
+        assert_eq!(s.client().total_notional(), 55_000 * USDC);
+        open_pos(&s, &b);
+        // Somme brute, toutes devises et tous sens (pas de netting).
+        assert_eq!(s.client().total_notional(), 68_750 * USDC);
+        assert_eq!(s.client().pilot_limits().total_notional, 68_750 * USDC);
+
+        close_pos_flat(&s, &a);
+        assert_eq!(s.client().total_notional(), 13_750 * USDC);
+        close_pos_flat(&s, &b);
+        assert_eq!(s.client().total_notional(), 0);
+        s.assert_invariant(0);
+    }
+
+    #[test]
+    fn notional_cap_is_none_by_default() {
+        let s = setup();
+        assert_eq!(s.client().pilot_limits().notional_cap, None);
+    }
+
+    #[test]
+    fn open_up_to_notional_cap_is_accepted() {
+        let s = setup();
+        s.new_lp(LP_CAPITAL);
+        s.client().set_notional_cap(&Some(55_000 * USDC));
+        open_pos(&s, &make_hedge(&s, symbol_short!("MXN"), Side::BuyCurrency, MXN_1M, RATE_055, 1000));
+        assert_eq!(s.client().total_notional(), 55_000 * USDC);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #115)")]
+    fn open_over_notional_cap_panics() {
+        let s = setup();
+        s.new_lp(LP_CAPITAL);
+        s.client().set_notional_cap(&Some(55_000 * USDC - 1));
+        open_pos(&s, &make_hedge(&s, symbol_short!("MXN"), Side::BuyCurrency, MXN_1M, RATE_055, 1000));
+    }
+
+    #[test]
+    fn cap_below_open_notional_still_lets_hedges_close_then_none_lifts_it() {
+        let s = setup();
+        s.new_lp(LP_CAPITAL);
+        let a = make_hedge(&s, symbol_short!("MXN"), Side::BuyCurrency, MXN_1M, RATE_055, 1000);
+        open_pos(&s, &a);
+        s.client().set_notional_cap(&Some(0));
+        close_pos_flat(&s, &a);
+        assert_eq!(s.client().total_notional(), 0);
+
+        s.client().set_notional_cap(&None);
+        assert_eq!(s.client().pilot_limits().notional_cap, None);
+        open_pos(&s, &a);
+        assert_eq!(s.client().total_notional(), 55_000 * USDC);
+    }
+
+    #[test]
+    fn close_never_blocked_by_uncounted_notional() {
+        // Couverture ouverte avant B9 (upgrade) : son notionnel n'a pas été compté.
+        let s = setup();
+        s.new_lp(LP_CAPITAL);
+        let a = make_hedge(&s, symbol_short!("MXN"), Side::BuyCurrency, MXN_1M, RATE_055, 1000);
+        open_pos(&s, &a);
+        s.vault(|env| set_total_notional(env, 0));
+        close_pos_flat(&s, &a);
+        assert_eq!(s.client().total_notional(), 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #100)")]
+    fn negative_notional_cap_panics() {
+        let s = setup();
+        s.client().set_notional_cap(&Some(-1));
+    }
+
+    #[test]
+    fn set_notional_cap_requires_admin_and_emits_event() {
+        let s = setup();
+        s.client().set_notional_cap(&Some(1_000 * USDC));
+        assert_admin_only(&s, "set_notional_cap");
+        assert_eq!(
+            s.env.events().all().filter_by_contract(&s.pool),
+            [NotionalCapSet { cap: Some(1_000 * USDC) }.to_xdr(&s.env, &s.pool)]
+        );
+        assert_eq!(s.client().pilot_limits().notional_cap, Some(1_000 * USDC));
+
+        s.client().set_notional_cap(&None);
+        assert_eq!(
+            s.env.events().all().filter_by_contract(&s.pool),
+            [NotionalCapSet { cap: None }.to_xdr(&s.env, &s.pool)]
+        );
     }
 }
