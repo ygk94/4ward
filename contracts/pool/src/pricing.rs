@@ -288,12 +288,16 @@ fn lock_fixing(env: &Env, hedge_id: u64, price: i128) {
     s.extend_ttl(&key, FIXING_TTL_THRESHOLD, FIXING_TTL_EXTEND_TO);
 }
 
-/// Cours de règlement : le prix en vigueur **à l'échéance** (ou juste après), pas au moment où `settle` est
-/// appelé, sinon celui qui règle choisit son moment. Cours figé s'il existe ; sinon `read_fixing`, et un cours
-/// trouvé est figé (il ne change plus, même si l'oracle publie autre chose ou oublie son historique).
-/// `Pending` ou `Missing` : panique `NoFixing` (312) ; la transaction est annulée, la couverture reste ouverte.
-/// Appelée par `hedge::settle` avec l'échéance réelle (`hedge.maturity`).
-pub(crate) fn settlement_fixing(env: &Env, hedge_id: u64, currency: &Symbol, maturity: u64) -> i128 {
+/// Fige le cours d'échéance d'une couverture **sans la régler**, et le renvoie.
+///
+/// Reflector ne garde qu'environ 24 h d'historique : sans appel de `record_fixing` (ou de `settle`) dans les
+/// 24 h qui suivent l'échéance, le cours est perdu et la couverture n'est plus réglable que par le futur
+/// `settle_fallback` (Clément). Le robot doit donc l'appeler peu après chaque échéance.
+///
+/// Déjà figé : renvoie le cours figé, sans rien changer ni paniquer (appel répétable).
+/// Pas encore de cours (`Pending`) ou plus de cours (`Missing`) : panique `NoFixing` (312).
+#[allow(dead_code)] // exposée par Clément dans lib.rs
+pub(crate) fn record_fixing(env: &Env, hedge_id: u64, currency: &Symbol, maturity: u64) -> i128 {
     if let Some(price) = locked_fixing(env, hedge_id) {
         return price;
     }
@@ -302,6 +306,26 @@ pub(crate) fn settlement_fixing(env: &Env, hedge_id: u64, currency: &Symbol, mat
             lock_fixing(env, hedge_id, price);
             price
         }
+        FixingRead::Pending | FixingRead::Missing => panic_with_error!(env, PricingError::NoFixing),
+    }
+}
+
+/// Cours de règlement : le prix en vigueur **à l'échéance** (ou juste après), pas au moment où `settle` est
+/// appelé, sinon celui qui règle choisit son moment.
+/// - Cours figé par `record_fixing` : il est consommé (l'entrée est supprimée) et renvoyé.
+/// - Sinon `read_fixing`, sans rien écrire : la couverture est réglée dans la même transaction.
+/// - `Pending` ou `Missing` : panique `NoFixing` (312) ; la transaction est annulée, la couverture reste ouverte.
+///
+/// Sans appel de `record_fixing` (ou de `settle`) dans les 24 h après l'échéance, Reflector a oublié
+/// l'historique : la couverture n'est alors réglable que par le futur `settle_fallback` (Clément).
+/// Appelée par `hedge::settle` avec l'échéance réelle (`hedge.maturity`).
+pub(crate) fn settlement_fixing(env: &Env, hedge_id: u64, currency: &Symbol, maturity: u64) -> i128 {
+    if let Some(price) = locked_fixing(env, hedge_id) {
+        env.storage().persistent().remove(&PricingKey::Fixing(hedge_id));
+        return price;
+    }
+    match read_fixing(env, currency, maturity) {
+        FixingRead::Found(price) => price,
         FixingRead::Pending | FixingRead::Missing => panic_with_error!(env, PricingError::NoFixing),
     }
 }

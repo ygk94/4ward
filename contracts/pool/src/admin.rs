@@ -25,6 +25,8 @@ pub enum AdminError {
     InvalidOracleDecimals = 403,
     /// La garde doit être une clé distincte de l'admin.
     GuardianIsAdmin = 404,
+    /// Fonction pas encore branchée (aujourd'hui : liste blanche `Role::Sme`, moitié hedge de B9).
+    NotImplemented = 405,
 }
 
 #[contracttype]
@@ -101,19 +103,35 @@ pub(crate) fn require_not_paused(env: &Env) {
     }
 }
 
+/// Branche PME de la liste blanche : à écrire avec la moitié hedge de B9 (Clément).
+pub(crate) fn sme_not_implemented(env: &Env) -> ! {
+    panic_with_error!(env, AdminError::NotImplemented)
+}
+
+/// La garde ne peut pas devenir admin (sinon une seule clé ferait les deux rôles).
+fn require_not_guardian(env: &Env, who: &Address) {
+    if guardian(env).as_ref() == Some(who) {
+        panic_with_error!(env, AdminError::GuardianIsAdmin);
+    }
+}
+
 // ---- transfert d'admin ----
 
+/// Refuse `GuardianIsAdmin` (404) si `new_admin` est la garde.
 pub(crate) fn propose_admin(env: &Env, new_admin: &Address) {
     let current = crate::admin(env);
     current.require_auth();
+    require_not_guardian(env, new_admin);
     env.storage().instance().set(&AdminKey::PendingAdmin, new_admin);
     AdminProposed { current, proposed: new_admin.clone() }.publish(env);
 }
 
 /// Signée par l'admin proposé : il reçoit le rôle, l'ancien admin perd ses droits.
+/// Refuse `GuardianIsAdmin` (404) si le proposé est devenu la garde depuis la proposition.
 pub(crate) fn accept_admin(env: &Env) {
     let new_admin = pending_admin(env).unwrap_or_else(|| panic_with_error!(env, AdminError::NoPendingAdmin));
     new_admin.require_auth();
+    require_not_guardian(env, &new_admin);
     let previous = crate::admin(env);
     let s = env.storage().instance();
     s.set(&DataKey::Admin, &new_admin);
@@ -342,6 +360,39 @@ mod tests {
         assert_eq!(c.pending_admin(), None);
         assert_admin_error(c.try_accept_admin(), AdminError::NoPendingAdmin);
         assert_eq!(c.get_admin(), s.admin);
+    }
+
+    #[test]
+    fn guardian_cannot_be_proposed_as_admin() {
+        let s = setup();
+        let c = s.client();
+        let guardian = Address::generate(&s.env);
+        c.set_guardian(&guardian);
+        assert_admin_error(c.try_propose_admin(&guardian), AdminError::GuardianIsAdmin);
+        assert_eq!(c.pending_admin(), None);
+    }
+
+    #[test]
+    fn proposed_admin_made_guardian_cannot_accept() {
+        let s = setup();
+        let c = s.client();
+        let x = Address::generate(&s.env);
+        c.propose_admin(&x);
+        c.set_guardian(&x);
+        assert_admin_error(c.try_accept_admin(), AdminError::GuardianIsAdmin);
+        assert_eq!(c.get_admin(), s.admin);
+    }
+
+    // ---- liste blanche PME pas encore branchée ----
+
+    #[test]
+    fn sme_role_returns_not_implemented() {
+        let s = setup();
+        let c = s.client();
+        let who = Address::generate(&s.env);
+        assert_admin_error(c.try_is_allowed(&Role::Sme, &who), AdminError::NotImplemented);
+        assert_admin_error(c.try_set_allowed(&Role::Sme, &who, &true), AdminError::NotImplemented);
+        assert_admin_error(c.try_set_allowlist_enabled(&Role::Sme, &true), AdminError::NotImplemented);
     }
 
     // ---- garde et pause ----

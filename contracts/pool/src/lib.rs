@@ -91,11 +91,6 @@ pub struct PilotLimits {
     pub total_notional: i128,
 }
 
-/// Branche PME de la liste blanche : à écrire avec la moitié hedge de B9.
-fn sme_not_implemented() -> ! {
-    panic!("Role::Sme : liste blanche PME pas encore implementee (B9 hedge)")
-}
-
 #[contracttype]
 pub enum DataKey {
     Admin,
@@ -231,7 +226,7 @@ impl Pool {
     pub fn set_allowed(env: Env, role: Role, who: Address, allowed: bool) {
         match role {
             Role::Lp => vault::set_lp_allowed(&env, &who, allowed),
-            Role::Sme => sme_not_implemented(),
+            Role::Sme => admin::sme_not_implemented(&env),
         }
     }
 
@@ -239,7 +234,7 @@ impl Pool {
     pub fn is_allowed(env: Env, role: Role, who: Address) -> bool {
         match role {
             Role::Lp => vault::is_lp_allowed(&env, &who),
-            Role::Sme => sme_not_implemented(),
+            Role::Sme => admin::sme_not_implemented(&env),
         }
     }
 
@@ -247,7 +242,7 @@ impl Pool {
     pub fn set_allowlist_enabled(env: Env, role: Role, enabled: bool) {
         match role {
             Role::Lp => vault::set_lp_allowlist_enabled(&env, enabled),
-            Role::Sme => sme_not_implemented(),
+            Role::Sme => admin::sme_not_implemented(&env),
         }
     }
 

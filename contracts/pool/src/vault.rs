@@ -45,7 +45,7 @@
 //!
 //! Netting : `basket_max_loss` calcule la perte maximale exacte d'un panier de couvertures,
 //! mais n'est PAS branché sur la réserve. Conditions pour le brancher :
-//! 1. fixing commun : déjà fait (`settle` lit le cours à l'échéance via `pricing::fixing`) ;
+//! 1. fixing commun : déjà fait (`settle` lit le cours à l'échéance via `pricing::settlement_fixing`) ;
 //!    reste à aligner les échéances (point 2) ;
 //! 2. échéances arrondies à des dates de fixing (aujourd'hui `now + duration` à la seconde :
 //!    deux couvertures n'ont jamais la même échéance, les paniers sont de taille 1) ;
@@ -749,6 +749,9 @@ pub(crate) fn close_position(env: &Env, hedge: &Hedge) {
     set_exposure(env, &hedge.currency, e);
     // Borné à 0 plutôt qu'une panique : une couverture ouverte avant B9 (contrat mis à jour par
     // `upgrade`) n'a pas été comptée, et son règlement ne doit jamais être bloqué.
+    // Limite connue : sa clôture retire un notionnel jamais ajouté, donc le total sous-compte les
+    // couvertures encore ouvertes. Sans conséquence en pratique : le testnet sera redéployé (pas mis à
+    // jour) en semaine 49, aucune couverture antérieure à B9 n'existera.
     set_total_notional(env, (total_notional(env) - notional_usd).max(0));
 
     release(env, hedge.margin);

@@ -591,20 +591,48 @@ mod pricing_tests {
         assert_eq!(read(&env, &pool, maturity), FixingRead::Missing);
     }
 
-    /// Une fois figé, le cours ne change plus : ni un nouveau prix, ni l'oubli de l'historique (> 24 h).
+    /// Figé par `record_fixing`, le cours ne change plus (nouveau prix, oubli de l'historique > 24 h,
+    /// second appel), sert au règlement, puis l'entrée disparaît.
     #[test]
-    fn pricing_fixing_locked_never_changes() {
+    fn pricing_fixing_recorded_survives_oracle_and_is_consumed() {
         let (env, pool, oracle) = setup_mock_oracle();
         let maturity = T0 + 300;
         mock_price_at(&env, &oracle, T0, MXN_SPOT);
         env.ledger().set_timestamp(maturity + 10);
-        let settle = |env: &Env| env.as_contract(&pool, || pricing::settlement_fixing(env, 7, &mxn(env), maturity));
-        assert_eq!(settle(&env), MXN_SPOT);
-        assert_eq!(env.as_contract(&pool, || pricing::locked_fixing(&env, 7)), Some(MXN_SPOT));
+        let record = |env: &Env| env.as_contract(&pool, || pricing::record_fixing(env, 7, &mxn(env), maturity));
+        let locked = |env: &Env| env.as_contract(&pool, || pricing::locked_fixing(env, 7));
+        assert_eq!(record(&env), MXN_SPOT);
+        assert_eq!(locked(&env), Some(MXN_SPOT));
         mock_price_at(&env, &oracle, maturity + 100_000, 9_000_000_000_000);
         assert_eq!(read(&env, &pool, maturity), FixingRead::Missing); // l'oracle a oublié
-        assert_eq!(settle(&env), MXN_SPOT);
+        assert_eq!(record(&env), MXN_SPOT); // second appel : cours inchangé, pas de panique
+        assert_eq!(locked(&env), Some(MXN_SPOT));
         assert!(!env.as_contract(&pool, || pricing::fixing_missing(&env, 7, &mxn(&env), maturity)));
+        let spot = env.as_contract(&pool, || pricing::settlement_fixing(&env, 7, &mxn(&env), maturity));
+        assert_eq!(spot, MXN_SPOT);
+        assert_eq!(locked(&env), None);
+    }
+
+    /// Règlement direct sur l'oracle : rien n'est écrit.
+    #[test]
+    fn pricing_settlement_fixing_direct_read_writes_nothing() {
+        let (env, pool, oracle) = setup_mock_oracle();
+        let maturity = T0 + 300;
+        mock_price_at(&env, &oracle, T0, MXN_SPOT);
+        env.ledger().set_timestamp(maturity + 10);
+        let spot = env.as_contract(&pool, || pricing::settlement_fixing(&env, 7, &mxn(&env), maturity));
+        assert_eq!(spot, MXN_SPOT);
+        assert_eq!(env.as_contract(&pool, || pricing::locked_fixing(&env, 7)), None);
+    }
+
+    /// Pas encore de cours : `record_fixing` échoue avec 312.
+    #[test]
+    #[should_panic(expected = "Error(Contract, #312)")]
+    fn pricing_record_fixing_pending_is_no_fixing() {
+        let (env, pool, oracle) = setup_mock_oracle();
+        mock_price_at(&env, &oracle, T0, MXN_SPOT);
+        env.ledger().set_timestamp(T0 + 2_000);
+        env.as_contract(&pool, || pricing::record_fixing(&env, 3, &mxn(&env), T0 + 1_000));
     }
 
     /// Pas encore de cours : `settlement_fixing` échoue avec 312.
