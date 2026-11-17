@@ -10,8 +10,9 @@
 //! Ce fichier ne contient que les points d'entrée publics et les types partagés.
 //! Les fonctions `pub(crate)` entre modules sont le contrat d'interface entre vous :
 //! ne pas changer leur signature sans prévenir les deux autres.
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol};
+use soroban_sdk::{contract, contractimpl, contracttype, Address, BytesN, Env, Symbol};
 
+mod admin;
 mod hedge;
 mod pricing;
 mod vault;
@@ -97,6 +98,7 @@ pub struct Pool;
 #[contractimpl]
 impl Pool {
     pub fn __constructor(env: Env, admin: Address, usdc: Address, oracle: Address, spread_bps: u32) {
+        admin::check_oracle_decimals(&env, &oracle);
         let s = env.storage().instance();
         s.set(&DataKey::Admin, &admin);
         s.set(&DataKey::Usdc, &usdc);
@@ -112,6 +114,7 @@ impl Pool {
     /// Dépose `amount` USDC (7 décimales) dans le pool contre des parts au prix plein.
     /// Retourne le nombre de parts du LP après le dépôt (7 décimales).
     pub fn deposit_lp(env: Env, lp: Address, amount: i128) -> i128 {
+        admin::require_not_paused(&env);
         vault::deposit(&env, &lp, amount)
     }
 
@@ -155,6 +158,7 @@ impl Pool {
     /// Dépose `amount` USDC dans la tranche senior (rendement fixe, protégée par le junior).
     /// Retourne le nombre de parts senior du LP après le dépôt (7 décimales).
     pub fn deposit_senior(env: Env, lp: Address, amount: i128) -> i128 {
+        admin::require_not_paused(&env);
         vault::deposit_senior(&env, &lp, amount)
     }
 
@@ -222,6 +226,7 @@ impl Pool {
         duration_secs: u64,
         cap_bps: u32,
     ) -> u64 {
+        admin::require_not_paused(&env);
         hedge::open(&env, &owner, &supplier, &currency, side, notional, duration_secs, cap_bps)
     }
 
@@ -249,6 +254,60 @@ impl Pool {
     /// Admin, testnet / démo uniquement : ex. 25 920 → une couverture à 90 jours échoit en 300 s.
     pub fn set_time_factor(env: Env, factor: u32) {
         hedge::set_time_factor(&env, factor)
+    }
+
+    // ---- Admin ----
+
+    /// Admin : propose un nouvel admin, qui devra accepter (deux temps).
+    pub fn propose_admin(env: Env, new_admin: Address) {
+        admin::propose_admin(&env, &new_admin)
+    }
+
+    /// Signé par l'admin proposé : il reçoit le rôle, l'ancien perd ses droits.
+    pub fn accept_admin(env: Env) {
+        admin::accept_admin(&env)
+    }
+
+    /// Admin : annule la proposition en cours.
+    pub fn cancel_admin_proposal(env: Env) {
+        admin::cancel_admin_proposal(&env)
+    }
+
+    pub fn get_admin(env: Env) -> Address {
+        admin(&env)
+    }
+
+    pub fn pending_admin(env: Env) -> Option<Address> {
+        admin::pending_admin(&env)
+    }
+
+    /// Admin : pose la clé de garde (distincte de l'admin), qui peut mettre en pause.
+    pub fn set_guardian(env: Env, guardian: Address) {
+        admin::set_guardian(&env, &guardian)
+    }
+
+    pub fn guardian(env: Env) -> Option<Address> {
+        admin::guardian(&env)
+    }
+
+    /// Garde ou admin (signature de `caller`) : bloque dépôts et ouvertures de couverture.
+    /// Retraits, règlement, clôture anticipée et lectures restent possibles.
+    pub fn pause(env: Env, caller: Address) {
+        admin::pause(&env, &caller)
+    }
+
+    /// Admin seul.
+    pub fn unpause(env: Env) {
+        admin::unpause(&env)
+    }
+
+    pub fn paused(env: Env) -> bool {
+        admin::paused(&env)
+    }
+
+    /// Admin : remplace le code WASM (hash déjà téléversé), adresse et données inchangées.
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
+        admin::upgrade(&env, &new_wasm_hash)
     }
 }
 

@@ -8,7 +8,31 @@
 //! Erreurs : `PricingError`, codes 300+ (Vault 100+, Paiement 200+). Les textes de panic! sont effacés dans
 //! le WASM : seul un code d'erreur permet au front d'afficher la bonne raison d'un refus.
 use crate::{DataKey, Quote, Side};
-use soroban_sdk::{contractclient, contracterror, contracttype, panic_with_error, Address, Env, Symbol};
+use soroban_sdk::{
+    contractclient, contracterror, contractevent, contracttype, panic_with_error, Address, Env, Symbol,
+};
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RateSet {
+    #[topic]
+    pub currency: Symbol,
+    pub rate_bps: u32,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MinCapSet {
+    #[topic]
+    pub currency: Symbol,
+    pub cap_bps: u32,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SpreadSet {
+    pub spread_bps: u32,
+}
 
 /// Erreurs de Pricing. Codes 300+ pour ne pas entrer en collision avec Vault (100+) / Paiement (200+).
 /// Ne jamais réutiliser un numéro : ajouter à la suite.
@@ -111,7 +135,7 @@ pub struct PriceData {
 }
 
 /// Sous-ensemble de l'interface SEP-40 dont le pool a besoin.
-/// Hypothèse documentée, non vérifiée à chaque appel : `decimals()` vaut 14 sur Reflector FX comme sur le mock.
+/// `decimals()` doit valoir 14 : vérifié au constructeur (`admin::check_oracle_decimals`).
 #[contractclient(name = "OracleClient")]
 #[allow(dead_code)] // le trait n'existe que pour engendrer `OracleClient`
 pub trait Sep40Oracle {
@@ -152,6 +176,7 @@ pub(crate) fn set_rate(env: &Env, currency: &Symbol, rate_bps: u32) {
         panic_with_error!(env, PricingError::RateTooHigh);
     }
     env.storage().instance().set(&DataKey::Rate(currency.clone()), &rate_bps);
+    RateSet { currency: currency.clone(), rate_bps }.publish(env);
 }
 
 /// Ouvre une devise avec son plafond minimum, en bps (liste blanche : sans minimum, pas de cotation).
@@ -161,6 +186,7 @@ pub(crate) fn set_min_cap(env: &Env, currency: &Symbol, cap_bps: u32) {
         panic_with_error!(env, PricingError::CapOutOfRange);
     }
     env.storage().instance().set(&DataKey::MinCap(currency.clone()), &cap_bps);
+    MinCapSet { currency: currency.clone(), cap_bps }.publish(env);
 }
 
 pub(crate) fn set_spread(env: &Env, spread_bps: u32) {
@@ -169,6 +195,7 @@ pub(crate) fn set_spread(env: &Env, spread_bps: u32) {
         panic_with_error!(env, PricingError::SpreadTooHigh);
     }
     env.storage().instance().set(&DataKey::SpreadBps, &spread_bps);
+    SpreadSet { spread_bps }.publish(env);
 }
 
 // ---- appelé par hedge.rs (interface Paiement → Pricing) ----

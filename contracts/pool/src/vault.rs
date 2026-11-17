@@ -812,7 +812,7 @@ mod tests {
         env.mock_all_auths();
         let admin = Address::generate(&env);
         let usdc = env.register_stellar_asset_contract_v2(admin.clone()).address();
-        let oracle = Address::generate(&env);
+        let oracle = env.register(mock_oracle::MockOracle, (&admin,));
         let pool = env.register(Pool, (&admin, &usdc, &oracle, &50u32));
         Setup { env, admin, pool, usdc }
     }
