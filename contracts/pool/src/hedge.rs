@@ -177,7 +177,8 @@ pub(crate) fn settle(env: &Env, hedge_id: u64) -> i128 {
     }
 
     // cours en vigueur à l'échéance réelle, pas au moment de l'appel : personne ne choisit son moment
-    let spot = pricing::fixing(env, &hedge.currency, hedge.maturity);
+    // cours figé, sinon lu puis figé ; aucun cours encore : 312, la couverture reste ouverte
+    let spot = pricing::settlement_fixing(env, hedge_id, &hedge.currency, hedge.maturity);
     let (pnl, payout) = close(env, &key, &mut hedge, spot);
     HedgeSettled { hedge_id, owner: hedge.owner, spot, pnl, payout }.publish(env);
     payout

@@ -56,9 +56,26 @@ pub enum PricingError {
 /// (un prix en retard sur le marché = arbitrage contre le pool).
 pub const MAX_PRICE_AGE_SECS: u64 = 600;
 
-/// Âge maximum, à l'échéance, du cours de règlement lu par `fixing` : 3 périodes Reflector.
-/// Inchangé ici ; la lecture du cours d'échéance est revue dans le lot B1.
+/// Âge maximum, à l'échéance, du cours en vigueur à l'échéance (`read_fixing`) : 3 périodes Reflector.
+/// Au-delà, on prend le premier cours publié après l'échéance, dans `FIXING_GRACE_SECS`.
 pub const MAX_FIXING_AGE_SECS: u64 = 900;
+
+/// Fenêtre de rattrapage après l'échéance : passé ce délai sans cours utilisable, le cours est constaté absent.
+pub const FIXING_GRACE_SECS: u64 = 3_600;
+
+/// Pas de recherche du premier cours après l'échéance : la résolution de Reflector.
+const FIXING_STEP_SECS: u64 = 300;
+
+/// TTL d'un cours figé : comme une couverture (30 jours / 120 jours, en ledgers de ~5 s).
+const FIXING_TTL_THRESHOLD: u32 = 30 * 17_280;
+const FIXING_TTL_EXTEND_TO: u32 = 120 * 17_280;
+
+/// Clés de stockage de Pricing, à part de `DataKey` (lib.rs inchangé).
+#[contracttype]
+enum PricingKey {
+    /// Cours de règlement figé d'une couverture (persistent, écrit une seule fois).
+    Fixing(u64),
+}
 
 /// Année de 365 jours (convention ACT/365 simplifiée) : t = durée / SECS_PER_YEAR.
 /// C'est aussi la durée maximale d'une couverture.
@@ -175,24 +192,97 @@ pub(crate) fn spot(env: &Env, currency: &Symbol) -> i128 {
     data.price
 }
 
-/// Cours de règlement : le prix en vigueur **à l'échéance**, pas au moment où `settle` est appelé.
-/// Sans ça, celui qui règle choisit son moment (option gratuite contre le pool ou contre la PME), et un
-/// `set_price` posé après l'échéance changerait le règlement. USD par unité de devise, 14 décimales.
-/// Panique `NoFixing` si l'oracle n'a pas de prix à cette date, `InvalidPrice` si prix ≤ 0, `StalePrice`
-/// si le dernier prix avant l'échéance a plus de `MAX_FIXING_AGE_SECS` (oracle non mis à jour).
-/// Appelée par `hedge::settle` avec l'échéance réelle (`hedge.maturity`).
-pub(crate) fn fixing(env: &Env, currency: &Symbol, maturity: u64) -> i128 {
+// ---- cours d'échéance (lot B1) ----
+
+/// Lecture du cours d'échéance : trois issues.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum FixingRead {
+    /// Cours de règlement trouvé (USD par unité, 14 décimales).
+    Found(i128),
+    /// Aucun cours utilisable pour l'instant, mais la fenêtre `FIXING_GRACE_SECS` n'est pas écoulée.
+    Pending,
+    /// Aucun cours utilisable et la fenêtre est écoulée : constat d'absence (futur `settle_fallback`).
+    Missing,
+}
+
+/// Lecture seule (rien n'est écrit), dans l'ordre :
+/// 1. le cours en vigueur à l'échéance, s'il est positif et a au plus `MAX_FIXING_AGE_SECS` à l'échéance ;
+/// 2. sinon le premier cours publié dans ]maturity, maturity + `FIXING_GRACE_SECS`], cherché par pas de
+///    `FIXING_STEP_SECS` (exact sur Reflector, aligné sur 300 s ; sur le mock, deux prix à moins de 300 s
+///    d'écart peuvent faire sauter le plus ancien, défaut accepté pour la démo) ;
+/// 3. sinon `Pending` tant que `now < maturity + FIXING_GRACE_SECS`, puis `Missing`.
+/// Un cours ≤ 0 est traité comme inutilisable (on continue de chercher) : un mauvais cours ne bloque pas le règlement.
+pub(crate) fn read_fixing(env: &Env, currency: &Symbol, maturity: u64) -> FixingRead {
     let oracle: Address = env.storage().instance().get(&DataKey::Oracle).unwrap();
-    let data = OracleClient::new(env, &oracle)
-        .price(&Asset::Other(currency.clone()), &maturity)
-        .unwrap_or_else(|| panic_with_error!(env, PricingError::NoFixing));
-    if data.price <= 0 {
-        panic_with_error!(env, PricingError::InvalidPrice);
+    let client = OracleClient::new(env, &oracle);
+    let asset = Asset::Other(currency.clone());
+    let now = env.ledger().timestamp();
+    let deadline = maturity.saturating_add(FIXING_GRACE_SECS);
+
+    if maturity <= now {
+        if let Some(d) = client.price(&asset, &maturity) {
+            if d.price > 0 && d.timestamp <= maturity && maturity - d.timestamp <= MAX_FIXING_AGE_SECS {
+                return FixingRead::Found(d.price);
+            }
+        }
     }
-    if maturity.saturating_sub(data.timestamp) > MAX_FIXING_AGE_SECS {
-        panic_with_error!(env, PricingError::StalePrice);
+    let mut ts = maturity;
+    while ts < deadline {
+        ts = ts.saturating_add(FIXING_STEP_SECS).min(deadline);
+        if ts > now {
+            break;
+        }
+        if let Some(d) = client.price(&asset, &ts) {
+            if d.price > 0 && d.timestamp > maturity && d.timestamp <= deadline {
+                return FixingRead::Found(d.price);
+            }
+        }
     }
-    data.price
+    if now < deadline {
+        FixingRead::Pending
+    } else {
+        FixingRead::Missing
+    }
+}
+
+/// Cours figé d'une couverture, s'il existe.
+pub(crate) fn locked_fixing(env: &Env, hedge_id: u64) -> Option<i128> {
+    env.storage().persistent().get(&PricingKey::Fixing(hedge_id))
+}
+
+/// Fige le cours d'une couverture. Écrit une seule fois : sans effet si un cours est déjà figé.
+fn lock_fixing(env: &Env, hedge_id: u64, price: i128) {
+    let key = PricingKey::Fixing(hedge_id);
+    let s = env.storage().persistent();
+    if s.has(&key) {
+        return;
+    }
+    s.set(&key, &price);
+    s.extend_ttl(&key, FIXING_TTL_THRESHOLD, FIXING_TTL_EXTEND_TO);
+}
+
+/// Cours de règlement : le prix en vigueur **à l'échéance** (ou juste après), pas au moment où `settle` est
+/// appelé, sinon celui qui règle choisit son moment. Cours figé s'il existe ; sinon `read_fixing`, et un cours
+/// trouvé est figé (il ne change plus, même si l'oracle publie autre chose ou oublie son historique).
+/// `Pending` ou `Missing` : panique `NoFixing` (312) ; la transaction est annulée, la couverture reste ouverte.
+/// Appelée par `hedge::settle` avec l'échéance réelle (`hedge.maturity`).
+pub(crate) fn settlement_fixing(env: &Env, hedge_id: u64, currency: &Symbol, maturity: u64) -> i128 {
+    if let Some(price) = locked_fixing(env, hedge_id) {
+        return price;
+    }
+    match read_fixing(env, currency, maturity) {
+        FixingRead::Found(price) => {
+            lock_fixing(env, hedge_id, price);
+            price
+        }
+        FixingRead::Pending | FixingRead::Missing => panic_with_error!(env, PricingError::NoFixing),
+    }
+}
+
+/// Constat d'absence pour le futur `settle_fallback` : aucun cours figé et lecture `Missing`.
+#[allow(dead_code)] // branché par `settle_fallback` (Clément)
+pub(crate) fn fixing_missing(env: &Env, hedge_id: u64, currency: &Symbol, maturity: u64) -> bool {
+    locked_fixing(env, hedge_id).is_none() && read_fixing(env, currency, maturity) == FixingRead::Missing
 }
 
 /// Taux bloqué à l'ouverture, spread inclus (USD par unité, 14 décimales).

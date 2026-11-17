@@ -13,7 +13,8 @@ mod pricing_tests {
     //! (`lastprice(Asset::Other(sym))`, `decimals()` = 14). Réutilise les types `Asset` / `PriceData` du client
     //! déclaré dans `pricing.rs`, ce qui vérifie au passage que l'encodage coïncide.
     use crate::pricing::{
-        self, Asset, PriceData, PricingError, MAX_CAP_BPS, MAX_FIXING_AGE_SECS, MAX_PRICE_AGE_SECS, SECS_PER_YEAR,
+        self, Asset, FixingRead, PriceData, PricingError, FIXING_GRACE_SECS, MAX_CAP_BPS, MAX_FIXING_AGE_SECS,
+        MAX_PRICE_AGE_SECS, SECS_PER_YEAR,
     };
     use crate::{Pool, PoolClient, Quote, Side, BPS, PRICE_DECIMALS};
     use soroban_sdk::testutils::{Address as _, Ledger as _};
@@ -503,8 +504,15 @@ mod pricing_tests {
         mock_oracle::MockOracleClient::new(env, oracle).set_price(&mxn, &price);
     }
 
+    fn read(env: &Env, pool: &Address, maturity: u64) -> FixingRead {
+        env.as_contract(pool, || pricing::read_fixing(env, &mxn(env), maturity))
+    }
+
     fn fixing(env: &Env, pool: &Address, maturity: u64) -> i128 {
-        env.as_contract(pool, || pricing::fixing(env, &mxn(env), maturity))
+        match read(env, pool, maturity) {
+            FixingRead::Found(p) => p,
+            other => panic!("pas de cours : {:?}", other),
+        }
     }
 
     /// Le crash posé avant l'échéance compte ; un prix posé après l'échéance est ignoré,
@@ -530,31 +538,96 @@ mod pricing_tests {
         assert_eq!(fixing(&env, &pool, T0 + MAX_FIXING_AGE_SECS), MXN_SPOT);
     }
 
-    /// Dernier prix avant l'échéance trop ancien : l'oracle n'était pas à jour, on ne règle pas dessus.
+    /// Cours à l'échéance trop ancien : on prend le premier cours publié après l'échéance, pas l'ancien.
     #[test]
-    #[should_panic(expected = "Error(Contract, #302)")]
-    fn pricing_fixing_stale_price_panics() {
+    fn pricing_fixing_stale_falls_back_to_first_price_after() {
+        let (env, pool, oracle) = setup_mock_oracle();
+        let maturity = T0 + MAX_FIXING_AGE_SECS + 1;
+        mock_price_at(&env, &oracle, T0, MXN_SPOT);
+        mock_price_at(&env, &oracle, maturity + 700, 6_000_000_000_000);
+        mock_price_at(&env, &oracle, maturity + 2_000, 7_000_000_000_000);
+        env.ledger().set_timestamp(maturity + 2_500);
+        assert_eq!(fixing(&env, &pool, maturity), 6_000_000_000_000);
+    }
+
+    /// Premier prix après l'échéance, sans aucun prix avant : il compte aussi.
+    #[test]
+    fn pricing_fixing_no_price_before_maturity_uses_price_after() {
+        let (env, pool, oracle) = setup_mock_oracle();
+        mock_price_at(&env, &oracle, T0 + 400, MXN_SPOT);
+        env.ledger().set_timestamp(T0 + 600);
+        assert_eq!(fixing(&env, &pool, T0 + 300), MXN_SPOT);
+    }
+
+    /// Cours trop ancien, rien de neuf, l'heure n'est pas écoulée : pas encore.
+    #[test]
+    fn pricing_fixing_pending_within_grace() {
+        let (env, pool, oracle) = setup_mock_oracle();
+        let maturity = T0 + 1_000;
+        mock_price_at(&env, &oracle, T0, MXN_SPOT);
+        env.ledger().set_timestamp(maturity + FIXING_GRACE_SECS - 1);
+        assert_eq!(read(&env, &pool, maturity), FixingRead::Pending);
+    }
+
+    /// Échéance dans le futur : pas encore.
+    #[test]
+    fn pricing_fixing_future_maturity_is_pending() {
+        let (env, pool, oracle) = setup_mock_oracle();
+        mock_price_at(&env, &oracle, T0, MXN_SPOT);
+        assert_eq!(read(&env, &pool, T0 + 60), FixingRead::Pending);
+    }
+
+    /// Aucun cours utilisable une heure après l'échéance : absent, même si un prix arrive ensuite.
+    #[test]
+    fn pricing_fixing_missing_after_grace() {
+        let (env, pool, oracle) = setup_mock_oracle();
+        let maturity = T0 + 1_000;
+        mock_price_at(&env, &oracle, T0, MXN_SPOT);
+        env.ledger().set_timestamp(maturity + FIXING_GRACE_SECS);
+        assert_eq!(read(&env, &pool, maturity), FixingRead::Missing);
+        assert!(env.as_contract(&pool, || pricing::fixing_missing(&env, 0, &mxn(&env), maturity)));
+        // un prix publié après la fenêtre ne rattrape rien
+        mock_price_at(&env, &oracle, maturity + FIXING_GRACE_SECS + 10, 7_000_000_000_000);
+        assert_eq!(read(&env, &pool, maturity), FixingRead::Missing);
+    }
+
+    /// Une fois figé, le cours ne change plus : ni un nouveau prix, ni l'oubli de l'historique (> 24 h).
+    #[test]
+    fn pricing_fixing_locked_never_changes() {
+        let (env, pool, oracle) = setup_mock_oracle();
+        let maturity = T0 + 300;
+        mock_price_at(&env, &oracle, T0, MXN_SPOT);
+        env.ledger().set_timestamp(maturity + 10);
+        let settle = |env: &Env| env.as_contract(&pool, || pricing::settlement_fixing(env, 7, &mxn(env), maturity));
+        assert_eq!(settle(&env), MXN_SPOT);
+        assert_eq!(env.as_contract(&pool, || pricing::locked_fixing(&env, 7)), Some(MXN_SPOT));
+        mock_price_at(&env, &oracle, maturity + 100_000, 9_000_000_000_000);
+        assert_eq!(read(&env, &pool, maturity), FixingRead::Missing); // l'oracle a oublié
+        assert_eq!(settle(&env), MXN_SPOT);
+        assert!(!env.as_contract(&pool, || pricing::fixing_missing(&env, 7, &mxn(&env), maturity)));
+    }
+
+    /// Pas encore de cours : `settlement_fixing` échoue avec 312.
+    #[test]
+    #[should_panic(expected = "Error(Contract, #312)")]
+    fn pricing_settlement_fixing_pending_is_no_fixing() {
         let (env, pool, oracle) = setup_mock_oracle();
         mock_price_at(&env, &oracle, T0, MXN_SPOT);
         env.ledger().set_timestamp(T0 + 2_000);
-        fixing(&env, &pool, T0 + MAX_FIXING_AGE_SECS + 1);
+        env.as_contract(&pool, || pricing::settlement_fixing(&env, 3, &mxn(&env), T0 + 1_000));
     }
 
+    /// Le mock, comme Reflector, n'a plus de prix pour une date de plus de 24 h.
     #[test]
-    #[should_panic(expected = "Error(Contract, #312)")]
-    fn pricing_fixing_no_price_before_maturity_panics() {
-        let (env, pool, oracle) = setup_mock_oracle();
-        mock_price_at(&env, &oracle, T0 + 400, MXN_SPOT); // premier prix après l'échéance
-        fixing(&env, &pool, T0 + 300);
-    }
-
-    /// Échéance dans le futur : pas encore de cours de fixing.
-    #[test]
-    #[should_panic(expected = "Error(Contract, #312)")]
-    fn pricing_fixing_future_maturity_panics() {
-        let (env, pool, oracle) = setup_mock_oracle();
+    fn mock_oracle_forgets_after_24h() {
+        let (env, _pool, oracle) = setup_mock_oracle();
         mock_price_at(&env, &oracle, T0, MXN_SPOT);
-        fixing(&env, &pool, T0 + 60);
+        let client = mock_oracle::MockOracleClient::new(&env, &oracle);
+        let mxn = mock_oracle::Asset::Other(mxn(&env));
+        env.ledger().set_timestamp(T0 + 86_400);
+        assert!(client.price(&mxn, &T0).is_some());
+        env.ledger().set_timestamp(T0 + 86_401);
+        assert_eq!(client.price(&mxn, &T0), None);
     }
 
     /// MXN ouvert mais sans prix sur l'oracle : le refus doit venir de `check_cap`, pas de `spot`.
@@ -1202,29 +1275,37 @@ fn settle_uses_rate_at_maturity() {
 }
 
 #[test]
-fn settle_refused_when_rate_at_maturity_is_stale() {
+fn settle_stale_at_maturity_uses_first_price_after() {
     let s = setup();
     fund_pool(&s);
     let now = s.env.ledger().timestamp();
     // échéance à 2 000 s, aucun prix posé entre l'ouverture et l'échéance
     let id = s.pool.open_hedge(&s.lucia, &s.supplier, &Symbol::new(&s.env, "MXN"), &Side::BuyCurrency, &NOTIONAL, &2_000, &1000);
 
-    // un prix frais après l'échéance ne rattrape pas un oracle muet à l'échéance
-    price_at(&s, now + 2_010, SPOT_0);
-    assert_eq!(s.pool.try_settle(&id), Err(Ok(contract_err(PricingError::StalePrice as u32))));
+    // crash +12 % publié 10 s après l'échéance : pas encore lisible (recherche par pas de 300 s)
+    price_at(&s, now + 2_010, 6_160_000_000_000);
+    assert_eq!(s.pool.try_settle(&id), Err(Ok(contract_err(PricingError::NoFixing as u32))));
+    assert!(!s.pool.get_hedge(&id).unwrap().settled);
+
+    // 300 s après l'échéance, ce premier cours est retenu ; un prix plus tardif est ignoré
+    price_at(&s, now + 2_400, SPOT_0);
+    s.env.ledger().set_timestamp(now + 2_500);
+    let margin = s.pool.get_hedge(&id).unwrap().margin;
+    let paid = s.pool.settle(&id);
+    assert_settled(&s, id, paid, 2 * margin, -margin);
 }
 
 #[test]
-fn settle_refused_when_no_rate_at_maturity() {
+fn settle_refused_while_no_rate_and_hedge_stays_open() {
     let s = setup();
     let now = s.env.ledger().timestamp();
     let id = open_funded(&s, Side::BuyCurrency);
 
-    // 64 prix posés après l'échéance : l'historique du mock ne remonte plus jusqu'à elle
-    for i in 1..=64 {
-        price_at(&s, now + MATURITY_IN + i, SPOT_0);
-    }
+    // personne ne règle pendant plus de 24 h : l'oracle a oublié le cours d'échéance, rien n'a été figé.
+    // 312, couverture ouverte (cas du futur `settle_fallback`).
+    s.env.ledger().set_timestamp(now + MATURITY_IN + 86_401);
     assert_eq!(s.pool.try_settle(&id), Err(Ok(contract_err(PricingError::NoFixing as u32))));
+    assert!(!s.pool.get_hedge(&id).unwrap().settled);
 }
 
 // ---- Clôture anticipée ----
