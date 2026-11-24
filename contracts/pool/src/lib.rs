@@ -10,8 +10,9 @@
 //! Ce fichier ne contient que les points d'entrée publics et les types partagés.
 //! Les fonctions `pub(crate)` entre modules sont le contrat d'interface entre vous :
 //! ne pas changer leur signature sans prévenir les deux autres.
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol};
+use soroban_sdk::{contract, contractimpl, contracttype, Address, BytesN, Env, Symbol};
 
+mod admin;
 mod hedge;
 mod pricing;
 mod vault;
@@ -66,6 +67,30 @@ pub struct Hedge {
     pub settled: bool,
 }
 
+/// Liste blanche concernée par `set_allowed` / `is_allowed` / `set_allowlist_enabled` (B9).
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Role {
+    /// Apporteur de capital (dépôts junior et senior) : vault.rs.
+    Lp,
+    /// PME qui ouvre des couvertures : hedge.rs (moitié de Clément, pas encore branchée).
+    Sme,
+}
+
+/// Réglages et compteurs du pilote (B9), en lecture pour le front.
+/// Les champs côté couvertures (liste PME, plafonds par couverture et de durée, nombre maximal
+/// de couvertures ouvertes) seront ajoutés par la moitié hedge de B9.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PilotLimits {
+    /// Liste blanche des LP active (true par défaut : pilote fermé).
+    pub lp_allowlist_on: bool,
+    /// Plafond du notionnel total ouvert, USDC 7 décimales ; `None` = sans plafond.
+    pub notional_cap: Option<i128>,
+    /// Σ notionnels des couvertures ouvertes, USDC 7 décimales au taux bloqué.
+    pub total_notional: i128,
+}
+
 #[contracttype]
 pub enum DataKey {
     Admin,
@@ -97,6 +122,7 @@ pub struct Pool;
 #[contractimpl]
 impl Pool {
     pub fn __constructor(env: Env, admin: Address, usdc: Address, oracle: Address, spread_bps: u32) {
+        admin::check_oracle_decimals(&env, &oracle);
         let s = env.storage().instance();
         s.set(&DataKey::Admin, &admin);
         s.set(&DataKey::Usdc, &usdc);
@@ -112,6 +138,7 @@ impl Pool {
     /// Dépose `amount` USDC (7 décimales) dans le pool contre des parts au prix plein.
     /// Retourne le nombre de parts du LP après le dépôt (7 décimales).
     pub fn deposit_lp(env: Env, lp: Address, amount: i128) -> i128 {
+        admin::require_not_paused(&env);
         vault::deposit(&env, &lp, amount)
     }
 
@@ -155,6 +182,7 @@ impl Pool {
     /// Dépose `amount` USDC dans la tranche senior (rendement fixe, protégée par le junior).
     /// Retourne le nombre de parts senior du LP après le dépôt (7 décimales).
     pub fn deposit_senior(env: Env, lp: Address, amount: i128) -> i128 {
+        admin::require_not_paused(&env);
         vault::deposit_senior(&env, &lp, amount)
     }
 
@@ -191,6 +219,52 @@ impl Pool {
         vault::set_currency_limit(&env, &currency, limit_bps)
     }
 
+    // ---- Pilote (B9) ----
+
+    /// Admin : ajoute (`true`) ou retire (`false`) `who` de la liste blanche du rôle.
+    /// Un LP retiré garde ses parts et peut toujours retirer.
+    pub fn set_allowed(env: Env, role: Role, who: Address, allowed: bool) {
+        match role {
+            Role::Lp => vault::set_lp_allowed(&env, &who, allowed),
+            Role::Sme => admin::sme_not_implemented(&env),
+        }
+    }
+
+    /// `who` peut-il agir pour ce rôle ? Toujours vrai quand la liste du rôle est désactivée.
+    pub fn is_allowed(env: Env, role: Role, who: Address) -> bool {
+        match role {
+            Role::Lp => vault::is_lp_allowed(&env, &who),
+            Role::Sme => admin::sme_not_implemented(&env),
+        }
+    }
+
+    /// Admin : active (pilote fermé, par défaut) ou désactive la liste blanche du rôle.
+    pub fn set_allowlist_enabled(env: Env, role: Role, enabled: bool) {
+        match role {
+            Role::Lp => vault::set_lp_allowlist_enabled(&env, enabled),
+            Role::Sme => admin::sme_not_implemented(&env),
+        }
+    }
+
+    /// Admin : plafond du notionnel total ouvert (USDC, 7 décimales), `None` = sans plafond.
+    /// Contrôlé à l'ouverture seulement : un règlement n'est jamais bloqué.
+    pub fn set_notional_cap(env: Env, cap: Option<i128>) {
+        vault::set_notional_cap(&env, cap)
+    }
+
+    /// Σ notionnels des couvertures ouvertes, USDC 7 décimales au taux bloqué.
+    pub fn total_notional(env: Env) -> i128 {
+        vault::total_notional(&env)
+    }
+
+    pub fn pilot_limits(env: Env) -> PilotLimits {
+        PilotLimits {
+            lp_allowlist_on: vault::lp_allowlist_on(&env),
+            notional_cap: vault::notional_cap(&env),
+            total_notional: vault::total_notional(&env),
+        }
+    }
+
     // ---- Pricing ----
 
     pub fn quote(env: Env, currency: Symbol, side: Side, notional: i128, duration_secs: u64, cap_bps: u32) -> Quote {
@@ -222,6 +296,7 @@ impl Pool {
         duration_secs: u64,
         cap_bps: u32,
     ) -> u64 {
+        admin::require_not_paused(&env);
         hedge::open(&env, &owner, &supplier, &currency, side, notional, duration_secs, cap_bps)
     }
 
@@ -249,6 +324,60 @@ impl Pool {
     /// Admin, testnet / démo uniquement : ex. 25 920 → une couverture à 90 jours échoit en 300 s.
     pub fn set_time_factor(env: Env, factor: u32) {
         hedge::set_time_factor(&env, factor)
+    }
+
+    // ---- Admin ----
+
+    /// Admin : propose un nouvel admin, qui devra accepter (deux temps).
+    pub fn propose_admin(env: Env, new_admin: Address) {
+        admin::propose_admin(&env, &new_admin)
+    }
+
+    /// Signé par l'admin proposé : il reçoit le rôle, l'ancien perd ses droits.
+    pub fn accept_admin(env: Env) {
+        admin::accept_admin(&env)
+    }
+
+    /// Admin : annule la proposition en cours.
+    pub fn cancel_admin_proposal(env: Env) {
+        admin::cancel_admin_proposal(&env)
+    }
+
+    pub fn get_admin(env: Env) -> Address {
+        admin(&env)
+    }
+
+    pub fn pending_admin(env: Env) -> Option<Address> {
+        admin::pending_admin(&env)
+    }
+
+    /// Admin : pose la clé de garde (distincte de l'admin), qui peut mettre en pause.
+    pub fn set_guardian(env: Env, guardian: Address) {
+        admin::set_guardian(&env, &guardian)
+    }
+
+    pub fn guardian(env: Env) -> Option<Address> {
+        admin::guardian(&env)
+    }
+
+    /// Garde ou admin (signature de `caller`) : bloque dépôts et ouvertures de couverture.
+    /// Retraits, règlement, clôture anticipée et lectures restent possibles.
+    pub fn pause(env: Env, caller: Address) {
+        admin::pause(&env, &caller)
+    }
+
+    /// Admin seul.
+    pub fn unpause(env: Env) {
+        admin::unpause(&env)
+    }
+
+    pub fn paused(env: Env) -> bool {
+        admin::paused(&env)
+    }
+
+    /// Admin : remplace le code WASM (hash déjà téléversé), adresse et données inchangées.
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
+        admin::upgrade(&env, &new_wasm_hash)
     }
 }
 

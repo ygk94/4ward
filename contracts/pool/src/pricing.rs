@@ -8,7 +8,31 @@
 //! Erreurs : `PricingError`, codes 300+ (Vault 100+, Paiement 200+). Les textes de panic! sont effacés dans
 //! le WASM : seul un code d'erreur permet au front d'afficher la bonne raison d'un refus.
 use crate::{DataKey, Quote, Side};
-use soroban_sdk::{contractclient, contracterror, contracttype, panic_with_error, Address, Env, Symbol};
+use soroban_sdk::{
+    contractclient, contracterror, contractevent, contracttype, panic_with_error, Address, Env, Symbol,
+};
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RateSet {
+    #[topic]
+    pub currency: Symbol,
+    pub rate_bps: u32,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MinCapSet {
+    #[topic]
+    pub currency: Symbol,
+    pub cap_bps: u32,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SpreadSet {
+    pub spread_bps: u32,
+}
 
 /// Erreurs de Pricing. Codes 300+ pour ne pas entrer en collision avec Vault (100+) / Paiement (200+).
 /// Ne jamais réutiliser un numéro : ajouter à la suite.
@@ -43,14 +67,39 @@ pub enum PricingError {
     /// Pas de cours de fixing à l'échéance : aucun prix à cette date (ou échéance trop ancienne
     /// pour l'historique de l'oracle, ~12 h sur Reflector testnet).
     NoFixing = 312,
+    /// Dépassement de capacité dans un calcul de prix (`to_usdc`, `margin_for`, taux forward) :
+    /// montant ou cours hors de toute plage réaliste. Un code plutôt qu'une panique sans numéro.
+    Overflow = 313,
 }
 
 // ---- client SEP-40 (Reflector FX et mock-oracle) ----
 
-/// Âge maximum accepté pour un prix, en secondes.
-/// Reflector FX publie toutes les 300 s (`resolution`) ; on tolère 3 périodes manquées.
-/// Au-delà, le prix est jugé périmé et toute cotation est refusée (un prix faux = arbitrage contre le pool).
-pub const MAX_PRICE_AGE_SECS: u64 = 900;
+/// Âge maximum accepté pour le dernier prix (`spot` : devis, ouverture, clôture anticipée), en secondes.
+/// Reflector FX publie toutes les 300 s (`resolution`) : un prix a normalement moins de 330 s environ.
+/// 600 s tolère une période manquée. Au-delà, le prix est jugé périmé et toute cotation est refusée
+/// (un prix en retard sur le marché = arbitrage contre le pool).
+pub const MAX_PRICE_AGE_SECS: u64 = 600;
+
+/// Âge maximum, à l'échéance, du cours en vigueur à l'échéance (`read_fixing`) : 3 périodes Reflector.
+/// Au-delà, on prend le premier cours publié après l'échéance, dans `FIXING_GRACE_SECS`.
+pub const MAX_FIXING_AGE_SECS: u64 = 900;
+
+/// Fenêtre de rattrapage après l'échéance : passé ce délai sans cours utilisable, le cours est constaté absent.
+pub const FIXING_GRACE_SECS: u64 = 3_600;
+
+/// Pas de recherche du premier cours après l'échéance : la résolution de Reflector.
+const FIXING_STEP_SECS: u64 = 300;
+
+/// TTL d'un cours figé : comme une couverture (30 jours / 120 jours, en ledgers de ~5 s).
+const FIXING_TTL_THRESHOLD: u32 = 30 * 17_280;
+const FIXING_TTL_EXTEND_TO: u32 = 120 * 17_280;
+
+/// Clés de stockage de Pricing, à part de `DataKey` (lib.rs inchangé).
+#[contracttype]
+enum PricingKey {
+    /// Cours de règlement figé d'une couverture (persistent, écrit une seule fois).
+    Fixing(u64),
+}
 
 /// Année de 365 jours (convention ACT/365 simplifiée) : t = durée / SECS_PER_YEAR.
 /// C'est aussi la durée maximale d'une couverture.
@@ -86,7 +135,7 @@ pub struct PriceData {
 }
 
 /// Sous-ensemble de l'interface SEP-40 dont le pool a besoin.
-/// Hypothèse documentée, non vérifiée à chaque appel : `decimals()` vaut 14 sur Reflector FX comme sur le mock.
+/// `decimals()` doit valoir 14 : vérifié au constructeur (`admin::check_oracle_decimals`).
 #[contractclient(name = "OracleClient")]
 #[allow(dead_code)] // le trait n'existe que pour engendrer `OracleClient`
 pub trait Sep40Oracle {
@@ -115,8 +164,8 @@ pub(crate) fn quote(
     env.storage().instance().extend_ttl(INSTANCE_TTL_THRESHOLD, INSTANCE_TTL_EXTEND_TO);
     let spot = spot(env, currency);
     let forward_rate = forward_rate(env, currency, side, duration_secs);
-    let usdc_cost = to_usdc(notional, forward_rate);
-    let margin = margin_for(usdc_cost, cap_bps);
+    let usdc_cost = to_usdc(env, notional, forward_rate);
+    let margin = margin_for(env, usdc_cost, cap_bps);
     Quote { spot, forward_rate, usdc_cost, margin }
 }
 
@@ -127,6 +176,7 @@ pub(crate) fn set_rate(env: &Env, currency: &Symbol, rate_bps: u32) {
         panic_with_error!(env, PricingError::RateTooHigh);
     }
     env.storage().instance().set(&DataKey::Rate(currency.clone()), &rate_bps);
+    RateSet { currency: currency.clone(), rate_bps }.publish(env);
 }
 
 /// Ouvre une devise avec son plafond minimum, en bps (liste blanche : sans minimum, pas de cotation).
@@ -136,6 +186,7 @@ pub(crate) fn set_min_cap(env: &Env, currency: &Symbol, cap_bps: u32) {
         panic_with_error!(env, PricingError::CapOutOfRange);
     }
     env.storage().instance().set(&DataKey::MinCap(currency.clone()), &cap_bps);
+    MinCapSet { currency: currency.clone(), cap_bps }.publish(env);
 }
 
 pub(crate) fn set_spread(env: &Env, spread_bps: u32) {
@@ -144,6 +195,7 @@ pub(crate) fn set_spread(env: &Env, spread_bps: u32) {
         panic_with_error!(env, PricingError::SpreadTooHigh);
     }
     env.storage().instance().set(&DataKey::SpreadBps, &spread_bps);
+    SpreadSet { spread_bps }.publish(env);
 }
 
 // ---- appelé par hedge.rs (interface Paiement → Pricing) ----
@@ -167,24 +219,121 @@ pub(crate) fn spot(env: &Env, currency: &Symbol) -> i128 {
     data.price
 }
 
-/// Cours de règlement : le prix en vigueur **à l'échéance**, pas au moment où `settle` est appelé.
-/// Sans ça, celui qui règle choisit son moment (option gratuite contre le pool ou contre la PME), et un
-/// `set_price` posé après l'échéance changerait le règlement. USD par unité de devise, 14 décimales.
-/// Panique `NoFixing` si l'oracle n'a pas de prix à cette date, `InvalidPrice` si prix ≤ 0, `StalePrice`
-/// si le dernier prix avant l'échéance a plus de `MAX_PRICE_AGE_SECS` (oracle non mis à jour).
-/// Appelée par `hedge::settle` avec l'échéance réelle (`hedge.maturity`).
-pub(crate) fn fixing(env: &Env, currency: &Symbol, maturity: u64) -> i128 {
+// ---- cours d'échéance (lot B1) ----
+
+/// Lecture du cours d'échéance : trois issues.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum FixingRead {
+    /// Cours de règlement trouvé (USD par unité, 14 décimales).
+    Found(i128),
+    /// Aucun cours utilisable pour l'instant, mais la fenêtre `FIXING_GRACE_SECS` n'est pas écoulée.
+    Pending,
+    /// Aucun cours utilisable et la fenêtre est écoulée : constat d'absence (futur `settle_fallback`).
+    Missing,
+}
+
+/// Lecture seule (rien n'est écrit), dans l'ordre :
+/// 1. le cours en vigueur à l'échéance, s'il est positif et a au plus `MAX_FIXING_AGE_SECS` à l'échéance ;
+/// 2. sinon le premier cours publié dans ]maturity, maturity + `FIXING_GRACE_SECS`], cherché par pas de
+///    `FIXING_STEP_SECS` (exact sur Reflector, aligné sur 300 s ; sur le mock, deux prix à moins de 300 s
+///    d'écart peuvent faire sauter le plus ancien, défaut accepté pour la démo) ;
+/// 3. sinon `Pending` tant que `now < maturity + FIXING_GRACE_SECS`, puis `Missing`.
+/// Un cours ≤ 0 est traité comme inutilisable (on continue de chercher) : un mauvais cours ne bloque pas le règlement.
+pub(crate) fn read_fixing(env: &Env, currency: &Symbol, maturity: u64) -> FixingRead {
     let oracle: Address = env.storage().instance().get(&DataKey::Oracle).unwrap();
-    let data = OracleClient::new(env, &oracle)
-        .price(&Asset::Other(currency.clone()), &maturity)
-        .unwrap_or_else(|| panic_with_error!(env, PricingError::NoFixing));
-    if data.price <= 0 {
-        panic_with_error!(env, PricingError::InvalidPrice);
+    let client = OracleClient::new(env, &oracle);
+    let asset = Asset::Other(currency.clone());
+    let now = env.ledger().timestamp();
+    let deadline = maturity.saturating_add(FIXING_GRACE_SECS);
+
+    if maturity <= now {
+        if let Some(d) = client.price(&asset, &maturity) {
+            if d.price > 0 && d.timestamp <= maturity && maturity - d.timestamp <= MAX_FIXING_AGE_SECS {
+                return FixingRead::Found(d.price);
+            }
+        }
     }
-    if maturity.saturating_sub(data.timestamp) > MAX_PRICE_AGE_SECS {
-        panic_with_error!(env, PricingError::StalePrice);
+    let mut ts = maturity;
+    while ts < deadline {
+        ts = ts.saturating_add(FIXING_STEP_SECS).min(deadline);
+        if ts > now {
+            break;
+        }
+        if let Some(d) = client.price(&asset, &ts) {
+            if d.price > 0 && d.timestamp > maturity && d.timestamp <= deadline {
+                return FixingRead::Found(d.price);
+            }
+        }
     }
-    data.price
+    if now < deadline {
+        FixingRead::Pending
+    } else {
+        FixingRead::Missing
+    }
+}
+
+/// Cours figé d'une couverture, s'il existe.
+pub(crate) fn locked_fixing(env: &Env, hedge_id: u64) -> Option<i128> {
+    env.storage().persistent().get(&PricingKey::Fixing(hedge_id))
+}
+
+/// Fige le cours d'une couverture. Écrit une seule fois : sans effet si un cours est déjà figé.
+fn lock_fixing(env: &Env, hedge_id: u64, price: i128) {
+    let key = PricingKey::Fixing(hedge_id);
+    let s = env.storage().persistent();
+    if s.has(&key) {
+        return;
+    }
+    s.set(&key, &price);
+    s.extend_ttl(&key, FIXING_TTL_THRESHOLD, FIXING_TTL_EXTEND_TO);
+}
+
+/// Fige le cours d'échéance d'une couverture **sans la régler**, et le renvoie.
+///
+/// Reflector ne garde qu'environ 24 h d'historique : sans appel de `record_fixing` (ou de `settle`) dans les
+/// 24 h qui suivent l'échéance, le cours est perdu et la couverture n'est plus réglable que par le futur
+/// `settle_fallback` (Clément). Le robot doit donc l'appeler peu après chaque échéance.
+///
+/// Déjà figé : renvoie le cours figé, sans rien changer ni paniquer (appel répétable).
+/// Pas encore de cours (`Pending`) ou plus de cours (`Missing`) : panique `NoFixing` (312).
+#[allow(dead_code)] // exposée par Clément dans lib.rs
+pub(crate) fn record_fixing(env: &Env, hedge_id: u64, currency: &Symbol, maturity: u64) -> i128 {
+    if let Some(price) = locked_fixing(env, hedge_id) {
+        return price;
+    }
+    match read_fixing(env, currency, maturity) {
+        FixingRead::Found(price) => {
+            lock_fixing(env, hedge_id, price);
+            price
+        }
+        FixingRead::Pending | FixingRead::Missing => panic_with_error!(env, PricingError::NoFixing),
+    }
+}
+
+/// Cours de règlement : le prix en vigueur **à l'échéance** (ou juste après), pas au moment où `settle` est
+/// appelé, sinon celui qui règle choisit son moment.
+/// - Cours figé par `record_fixing` : il est consommé (l'entrée est supprimée) et renvoyé.
+/// - Sinon `read_fixing`, sans rien écrire : la couverture est réglée dans la même transaction.
+/// - `Pending` ou `Missing` : panique `NoFixing` (312) ; la transaction est annulée, la couverture reste ouverte.
+///
+/// Sans appel de `record_fixing` (ou de `settle`) dans les 24 h après l'échéance, Reflector a oublié
+/// l'historique : la couverture n'est alors réglable que par le futur `settle_fallback` (Clément).
+/// Appelée par `hedge::settle` avec l'échéance réelle (`hedge.maturity`).
+pub(crate) fn settlement_fixing(env: &Env, hedge_id: u64, currency: &Symbol, maturity: u64) -> i128 {
+    if let Some(price) = locked_fixing(env, hedge_id) {
+        env.storage().persistent().remove(&PricingKey::Fixing(hedge_id));
+        return price;
+    }
+    match read_fixing(env, currency, maturity) {
+        FixingRead::Found(price) => price,
+        FixingRead::Pending | FixingRead::Missing => panic_with_error!(env, PricingError::NoFixing),
+    }
+}
+
+/// Constat d'absence pour le futur `settle_fallback` : aucun cours figé et lecture `Missing`.
+#[allow(dead_code)] // branché par `settle_fallback` (Clément)
+pub(crate) fn fixing_missing(env: &Env, hedge_id: u64, currency: &Symbol, maturity: u64) -> bool {
+    locked_fixing(env, hedge_id).is_none() && read_fixing(env, currency, maturity) == FixingRead::Missing
 }
 
 /// Taux bloqué à l'ouverture, spread inclus (USD par unité, 14 décimales).
@@ -195,7 +344,8 @@ pub(crate) fn fixing(env: &Env, currency: &Symbol, maturity: u64) -> i128 {
 ///   F   = S × num / den
 /// Overflow : S ≈ 5,5e12 × num ≈ 3,2e11 → 1,8e24. Pire cas (S = 1e14, durée 1 an, taux 100 %) :
 /// S × num = 1e14 × 6,3e11 = 6,3e25. Le spread ensuite : F ≤ 2 × S = 2e14, × (BPS + spread) ≤ 10_500
-/// → 2,1e18. Tout reste très loin de i128::MAX ≈ 1,7e38.
+/// → 2,1e18. Tout reste très loin de i128::MAX ≈ 1,7e38 avec un cours réaliste ; les produits sont
+/// quand même vérifiés (`Overflow`, 313), car le cours vient d'un contrat externe.
 ///
 /// Arrondis : le spread arrondit du côté du pool ; la troncature de F (floor) peut avantager
 /// l'acheteur de moins de 1e-14 USD par unité, sans effet mesurable. Le spread arrondit
@@ -215,12 +365,12 @@ pub(crate) fn forward_rate(env: &Env, currency: &Symbol, side: Side, duration_se
     let duration = duration_secs as i128;
     let num = year + r_usd * duration;
     let den = year + r_dev * duration;
-    let f = mul_div_floor(s, num, den);
+    let f = mul_div_floor(env, s, num, den);
 
     let spread = spread as i128;
     match side {
-        Side::BuyCurrency => mul_div_ceil(f, crate::BPS + spread, crate::BPS),
-        Side::SellCurrency => mul_div_floor(f, crate::BPS - spread, crate::BPS),
+        Side::BuyCurrency => mul_div_ceil(env, f, crate::BPS + spread, crate::BPS),
+        Side::SellCurrency => mul_div_floor(env, f, crate::BPS - spread, crate::BPS),
     }
 }
 
@@ -235,13 +385,19 @@ fn rate(env: &Env, currency: &Symbol) -> i128 {
 }
 
 /// a × b / c arrondi vers le bas. Valeurs positives ; multiplier avant de diviser.
-fn mul_div_floor(a: i128, b: i128, c: i128) -> i128 {
-    a * b / c
+/// `Overflow` (313) si a × b dépasse i128, au lieu d'une panique sans code.
+fn mul_div_floor(env: &Env, a: i128, b: i128, c: i128) -> i128 {
+    a.checked_mul(b)
+        .and_then(|p| p.checked_div(c))
+        .unwrap_or_else(|| panic_with_error!(env, PricingError::Overflow))
 }
 
-/// a × b / c arrondi vers le haut. Valeurs positives.
-fn mul_div_ceil(a: i128, b: i128, c: i128) -> i128 {
-    (a * b + c - 1) / c
+/// a × b / c arrondi vers le haut. Valeurs positives. `Overflow` (313) comme `mul_div_floor`.
+fn mul_div_ceil(env: &Env, a: i128, b: i128, c: i128) -> i128 {
+    a.checked_mul(b)
+        .and_then(|p| p.checked_add(c - 1))
+        .and_then(|p| p.checked_div(c))
+        .unwrap_or_else(|| panic_with_error!(env, PricingError::Overflow))
 }
 
 /// Panique si la devise n'est pas ouverte (pas de plafond minimum = hors liste blanche), si `cap_bps`
@@ -262,11 +418,13 @@ pub(crate) fn check_cap(env: &Env, currency: &Symbol, cap_bps: u32) {
 
 /// Marge USDC (7 décimales) pour un plafond : usdc_cost × cap_bps / BPS, arrondi vers le haut (côté pool).
 /// `hedge::open` doit appeler cette fonction : la marge déposée est alors identique à celle affichée par `quote`.
-pub(crate) fn margin_for(usdc_cost: i128, cap_bps: u32) -> i128 {
-    mul_div_ceil(usdc_cost, cap_bps as i128, crate::BPS)
+/// `Overflow` (313) si le produit dépasse i128.
+pub(crate) fn margin_for(env: &Env, usdc_cost: i128, cap_bps: u32) -> i128 {
+    mul_div_ceil(env, usdc_cost, cap_bps as i128, crate::BPS)
 }
 
-/// Conversion devise → USDC : notional (7 déc.) × rate (14 déc.) → USDC (7 déc.).
-pub(crate) fn to_usdc(notional: i128, rate: i128) -> i128 {
-    notional * rate / 10i128.pow(crate::PRICE_DECIMALS)
+/// Conversion devise → USDC : notional (7 déc.) × rate (14 déc.) → USDC (7 déc.), arrondi vers le bas.
+/// `Overflow` (313) si notional × rate dépasse i128.
+pub(crate) fn to_usdc(env: &Env, notional: i128, rate: i128) -> i128 {
+    mul_div_floor(env, notional, rate, 10i128.pow(crate::PRICE_DECIMALS))
 }

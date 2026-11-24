@@ -35,6 +35,8 @@ const DECIMALS: u32 = 14;
 const RESOLUTION: u32 = 300;
 /// Taille de l'historique par actif : largement assez pour une démo (un prix toutes les quelques minutes).
 const MAX_HISTORY: u32 = 64;
+/// Profondeur de l'historique de Reflector FX : 24 h.
+const HISTORY_SECS: u64 = 86_400;
 
 #[contract]
 pub struct MockOracle;
@@ -95,8 +97,10 @@ impl MockOracle {
     /// Prix en vigueur à `timestamp` : le dernier posé à cet instant ou avant (SEP-40 `price`).
     /// `None` si `timestamp` est dans le futur ou avant le premier prix, comme Reflector
     /// (qui renvoie le cours de la période de 300 s contenant `timestamp`).
+    /// Comme Reflector, l'historique ne couvre que 24 h : `None` pour une date de plus de `HISTORY_SECS`.
     pub fn price(env: Env, asset: Asset, timestamp: u64) -> Option<PriceData> {
-        if timestamp > env.ledger().timestamp() {
+        let now = env.ledger().timestamp();
+        if timestamp > now || now - timestamp > HISTORY_SECS {
             return None;
         }
         let history: Vec<PriceData> = env.storage().persistent().get(&DataKey::History(asset))?;
