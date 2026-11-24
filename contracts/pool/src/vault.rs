@@ -917,6 +917,23 @@ pub(crate) fn basket_max_loss(legs: &[Leg]) -> i128 {
     worst.max(0) + legs.len() as i128
 }
 
+// Filet de tests du vault (phase 1), un fichier par angle : voir `vault_net/README.md`.
+#[cfg(test)]
+#[path = "vault_net/attack.rs"]
+mod net_attack;
+#[cfg(test)]
+#[path = "vault_net/world.rs"]
+mod net_world;
+#[cfg(test)]
+#[path = "vault_net/platform.rs"]
+mod net_platform;
+#[cfg(test)]
+#[path = "vault_net/mutants.rs"]
+mod net_mutants;
+#[cfg(test)]
+#[path = "vault_net/props.rs"]
+mod net_props;
+
 #[cfg(test)]
 mod tests {
     use super::*;
