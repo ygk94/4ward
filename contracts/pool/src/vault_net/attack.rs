@@ -39,6 +39,7 @@ fn net() -> Net {
     let usdc = env.register_stellar_asset_contract_v2(admin.clone()).address();
     let oracle = env.register(mock_oracle::MockOracle, (&admin,));
     let pool = env.register(Pool, (&admin, &usdc, &oracle, &50u32));
+    PoolClient::new(&env, &pool).set_senior_deposits_open(&true); // fermés par défaut (B5)
     Net { env, pool, usdc }
 }
 
@@ -179,21 +180,9 @@ fn inflation_by_exit_discount(n: &Net) -> Outcome {
     Outcome { victim_loss: 999 * USDC - victim_back, attacker_gain: n.usdc_of(&attacker) - 1_000 * USDC }
 }
 
-/// CONSTAT (vert aujourd'hui, à supprimer avec B6) : la victime reçoit 1 part pour 999 USDC et
-/// en perd 249,5 ; l'attaquant les empoche exactement.
-#[test]
-fn constat_inflation_by_exit_discount_victim_loses_249_5() {
-    let n = net();
-    let o = inflation_by_exit_discount(&n);
-    // Attaquant : 4 999 999 999 au retrait, puis 7 495 000 001 pour sa dernière part.
-    assert_eq!(o.victim_loss, 2_495_000_000);
-    assert_eq!(o.attacker_gain, 2_495_000_000);
-}
-
 /// ROUGE (B6) : après le plancher de parts, le retrait de l'attaquant est refusé (116) et la
 /// victime récupère son dépôt à 1 stroop près.
 #[test]
-#[ignore = "ROUGE : passe après B6 (plancher de parts junior)"]
 fn inflation_by_exit_discount_victim_loses_at_most_one_stroop() {
     let n = net();
     let o = inflation_by_exit_discount(&n);
@@ -227,19 +216,8 @@ fn inflation_two_addresses(n: &Net) -> Outcome {
     }
 }
 
-/// CONSTAT (à supprimer avec B6).
-#[test]
-fn constat_inflation_two_addresses_victim_loses_249_5() {
-    let n = net();
-    let o = inflation_two_addresses(&n);
-    // A reçoit 5 000 000 000 (la moitié de son capital), B garde 1 part qui vaut alors 5 000 000 001.
-    assert_eq!(o.victim_loss, 2_495_000_000);
-    assert_eq!(o.attacker_gain, 2_495_000_000);
-}
-
 /// ROUGE (B6) : le plancher porte sur le total des parts, pas sur l'adresse.
 #[test]
-#[ignore = "ROUGE : passe après B6 (plancher de parts junior)"]
 fn inflation_two_addresses_victim_loses_at_most_one_stroop() {
     let n = net();
     let o = inflation_two_addresses(&n);
@@ -269,18 +247,8 @@ fn inflation_by_pool_gain(n: &Net) -> Outcome {
     }
 }
 
-/// CONSTAT (à supprimer avec B6) : 1 part pour 399 USDC, la victime en perd 99,5.
-#[test]
-fn constat_inflation_by_pool_gain_victim_loses_99_5() {
-    let n = net();
-    let o = inflation_by_pool_gain(&n);
-    assert_eq!(o.victim_loss, 995_000_000);
-    assert_eq!(o.attacker_gain, 995_000_000);
-}
-
 /// ROUGE (B6).
 #[test]
-#[ignore = "ROUGE : passe après B6 (plancher de parts junior)"]
 fn inflation_by_pool_gain_victim_loses_at_most_one_stroop() {
     let n = net();
     let o = inflation_by_pool_gain(&n);
@@ -412,24 +380,9 @@ fn senior_runs_under_cap(n: &Net) -> (Address, Address, i128) {
     (senior, sme, paid)
 }
 
-/// CONSTAT (à inverser avec B5) : le senior emporte 836 000, T = 164 000 < R = 180 000 ; le
-/// règlement perdant à pleine marge échoue en 103 et la PME ne peut pas être payée.
-#[test]
-#[should_panic(expected = "Error(Contract, #103)")]
-fn constat_senior_exit_under_cap_blocks_losing_settle() {
-    let n = net();
-    let (_, sme, paid) = senior_runs_under_cap(&n);
-    assert_eq!(paid, 836_000 * USDC);
-    assert_eq!(n.t(), 164_000 * USDC);
-    assert_eq!(n.r(), 180_000 * USDC);
-    // 16 000 USDC qui adossaient la couverture sont partis chez le senior.
-    n.close_pool_loses(&sme, 180_000 * USDC, 180_000 * USDC);
-}
-
 /// ROUGE (B5) : le retrait est limité au payable, min(836 000, T − R = 820 000) ; T = R après
 /// le retrait et le règlement perdant passe. Le senior garde une créance de 16 000 non servie.
 #[test]
-#[ignore = "ROUGE : passe après B5 (valeur senior payable plafonnée à T − R)"]
 fn senior_exit_under_cap_is_limited_and_settle_passes() {
     let n = net();
     let (senior, sme, paid) = senior_runs_under_cap(&n);
@@ -444,7 +397,6 @@ fn senior_exit_under_cap_is_limited_and_settle_passes() {
 
 /// ROUGE (B5) : retrait de la moitié des parts sous plafond : la moitié du payable (410 000).
 #[test]
-#[ignore = "ROUGE : passe après B5 (valeur senior payable plafonnée à T − R)"]
 fn half_senior_exit_under_cap_gets_half_of_payable() {
     let n = net();
     n.junior(200_000 * USDC);

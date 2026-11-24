@@ -122,6 +122,7 @@ impl Net {
         let usdc = env.register_stellar_asset_contract_v2(admin.clone()).address();
         let oracle = env.register(MockOracle, (&admin,));
         let pool = env.register(Pool, (&admin, &usdc, &oracle, &50u32));
+        PoolClient::new(&env, &pool).set_senior_deposits_open(&true); // fermés par défaut (B5)
         let c = PoolClient::new(&env, &pool);
         c.set_rate(&Symbol::new(&env, "USD"), &400);
         c.set_rate(&mxn(&env), &700);
@@ -313,16 +314,20 @@ impl Net {
     pub fn deposit(&self, lp: usize, amount: i128) -> Result<String, String> {
         let c = self.client();
         let lp_a = &self.lps[lp];
-        let (j0, s0) = (self.true_junior(), self.junior_shares_total());
+        let (j0, s0, r0) = (self.true_junior(), self.junior_shares_total(), self.r());
         let before = c.lp_shares(lp_a);
         match code(c.try_deposit_lp(lp_a, &amount)) {
             Ok(after) => {
                 let minted = after - before;
                 let (j1, s1) = (self.true_junior(), self.junior_shares_total());
                 let value = mul(minted, j1, s1);
-                // Perte d'arrondi tolérée : une part au prix d'avant, le nombre de parts étant borné
-                // par le plancher (après B6, R > 0 ⇒ parts ≥ plancher), + 10 stroops de marge.
-                let tol = ceil_div(j0, s0.max(FLOOR_SHARES)) + 10;
+                // Perte d'arrondi tolérée : la valeur d'un stroop de part au prix d'avant, + 10 stroops.
+                // Avec R > 0, le nombre de parts est borné par le plancher (B6) : une poussière de
+                // parts adossée à du capital réservé (l'inflation) dépasse donc la tolérance. Avec
+                // R = 0, un LP peut légitimement descendre sous le plancher sans changer le prix de
+                // la part : seule compte la valeur d'une part, qui peut être élevée après des gains.
+                let parts = if r0 > 0 { s0.max(FLOOR_SHARES) } else { s0.max(1) };
+                let tol = ceil_div(j0, parts) + 10;
                 if self.on(DILUTION) && amount - value > tol {
                     return Err(format!(
                         "D1 dépôt dilué : {amount} déposés → {minted} parts valant {value} (perte {} > {tol})",
@@ -729,7 +734,6 @@ fn net_random_sequences_today_invariants() {
 
 /// ROUGE (B6) : suites junior seulement, opérations ciblées, invariants B6.
 #[test]
-#[ignore = "ROUGE jusqu'à B6 (plancher de parts junior)"]
 fn net_random_sequences_b6() {
     let cfg = Config { name: "vault::net_props::net_random_sequences_b6", seed: SEED, suites: 100, steps: 40, checks: B6, senior: false, targeted: true };
     if let Err(e) = campaign(cfg) {
@@ -739,7 +743,6 @@ fn net_random_sequences_b6() {
 
 /// ROUGE (B5) : seniors et temps long, invariants B5.
 #[test]
-#[ignore = "ROUGE jusqu'à B5 (intérêts Safe plafonnés)"]
 fn net_random_sequences_b5() {
     let cfg = Config { name: "vault::net_props::net_random_sequences_b5", seed: SEED, suites: 100, steps: 40, checks: B5, senior: true, targeted: true };
     if let Err(e) = campaign(cfg) {
@@ -749,7 +752,6 @@ fn net_random_sequences_b5() {
 
 /// ROUGE (B5 + B6) : la campagne complète, cible finale.
 #[test]
-#[ignore = "ROUGE jusqu'à B5 et B6"]
 fn net_random_sequences_all() {
     let cfg = Config { name: "vault::net_props::net_random_sequences_all", seed: SEED, suites: 100, steps: 40, checks: ALL, senior: true, targeted: true };
     if let Err(e) = campaign(cfg) {
@@ -763,7 +765,6 @@ fn net_random_sequences_all() {
 /// retrait « tout sauf 1 stroop » ; sans I11 (masque `DILUTION`), D1 sur le dépôt de 999 USDC.
 /// Après B6 : le retrait est refusé en 116 (code accepté par `withdraw`) et tout passe.
 #[test]
-#[ignore = "ROUGE jusqu'à B6 (plancher de parts junior)"]
 fn net_defect1_inflation_by_exit_discount() {
     defect1(ALL);
 }
@@ -791,7 +792,6 @@ pub(super) fn defect1(checks: Checks) {
 /// sans WS (masque `NO_103`), le règlement échoue en 103. Après B5 : retrait limité à T − R,
 /// règlement accepté, T = R puis T ≥ 0.
 #[test]
-#[ignore = "ROUGE jusqu'à B5 (intérêts Safe plafonnés)"]
 fn net_defect2_senior_withdraw_then_losing_settle() {
     defect2(ALL);
 }

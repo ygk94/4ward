@@ -198,8 +198,26 @@ impl Pool {
     }
 
     /// Valeur des deux tranches (senior + junior = total_assets) et prix d'une part senior.
+    /// `senior` est la créance senior (ce qui est dû) ; ce qui peut sortir aujourd'hui est
+    /// `senior` − `senior_arrears()`.
     pub fn tranche_values(env: Env) -> vault::TrancheValues {
         vault::tranche_values(&env)
+    }
+
+    /// Intérêts senior en retard de service (USDC, 7 décimales) : la part de la créance senior que
+    /// le junior ne peut pas payer sans entamer le capital réservé. 0 en temps normal.
+    pub fn senior_arrears(env: Env) -> i128 {
+        vault::senior_arrears(&env)
+    }
+
+    /// Dépôts senior ouverts ? Fermés par défaut.
+    pub fn senior_deposits_open(env: Env) -> bool {
+        vault::senior_deposits_open(&env)
+    }
+
+    /// Admin : ouvre ou ferme les dépôts senior. Les retraits senior restent toujours possibles.
+    pub fn set_senior_deposits_open(env: Env, open: bool) {
+        vault::set_senior_deposits_open(&env, open)
     }
 
     /// Exposition du pool sur une devise (couvertures ouvertes) : volumes acheteur / vendeur

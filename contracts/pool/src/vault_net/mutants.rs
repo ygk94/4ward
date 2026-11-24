@@ -22,6 +22,7 @@ fn net() -> Net {
     let usdc = env.register_stellar_asset_contract_v2(admin.clone()).address();
     let oracle = env.register(mock_oracle::MockOracle, (&admin,));
     let pool = env.register(Pool, (&admin, &usdc, &oracle, &50u32));
+    PoolClient::new(&env, &pool).set_senior_deposits_open(&true); // fermés par défaut (B5)
     Net { env, pool, usdc }
 }
 
@@ -138,7 +139,7 @@ fn withdraw_senior_rounds_down_and_equals_balance() {
     s.advance(1_001);
     let shares = s.vault(|env| senior_shares(env, &a));
     let total = s.vault(senior_total_shares);
-    let value = s.vault(senior_value);
+    let value = s.vault(senior_payable);
     // Contrôle du scénario : il y a bien une fraction à arrondir.
     assert_ne!((shares * value) % total, 0, "scénario à revoir : division exacte");
     let before = s.c().senior_balance(&a);
@@ -288,7 +289,6 @@ fn senior_error_branches() {
 /// Défaut 1 (B6) : inflation par la décote de sortie. Robuste au correctif : soit le retrait
 /// qui laisse la poussière est refusé (116), soit la victime perd au plus 10 000 stroops (arrondi).
 #[test]
-#[ignore = "ROUGE jusqu'à B6 : plancher de parts junior"]
 fn exit_discount_inflation_is_blocked() {
     let s = net();
     let attacker = s.junior(1_000 * USDC);
@@ -310,7 +310,6 @@ fn exit_discount_inflation_is_blocked() {
 /// Défaut 2 (B5) : intérêts senior qui font passer le junior sous R ; le retrait senior total
 /// laisse T < R et le règlement perdant échoue en 103. Après B5 : retrait limité à 810 000.
 #[test]
-#[ignore = "ROUGE jusqu'à B5 : valeur senior payable plafonnée à T − R"]
 fn senior_exit_under_cap_keeps_losing_settlement_payable() {
     let s = net();
     s.junior(200_000 * USDC);
@@ -329,7 +328,6 @@ fn senior_exit_under_cap_keeps_losing_settlement_payable() {
 
 /// B5 : capacité jamais négative (aujourd'hui −26 000 dans ce scénario).
 #[test]
-#[ignore = "ROUGE jusqu'à B5 : capacity() ≥ 0"]
 fn capacity_never_negative_under_senior_cap() {
     let s = net();
     s.junior(200_000 * USDC);
@@ -341,7 +339,6 @@ fn capacity_never_negative_under_senior_cap() {
 
 /// B6 : le plancher passe AVANT le calcul du montant (sinon 107 masque 116).
 #[test]
-#[ignore = "ROUGE jusqu'à B6 : code 116 avant 107"]
 fn full_exit_with_all_capital_reserved_reports_116() {
     let s = net();
     let lp = s.junior(100 * USDC);
@@ -352,7 +349,6 @@ fn full_exit_with_all_capital_reserved_reports_116() {
 
 /// B6 : le plancher porte sur la poussière (1 stroop restant), pas seulement sur 0 part.
 #[test]
-#[ignore = "ROUGE jusqu'à B6 : poussière sous le plancher refusée"]
 fn leaving_one_stroop_of_shares_with_reserve_reports_116() {
     let s = net();
     let lp = s.junior(1_000 * USDC);
@@ -450,7 +446,7 @@ fn senior_balance_catches_up_after_pool_gain() {
 /// B5, provision d'intérêts (mutant « provision oubliée ») : capacité saturée 120 jours puis
 /// règlement perdant à pleine marge ; le senior qui sort est servi en entier (créance).
 #[test]
-#[ignore = "ROUGE jusqu'à B5 : provision de 120 jours d'intérêts dans la capacité"]
+#[ignore = "Décision D1 (docs/decisions-contrat.md) : pas de provision d'intérêts dans la capacité pour l'instant"]
 fn senior_served_in_full_after_120_days_saturated() {
     let s = net();
     s.junior(200_000 * USDC);

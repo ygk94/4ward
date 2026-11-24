@@ -12,24 +12,24 @@
 
 ## Statuts
 
-- **VERT** : passe aujourd'hui et doit continuer.
-- **CONSTAT** : passe aujourd'hui parce qu'il fige la perte exacte d'un défaut. À supprimer avec le correctif (il deviendra rouge). Noms commençant par `constat_`.
-- **ROUGE** : `#[ignore = "ROUGE …"]`, échoue aujourd'hui à cause d'un défaut connu, doit passer après le lot indiqué. Retirer le `#[ignore]` avec le correctif.
+- **VERT** : passe et doit continuer.
+- **CONSTAT** : passe parce qu'il fige la perte exacte d'un défaut encore présent. À supprimer avec le correctif. Noms commençant par `constat_`.
+- **ROUGE** : `#[ignore = "…"]`, échoue à cause d'un défaut connu ; retirer le `#[ignore]` avec le correctif.
 - **FUTUR** : dépend d'un lot non écrit. Dans `world.rs`, sous `#[cfg(any())]` (jamais compilé) ; ailleurs, `#[ignore = "FUTUR …"]`. Les noms de fonctions sont tirés des plans, à confirmer.
 
-État au 24/11/2026 : `cargo test -p pool` donne 267 réussis, 22 ignorés ; `cargo test -p pool -- --ignored` : les 22 échouent, comme prévu.
+État au 24/11/2026, après B5 et B6 : `cargo test -p pool` donne 283 réussis, 3 ignorés. Les constats de B5 et B6 ont été supprimés et leurs tests rouges réactivés.
 
-| Lot | Tests ROUGE à réactiver |
+| Test encore ignoré | Pourquoi |
 |---|---|
-| B6 | `attack` : `inflation_*_at_most_one_stroop` (×3) ; `mutants` : `exit_discount_inflation_is_blocked`, `full_exit_with_all_capital_reserved_reports_116`, `leaving_one_stroop_of_shares_with_reserve_reports_116` ; `world` : `r_inflation_by_exit_discount`, `r_last_lp_with_hedge_without_fixing` ; `props` : `net_defect1_*`, `net_random_sequences_b6` |
-| B5 | `attack` : `senior_exit_under_cap_is_limited_and_settle_passes`, `half_senior_exit_under_cap_gets_half_of_payable` ; `mutants` : `capacity_never_negative_under_senior_cap`, `senior_exit_under_cap_keeps_losing_settlement_payable`, `senior_served_in_full_after_120_days_saturated` ; `world` : `r_senior_interest_then_withdraw_blocks_losing_settle` ; `platform` : `e2e_defect2_settle_after_full_senior_exit_never_fails` ; `props` : `net_defect2_*`, `net_random_sequences_b5` |
-| B5 + B6 | `props` : `net_random_sequences_all` |
-| B3 (Lancelot) | `attack` : `deposit_refused_between_maturity_and_settle` |
-| B9, côté couverture (Clément) | `platform` : `ttl_120_day_hedge_entries_live_until_settlement_deadline` |
+| `attack::deposit_refused_between_maturity_and_settle` | FUTUR, lot B3 (Lancelot). Son constat `constat_deposit_between_maturity_and_settle_captures_half_the_gain` est à supprimer en même temps |
+| `platform::ttl_120_day_hedge_entries_live_until_settlement_deadline` | Moitié couverture de B9 (Clément) : durée de conservation alignée sur l'échéance |
+| `mutants::senior_served_in_full_after_120_days_saturated` | Décision D1 (`docs/decisions-contrat.md`) : pas de provision d'intérêts dans la capacité pour l'instant |
+
+Constats encore actifs, à supprimer avec leur lot : `platform::transfer_settle_to_frozen_owner_reverts_and_keeps_reserve` (B4), `platform::events_senior_interest_has_no_event_today` (événement d'intérêts senior, non prévu).
 
 ## Codes d'erreur supposés
 
-116 plancher de parts (B6), 117 retrait senior sous le réservé (B5, garde), 118 intérêts senior en retard (B5), 119 dépôts Safe fermés (B5), 113 refus des dépôts tant qu'une couverture échue attend (B3). Ce sont des constantes en tête de chaque fichier : à remplacer par les variantes de `VaultError` une fois écrites. Le 113 est encore ambigu entre la note de Lancelot (B3) et le commentaire de `vault.rs` (retrait senior).
+`VaultError` : 116 `LastShareLocked` (B6), 117 `SeniorWithdrawBelowReserved` (B5, garde-fou), 118 `SeniorArrears` (B5), 119 `SeniorDepositsClosed` (B5). Le 113 reste réservé au refus des dépôts de B3 (commentaire de `VaultError` aligné sur la note de Lancelot). Certains fichiers gardent ces numéros en constantes locales.
 
 ## Rejouer une suite aléatoire
 
@@ -41,8 +41,9 @@ NET_SEED=0x5eed2026 NET_CHECKS=1f NET_SUITE=1 cargo test -p pool vault::net_prop
 
 `NET_SUITES` et `NET_STEPS` allongent une campagne (essai de nuit). La campagne verte par défaut (100 suites × 40 pas) prend environ 17 s en debug.
 
-## Ce que le filet suppose des correctifs
+## Ce que les correctifs font (B5, B6)
 
 - B6 : le plancher porte sur le total des parts junior et se contrôle avant le calcul du montant ; `capacity()` vaut 0 tant que le total des parts est sous le plancher (sinon une couverture peut s'ouvrir sur un pool réduit à la poussière).
 - B5 : la créance senior non plafonnée sert au prix d'entrée junior et au ratio de 20 % ; la valeur plafonnée sert aux retraits senior ; la capacité n'est jamais négative.
-- Des tests existants de `vault::tests` casseront avec les correctifs : deux avec B6 (sorties jusqu'à la dernière part avec une couverture ouverte), une vingtaine avec la provision d'intérêts de B5 (via `assert_tranches` et `tranched()`).
+- Dépôts senior fermés par défaut : chaque aide de test ouvre les dépôts juste après l'enregistrement du pool.
+- Tests de `vault::tests` adaptés : deux sorties totales avec une couverture ouverte (désormais jusqu'au plancher), deux tests de capacité négative (désormais 0), et `assert_tranches` (capacité = max(junior − réservé, 0)).

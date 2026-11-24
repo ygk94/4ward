@@ -34,7 +34,6 @@ const JUNIOR_FLOOR: i128 = 10_000_000;
 const E_LP_NOT_ALLOWED: u32 = 114;
 const E_NOTIONAL_CAP: u32 = 115;
 const E_LAST_SHARE_LOCKED: u32 = 116; // B6
-const E_LOSS_EXCEEDS_CAPITAL: u32 = 103;
 const E_PAUSED: u32 = 400;
 const E_NO_FIXING: u32 = 312;
 
@@ -76,6 +75,7 @@ fn world<'a>() -> World<'a> {
     let usdc_id = env.register_stellar_asset_contract_v2(admin.clone()).address();
     let oracle_id = env.register(MockOracle, (&admin,));
     let pool_id = env.register(Pool, (&admin, &usdc_id, &oracle_id, 0u32));
+    PoolClient::new(&env, &pool_id).set_senior_deposits_open(&true); // fermés par défaut (B5)
     let pool = PoolClient::new(&env, &pool_id);
     pool.set_rate(&Symbol::new(&env, "USD"), &0);
     pool.set_guardian(&guardian);
@@ -526,7 +526,6 @@ fn w_junior_entry_price_uses_uncapped_senior_claim() {
 /// sauf 1 stroop ; le déposant de 999 USDC reçoit 1 part et, après un règlement à plat, retire
 /// 749,5 USDC : perte 249,5. Après B6 : 116, le LP garde le plancher, perte négligeable.
 #[test]
-#[ignore = "ROUGE jusqu'à B6 (plancher de parts junior)"]
 fn r_inflation_by_exit_discount() {
     let w = world_mxn();
     let attacker = w.junior(1_000 * USDC);
@@ -560,7 +559,6 @@ fn r_inflation_by_exit_discount() {
 /// verse 836 000, T = 164 000 < R, et le règlement perdant à pleine marge échoue en 103.
 /// Après B5 : capacité 0, retrait limité au payable 815 000, T = R = 185 000, règlement passé.
 #[test]
-#[ignore = "ROUGE jusqu'à B5 (payable senior plafonné)"]
 fn r_senior_interest_then_withdraw_blocks_losing_settle() {
     let w = world_mxn();
     w.junior(200_000 * USDC);
@@ -581,44 +579,10 @@ fn r_senior_interest_then_withdraw_blocks_losing_settle() {
     assert_eq!(w.pool.total_assets(), 0);
 }
 
-/// Défaut 2 tel qu'il est aujourd'hui (preuve que le ROUGE échoue pour la bonne raison).
-/// VERT sur le code actuel, À SUPPRIMER avec B5.
-#[test]
-fn constat_defect_2_today() {
-    let w = world_mxn();
-    w.junior(200_000 * USDC);
-    let (s, s_shares) = w.senior(800_000 * USDC);
-    let sme = w.sme(200_000 * USDC);
-    let id = w.open(&sme, "MXN", Side::BuyCurrency, 37_000_000 * UNIT, YEAR, 1000);
-    w.goto(T0 + YEAR);
-    assert_eq!(w.pool.capacity(), -21_000 * USDC);
-    assert_eq!(w.pool.withdraw_senior(&s, &s_shares), 836_000 * USDC);
-    assert_eq!(w.pool.total_assets(), 164_000 * USDC);
-    w.set_spot("MXN", px(6, 2));
-    assert_err(w.pool.try_settle(&id), E_LOSS_EXCEEDS_CAPITAL);
-}
-
-/// Défaut 1 tel qu'il est aujourd'hui. VERT sur le code actuel, À SUPPRIMER avec B6.
-#[test]
-fn constat_defect_1_today() {
-    let w = world_mxn();
-    let attacker = w.junior(1_000 * USDC);
-    let sme = w.sme(1_000 * USDC);
-    let id = w.open(&sme, "MXN", Side::BuyCurrency, 100_000 * UNIT, 30 * DAY, 1000);
-    let shares = w.pool.lp_shares(&attacker);
-    assert_eq!(w.pool.withdraw(&attacker, &(shares - 1)), 4_999_999_999);
-    assert_eq!(w.pool.total_assets(), 5_000_000_001);
-    let victim = w.junior(999 * USDC);
-    assert_eq!(w.pool.lp_shares(&victim), 1);
-    w.settle_at(id, "MXN", px(5, 2));
-    assert_eq!(w.pool.withdraw(&victim, &1), 7_495_000_000); // 749,5 : perte 249,5
-}
-
 /// B1 × B6 : couverture sans cours (312, fenêtre écoulée) qui garde R > 0. Le dernier LP ne
 /// peut pas brûler sa dernière part (116) ; il retire jusqu'au plancher. Code actuel : il brûle
 /// tout, T = R = 500 sans aucune part, et le prochain déposant hérite de la couverture bloquée.
 #[test]
-#[ignore = "ROUGE jusqu'à B6 (plancher de parts junior)"]
 fn r_last_lp_with_hedge_without_fixing() {
     let w = world_mxn();
     let j = w.junior(10_000 * USDC);

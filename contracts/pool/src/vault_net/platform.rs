@@ -41,6 +41,7 @@ fn net() -> Net {
     let oracle = env.register(MockOracle, (&admin,));
     MockOracleClient::new(&env, &oracle).set_price(&OracleAsset::Other(symbol_short!("MXN")), &MXN_SPOT);
     let pool = env.register(Pool, (&admin, &usdc, &oracle, &50u32));
+    PoolClient::new(&env, &pool).set_senior_deposits_open(&true); // fermés par défaut (B5)
     let c = PoolClient::new(&env, &pool);
     c.set_rate(&symbol_short!("USD"), &400);
     c.set_rate(&symbol_short!("MXN"), &700);
@@ -827,18 +828,8 @@ fn thin_junior_after_one_year() -> (Net, u64, Address) {
     (s, id, senior)
 }
 
-/// VERT (constat, à supprimer avec B5) : le défaut est là, le règlement échoue en 103.
-#[test]
-fn e2e_defect2_settle_fails_103_today() {
-    let (s, id, senior) = thin_junior_after_one_year();
-    assert_eq!(s.client().withdraw_senior(&senior, &(800_000 * USDC)), 836_000 * USDC);
-    assert_eq!(s.client().total_assets(), 164_000 * USDC);
-    assert_eq!(s.client().try_settle(&id).err(), Some(Ok(VaultError::LossExceedsCapital.into())));
-}
-
 /// ROUGE (B5) : après un retrait senior total, un règlement perdant ne doit jamais échouer.
 #[test]
-#[ignore = "B5 : withdraw_senior laisse T < Reserved, settle échoue en 103"]
 fn e2e_defect2_settle_after_full_senior_exit_never_fails() {
     let (s, id, senior) = thin_junior_after_one_year();
     let shares = s.vault(|env| senior_shares(env, &senior));
