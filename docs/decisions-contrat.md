@@ -31,7 +31,7 @@ On fait le point 1. **On ne fait pas le point 2 pour l'instant.**
 ### Ce que ça implique
 
 - **Un LP Safe peut être servi en retard.** Si les intérêts dépassent ce que le junior peut payer pendant que des couvertures sont ouvertes, sa valeur retirable cesse de monter au lieu de suivre les 4,5 %. Elle rattrape quand le junior se reconstitue (spreads encaissés, couvertures réglées). Rien n'est perdu tant qu'il ne retire pas.
-- **Un LP Safe qui retire pendant ce retard abandonne sa part des intérêts non servis** aux LP Safe restants, ou au junior quand il n'en reste plus. Ce n'est pas un risque de fonds, mais c'est à dire aux LP Safe.
+- **Un LP Safe qui retire pendant ce retard abandonne sa part des intérêts non servis au junior.** Les parts Safe restantes gardent leur prix (la créance de chacune ne change pas) ; c'est la valeur junior (capital moins créance Safe) qui récupère la différence entre la créance du sortant et ce qu'il a touché. Ce n'est pas un risque de fonds, mais c'est à dire aux LP Safe. (Corrigé le 25/11 : la première version disait « aux LP Safe restants », ce que le code ne fait pas.)
 - **La capacité peut tomber à zéro par le seul effet des intérêts** : plus aucune couverture ne s'ouvre et aucun junior ne peut sortir tant que des couvertures en cours n'ont pas été réglées. Le contrat ne l'affiche plus en négatif : elle reste à zéro.
 - **Un dépôt Safe est refusé pendant un retard** (code 118), pour que le nouveau venu n'achète pas au prix plein une part qui vaut moins.
 - **À dire à Jia** dans la note des changements, avec le reste de B5.

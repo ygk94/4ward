@@ -630,7 +630,7 @@ pub(crate) fn deposit_senior(env: &Env, lp: &Address, amount: i128) -> i128 {
 /// × parts / parts senior totales), arrondi vers le bas. Quand les intérêts senior dépassent ce
 /// que le junior peut payer au-delà du capital réservé, le retrait est limité : TotalDeposits
 /// reste ≥ Reserved et un règlement perdant pour le pool passe toujours (B5). Le senior qui sort
-/// pendant ce retard abandonne sa part des intérêts non servis aux seniors restants (D1).
+/// pendant ce retard abandonne sa part des intérêts non servis au junior (D1).
 /// Retourne l'USDC versé.
 /// Erreurs : `InvalidAmount`, `InsufficientSeniorShares`, `SeniorWithdrawBelowReserved`,
 /// `WithdrawTooSmall`, `Overflow`.

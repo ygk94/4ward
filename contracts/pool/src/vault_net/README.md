@@ -43,7 +43,7 @@ NET_SEED=0x5eed2026 NET_CHECKS=1f NET_SUITE=1 cargo test -p pool vault::net_prop
 
 ## Ce que les correctifs font (B5, B6)
 
-- B6 : le plancher porte sur le total des parts junior et se contrôle avant le calcul du montant ; `capacity()` vaut 0 tant que le total des parts est sous le plancher (sinon une couverture peut s'ouvrir sur un pool réduit à la poussière).
+- B6 : le plancher porte sur le total des parts junior et se contrôle avant le calcul du montant. D2 : `reserve()` refuse toute couverture (101) tant que le total des parts est sous le plancher. `capacity()` reste la valeur brute, pour que la poussière d'un pool sans couverture puisse toujours sortir ; la lecture peut donc afficher de la capacité alors qu'une ouverture échoue en 101.
 - B5 : la créance senior non plafonnée sert au prix d'entrée junior et au ratio de 20 % ; la valeur plafonnée sert aux retraits senior ; la capacité n'est jamais négative.
 - Dépôts senior fermés par défaut : chaque aide de test ouvre les dépôts juste après l'enregistrement du pool.
 - Tests de `vault::tests` adaptés : deux sorties totales avec une couverture ouverte (désormais jusqu'au plancher), deux tests de capacité négative (désormais 0), et `assert_tranches` (capacité = max(junior − réservé, 0)).
