@@ -645,6 +645,62 @@ mod pricing_tests {
         env.as_contract(&pool, || pricing::settlement_fixing(&env, 3, &mxn(&env), T0 + 1_000));
     }
 
+    // ---- fixing en moyenne sur ~30 min (Instaward) ----
+
+    /// Pose un cours MXN à chacun des 6 relevés de la fenêtre qui finit à `maturity` (k = 5 … 0).
+    fn window(env: &Env, oracle: &Address, maturity: u64, prices: [i128; 6]) {
+        for (i, p) in prices.iter().enumerate() {
+            let k = 5 - i as u64;
+            mock_price_at(env, oracle, maturity - k * 300, *p);
+        }
+    }
+
+    /// Six cours dans la fenêtre : le fixing est leur moyenne, pas le dernier.
+    #[test]
+    fn pricing_twap_averages_the_window() {
+        let (env, pool, oracle) = setup_mock_oracle();
+        let m = T0 + 3_000;
+        window(&env, &oracle, m, [100, 101, 102, 103, 104, 102].map(|x| x * 10_000_000_000));
+        env.ledger().set_timestamp(m + 10);
+        // (100 + 101 + 102 + 103 + 104 + 102) / 6 = 102
+        assert_eq!(fixing(&env, &pool, m), 102 * 10_000_000_000);
+    }
+
+    /// Un pic isolé à l'échéance (+10 %) est écarté par la borne de 2 % : il ne fait pas le fixing.
+    #[test]
+    fn pricing_twap_drops_spike_at_maturity() {
+        let (env, pool, oracle) = setup_mock_oracle();
+        let m = T0 + 3_000;
+        let s = MXN_SPOT;
+        window(&env, &oracle, m, [s, s, s, s, s, s + s / 10]);
+        env.ledger().set_timestamp(m + 10);
+        assert_eq!(fixing(&env, &pool, m), s);
+    }
+
+    /// Cours éparpillés (moins de 4 dans la borne) : pas de fixing, puis constat d'absence.
+    #[test]
+    fn pricing_twap_inconsistent_window_has_no_fixing() {
+        let (env, pool, oracle) = setup_mock_oracle();
+        let m = T0 + 3_000;
+        let s = MXN_SPOT;
+        window(&env, &oracle, m, [s, s + s / 10, s, s + s / 10, s, s + s / 5]);
+        env.ledger().set_timestamp(m + 10);
+        assert_eq!(read(&env, &pool, m), FixingRead::Pending);
+        env.ledger().set_timestamp(m + FIXING_GRACE_SECS);
+        assert_eq!(read(&env, &pool, m), FixingRead::Missing);
+    }
+
+    /// Moins de 4 relevés dans la fenêtre : repli sur le cours unique (lecture B1).
+    #[test]
+    fn pricing_twap_thin_window_falls_back_to_single_price() {
+        let (env, pool, oracle) = setup_mock_oracle();
+        let m = T0 + 600;
+        mock_price_at(&env, &oracle, T0 + 300, MXN_SPOT);
+        mock_price_at(&env, &oracle, m, 6_000_000_000_000);
+        env.ledger().set_timestamp(m + 10);
+        assert_eq!(fixing(&env, &pool, m), 6_000_000_000_000);
+    }
+
     /// Le mock, comme Reflector, n'a plus de prix pour une date de plus de 24 h.
     #[test]
     fn mock_oracle_forgets_after_24h() {

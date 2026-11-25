@@ -90,6 +90,14 @@ pub const FIXING_GRACE_SECS: u64 = 3_600;
 /// Pas de recherche du premier cours après l'échéance : la résolution de Reflector.
 const FIXING_STEP_SECS: u64 = 300;
 
+/// Fixing en moyenne (dossier Instaward) : nombre de relevés, espacés de `FIXING_STEP_SECS`, qui se
+/// terminent à l'échéance (maturity − 25 min … maturity, soit une fenêtre d'environ 30 min).
+pub const TWAP_SAMPLES: usize = 6;
+/// Nombre minimum de relevés valides, après bornes, pour calculer la moyenne.
+pub const TWAP_MIN_SAMPLES: usize = 4;
+/// Borne : un relevé à plus de 2 % de la médiane de la fenêtre est écarté.
+pub const TWAP_BAND_BPS: i128 = 200;
+
 /// TTL d'un cours figé : comme une couverture (30 jours / 120 jours, en ledgers de ~5 s).
 const FIXING_TTL_THRESHOLD: u32 = 30 * 17_280;
 const FIXING_TTL_EXTEND_TO: u32 = 120 * 17_280;
@@ -232,7 +240,66 @@ pub(crate) enum FixingRead {
     Missing,
 }
 
+/// Résultat de la fenêtre de moyenne.
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum Twap {
+    /// Moyenne des relevés retenus.
+    Price(i128),
+    /// Moins de `TWAP_MIN_SAMPLES` relevés dans la fenêtre (historique trop court, oracle muet) :
+    /// on se replie sur la lecture d'un cours unique.
+    Thin,
+    /// Assez de relevés, mais moins de `TWAP_MIN_SAMPLES` dans la borne de la médiane : cours
+    /// incohérents, aucun fixing (pas de repli sur un cours unique, qui serait manipulable).
+    Inconsistent,
+}
+
+/// Moyenne des cours de la fenêtre qui se termine à l'échéance (lecture seule).
+/// Relevé k (k = 0…`TWAP_SAMPLES` − 1) : cours en vigueur à `maturity − k × FIXING_STEP_SECS`, valide
+/// s'il est positif et a au plus `MAX_FIXING_AGE_SECS` à cet instant. Les relevés à plus de
+/// `TWAP_BAND_BPS` de la médiane sont écartés ; la moyenne (arrondie vers le bas) porte sur le reste.
+/// Le même cours peut compter pour plusieurs relevés : c'est le cours en vigueur, comme une moyenne
+/// pondérée par le temps.
+fn read_twap(env: &Env, client: &OracleClient, asset: &Asset, maturity: u64) -> Twap {
+    let mut prices = [0i128; TWAP_SAMPLES];
+    let mut n = 0usize;
+    for k in 0..TWAP_SAMPLES {
+        let Some(ts) = maturity.checked_sub(k as u64 * FIXING_STEP_SECS) else { break };
+        if let Some(d) = client.price(asset, &ts) {
+            if d.price > 0 && d.timestamp <= ts && ts - d.timestamp <= MAX_FIXING_AGE_SECS {
+                prices[n] = d.price;
+                n += 1;
+            }
+        }
+    }
+    if n < TWAP_MIN_SAMPLES {
+        return Twap::Thin;
+    }
+    let p = &mut prices[..n];
+    p.sort_unstable();
+    // Médiane basse : pour un nombre pair, la plus petite des deux valeurs centrales.
+    let median = p[(n - 1) / 2];
+    let band = median
+        .checked_mul(TWAP_BAND_BPS)
+        .unwrap_or_else(|| panic_with_error!(env, PricingError::Overflow))
+        / 10_000;
+    let (mut sum, mut kept) = (0i128, 0i128);
+    for &x in p.iter() {
+        if (x - median).abs() <= band {
+            sum = sum.checked_add(x).unwrap_or_else(|| panic_with_error!(env, PricingError::Overflow));
+            kept += 1;
+        }
+    }
+    if (kept as usize) < TWAP_MIN_SAMPLES {
+        return Twap::Inconsistent;
+    }
+    Twap::Price(sum / kept)
+}
+
 /// Lecture seule (rien n'est écrit), dans l'ordre :
+/// 0. la moyenne de la fenêtre de ~30 min qui se termine à l'échéance (`read_twap`), si au moins
+///    `TWAP_MIN_SAMPLES` relevés y sont valides. Si la fenêtre a assez de relevés mais trop sont hors de
+///    la borne, aucun fixing : `Pending`, puis `Missing` (règlement de secours) ;
+/// Sinon (fenêtre trop maigre), repli sur un cours unique :
 /// 1. le cours en vigueur à l'échéance, s'il est positif et a au plus `MAX_FIXING_AGE_SECS` à l'échéance ;
 /// 2. sinon le premier cours publié dans ]maturity, maturity + `FIXING_GRACE_SECS`], cherché par pas de
 ///    `FIXING_STEP_SECS` (exact sur Reflector, aligné sur 300 s ; sur le mock, deux prix à moins de 300 s
@@ -247,6 +314,13 @@ pub(crate) fn read_fixing(env: &Env, currency: &Symbol, maturity: u64) -> Fixing
     let deadline = maturity.saturating_add(FIXING_GRACE_SECS);
 
     if maturity <= now {
+        match read_twap(env, &client, &asset, maturity) {
+            Twap::Price(p) => return FixingRead::Found(p),
+            Twap::Inconsistent => {
+                return if now < deadline { FixingRead::Pending } else { FixingRead::Missing };
+            }
+            Twap::Thin => {}
+        }
         if let Some(d) = client.price(&asset, &maturity) {
             if d.price > 0 && d.timestamp <= maturity && maturity - d.timestamp <= MAX_FIXING_AGE_SECS {
                 return FixingRead::Found(d.price);
