@@ -163,6 +163,7 @@ Les textes de `panic!` sont effacés dans le WASM déployé : le front ne reçoi
 | #203 `InvalidNotional` | Paiement | Montant de facture invalide |
 | #204 `InvalidDuration` | Paiement | Échéance invalide |
 | #206 `AlreadyMatured` | Paiement | Échéance atteinte : régler (`settle`) au lieu de clôturer |
+| #207 `Overflow` | Paiement | Montant ou cours hors de toute plage réaliste (calcul du P&L) |
 | #100 `InvalidAmount` | Vault | Montant invalide |
 | #101 `InsufficientCapacity` | Vault | Le pool n'a pas assez de capital pour cette protection |
 | #102 `ReleaseExceedsReserved` | Vault | Erreur interne (libération au-delà du capital réservé) |

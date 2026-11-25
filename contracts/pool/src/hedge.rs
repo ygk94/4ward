@@ -13,7 +13,7 @@
 //! Ensuite, côté front : path payment USDC → devise vers `supplier` pour exactement `notional`.
 //! Mode démo : `time_factor` (admin, 1 par défaut) raccourcit l'échéance réelle (`durée / facteur`)
 //! sans changer le prix, calculé sur la durée annoncée. Ex. 25 920 : 90 jours → 300 s.
-//! Erreurs : `HedgeError`, codes 200+ (Vault 100+). Les textes de panic! sont effacés dans le WASM :
+//! Erreurs : `HedgeError`, codes 200+ (Vault 100+, Pricing 300+, Admin 400+). Les textes de panic! sont effacés dans le WASM :
 //! seul un code d'erreur permet au front d'afficher la bonne raison d'un refus.
 use crate::{pricing, vault, DataKey, Hedge, Side};
 use soroban_sdk::{contracterror, contractevent, contracttype, panic_with_error, token, Address, Env, Symbol};
@@ -38,6 +38,9 @@ pub enum HedgeError {
     InvalidTimeFactor = 205,
     /// `close_early` à l'échéance ou après : utiliser `settle`.
     AlreadyMatured = 206,
+    /// Calcul du P&L hors de toute plage réaliste (notionnel × écart de cours dépasse i128) : refus avec un code
+    /// au lieu d'un piège de la VM sans explication.
+    Overflow = 207,
 }
 
 /// Clés de stockage de Paiement (à part de `DataKey`, partagé).
@@ -225,7 +228,7 @@ fn load_open(env: &Env, key: &DataKey) -> Hedge {
 /// Ferme la couverture au taux `rate` : P&L borné, libération de la réserve, gain ou perte du pool, versement
 /// de marge ± P&L au propriétaire, `settled = true`. Retourne (P&L, versement).
 fn close(env: &Env, key: &DataKey, hedge: &mut Hedge, rate: i128) -> (i128, i128) {
-    let pnl = pnl(hedge.side, hedge.notional, hedge.locked_rate, rate, hedge.margin);
+    let pnl = pnl(env, hedge.side, hedge.notional, hedge.locked_rate, rate, hedge.margin);
 
     vault::close_position(env, hedge);
     if pnl > 0 {
@@ -247,13 +250,16 @@ fn close(env: &Env, key: &DataKey, hedge: &mut Hedge, rate: i128) -> (i128, i128
 }
 
 /// P&L de l'utilisateur en USDC (7 décimales) : > 0 le pool lui doit, < 0 il doit au pool.
-/// Arrondi vers le bas (en faveur du pool), borné à ±marge (le plafond).
-pub(crate) fn pnl(side: Side, notional: i128, locked_rate: i128, spot: i128, margin: i128) -> i128 {
+/// Arrondi vers le bas (en faveur du pool), borné à ±marge (le plafond). `Overflow` (207) si le calcul dépasse i128.
+pub(crate) fn pnl(env: &Env, side: Side, notional: i128, locked_rate: i128, spot: i128, margin: i128) -> i128 {
     let diff = match side {
-        Side::BuyCurrency => spot - locked_rate,
-        Side::SellCurrency => locked_rate - spot,
+        Side::BuyCurrency => spot.checked_sub(locked_rate),
+        Side::SellCurrency => locked_rate.checked_sub(spot),
     };
-    let raw = (notional * diff).div_euclid(10i128.pow(crate::PRICE_DECIMALS));
+    let raw = diff
+        .and_then(|d| notional.checked_mul(d))
+        .unwrap_or_else(|| panic_with_error!(env, HedgeError::Overflow))
+        .div_euclid(10i128.pow(crate::PRICE_DECIMALS));
     raw.clamp(-margin, margin)
 }
 

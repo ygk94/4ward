@@ -762,43 +762,57 @@ fn fixture_is_ready() {
 
 #[test]
 fn pnl_currency_up_user_gains() {
+    let env = Env::default();
     // +8 % : 0.0594 → 59 400 USDC au comptant, le pool doit 4 530 USDC
-    assert_eq!(hedge::pnl(Side::BuyCurrency, NOTIONAL, LOCKED, 5_940_000_000_000, MARGIN), 45_300_000_000);
+    assert_eq!(hedge::pnl(&env, Side::BuyCurrency, NOTIONAL, LOCKED, 5_940_000_000_000, MARGIN), 45_300_000_000);
 }
 
 #[test]
 fn pnl_currency_down_user_loses() {
+    let env = Env::default();
     // −8 % : 0.0506 → 50 600 USDC au comptant, Lucía doit 4 270 USDC sur sa marge
-    assert_eq!(hedge::pnl(Side::BuyCurrency, NOTIONAL, LOCKED, 5_060_000_000_000, MARGIN), -42_700_000_000);
+    assert_eq!(hedge::pnl(&env, Side::BuyCurrency, NOTIONAL, LOCKED, 5_060_000_000_000, MARGIN), -42_700_000_000);
 }
 
 #[test]
 fn pnl_is_capped_at_margin() {
+    let env = Env::default();
     // +15 % : écart de 8 380 USDC, borné à la marge de 5 487 USDC
-    assert_eq!(hedge::pnl(Side::BuyCurrency, NOTIONAL, LOCKED, 6_325_000_000_000, MARGIN), MARGIN);
+    assert_eq!(hedge::pnl(&env, Side::BuyCurrency, NOTIONAL, LOCKED, 6_325_000_000_000, MARGIN), MARGIN);
     // −15 % : borné à −marge
-    assert_eq!(hedge::pnl(Side::BuyCurrency, NOTIONAL, LOCKED, 4_675_000_000_000, MARGIN), -MARGIN);
+    assert_eq!(hedge::pnl(&env, Side::BuyCurrency, NOTIONAL, LOCKED, 4_675_000_000_000, MARGIN), -MARGIN);
 }
 
 #[test]
 fn pnl_sell_side_is_reversed() {
+    let env = Env::default();
     // L'exportateur gagne quand la devise baisse
-    assert_eq!(hedge::pnl(Side::SellCurrency, NOTIONAL, LOCKED, 5_060_000_000_000, MARGIN), 42_700_000_000);
-    assert_eq!(hedge::pnl(Side::SellCurrency, NOTIONAL, LOCKED, 5_940_000_000_000, MARGIN), -45_300_000_000);
+    assert_eq!(hedge::pnl(&env, Side::SellCurrency, NOTIONAL, LOCKED, 5_060_000_000_000, MARGIN), 42_700_000_000);
+    assert_eq!(hedge::pnl(&env, Side::SellCurrency, NOTIONAL, LOCKED, 5_940_000_000_000, MARGIN), -45_300_000_000);
 }
 
 #[test]
 fn pnl_rounds_in_favour_of_pool() {
+    let env = Env::default();
     // 1 unité de devise (1e-7), écart de 1e-14 USD : P&L réel = 1e-21 USDC
     // le pool ne paie rien quand il doit une fraction...
-    assert_eq!(hedge::pnl(Side::BuyCurrency, 1, LOCKED, LOCKED + 1, MARGIN), 0);
+    assert_eq!(hedge::pnl(&env, Side::BuyCurrency, 1, LOCKED, LOCKED + 1, MARGIN), 0);
     // ...et encaisse l'unité entière quand c'est l'utilisateur qui doit une fraction
-    assert_eq!(hedge::pnl(Side::BuyCurrency, 1, LOCKED, LOCKED - 1, MARGIN), -1);
+    assert_eq!(hedge::pnl(&env, Side::BuyCurrency, 1, LOCKED, LOCKED - 1, MARGIN), -1);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #207)")]
+fn pnl_overflow_returns_code_instead_of_trapping() {
+    // écart démesuré : notional × écart dépasse i128, refus avec un code (207) et non un piège de la VM
+    let env = Env::default();
+    hedge::pnl(&env, Side::BuyCurrency, i128::MAX / 2, LOCKED, i128::MAX / 4, MARGIN);
 }
 
 #[test]
 fn pnl_unchanged_spot_is_zero() {
-    assert_eq!(hedge::pnl(Side::BuyCurrency, NOTIONAL, LOCKED, LOCKED, MARGIN), 0);
+    let env = Env::default();
+    assert_eq!(hedge::pnl(&env, Side::BuyCurrency, NOTIONAL, LOCKED, LOCKED, MARGIN), 0);
 }
 
 /// Taux bloqué réel de la couverture de démo (vrai Pricing, paramètres du setup testnet :
@@ -927,7 +941,7 @@ fn settle_guards() {
     set_spot(&s, SPOT_0);
     s.pool.settle(&id);
     assert_eq!(s.pool.try_settle(&id), Err(Ok(contract_err(HedgeError::AlreadySettled as u32))));
-    assert_eq!(s.usdc.balance(&s.lucia), LUCIA_START + hedge::pnl(Side::BuyCurrency, NOTIONAL, HEDGE_LOCKED, SPOT_0, HEDGE_MARGIN));
+    assert_eq!(s.usdc.balance(&s.lucia), LUCIA_START + hedge::pnl(&s.env, Side::BuyCurrency, NOTIONAL, HEDGE_LOCKED, SPOT_0, HEDGE_MARGIN));
 }
 
 /// Lucía ouvre la couverture de la démo : 1 000 000 MXN, plafond 10 %, échéance `MATURITY_IN`.
@@ -1278,7 +1292,7 @@ fn settle_needs_no_signature() {
 
     // règlement sans aucune signature : n'importe qui peut le déclencher
     let paid = s.pool.set_auths(&[]).settle(&id);
-    assert_eq!(paid, HEDGE_MARGIN + hedge::pnl(Side::BuyCurrency, NOTIONAL, HEDGE_LOCKED, SPOT_0, HEDGE_MARGIN));
+    assert_eq!(paid, HEDGE_MARGIN + hedge::pnl(&s.env, Side::BuyCurrency, NOTIONAL, HEDGE_LOCKED, SPOT_0, HEDGE_MARGIN));
     assert!(s.pool.get_hedge(&id).unwrap().settled);
 }
 
@@ -1357,7 +1371,7 @@ fn close_early_unchanged_market_costs_the_spreads() {
 
     // cours inchangé : Lucía perd l'aller-retour des spreads (≈ 1 %), rien de plus
     let rate = exit_rate(&s, Side::BuyCurrency, MATURITY_IN / 2);
-    let pnl = hedge::pnl(Side::BuyCurrency, NOTIONAL, HEDGE_LOCKED, rate, HEDGE_MARGIN);
+    let pnl = hedge::pnl(&s.env, Side::BuyCurrency, NOTIONAL, HEDGE_LOCKED, rate, HEDGE_MARGIN);
     assert!(pnl < 0 && pnl > -HEDGE_COST / 90);
     let paid = s.pool.close_early(&id);
     assert_settled(&s, id, paid, HEDGE_MARGIN + pnl, -pnl);
@@ -1371,7 +1385,7 @@ fn close_early_currency_up_user_gains() {
     set_spot(&s, 5_940_000_000_000); // +8 % : le pool perd, la PME sort avec son gain moins le spread
 
     let rate = exit_rate(&s, Side::BuyCurrency, MATURITY_IN - 10);
-    let pnl = hedge::pnl(Side::BuyCurrency, NOTIONAL, HEDGE_LOCKED, rate, HEDGE_MARGIN);
+    let pnl = hedge::pnl(&s.env, Side::BuyCurrency, NOTIONAL, HEDGE_LOCKED, rate, HEDGE_MARGIN);
     assert!(pnl > 0);
     let paid = s.pool.close_early(&id);
     assert_settled(&s, id, paid, HEDGE_MARGIN + pnl, -pnl);
@@ -1396,7 +1410,7 @@ fn close_early_sell_side_buys_back() {
     set_spot(&s, 5_060_000_000_000); // −8 % : l'exportateur gagne
 
     let rate = exit_rate(&s, Side::SellCurrency, MATURITY_IN - 10);
-    let pnl = hedge::pnl(Side::SellCurrency, NOTIONAL, s.pool.get_hedge(&id).unwrap().locked_rate, rate, s.pool.get_hedge(&id).unwrap().margin);
+    let pnl = hedge::pnl(&s.env, Side::SellCurrency, NOTIONAL, s.pool.get_hedge(&id).unwrap().locked_rate, rate, s.pool.get_hedge(&id).unwrap().margin);
     assert!(pnl > 0);
     let margin = s.pool.get_hedge(&id).unwrap().margin;
     let paid = s.pool.close_early(&id);
@@ -1448,7 +1462,7 @@ fn close_early_emits_event() {
     s.env.ledger().set_timestamp(s.env.ledger().timestamp() + 10);
     set_spot(&s, 5_940_000_000_000);
     let rate = exit_rate(&s, Side::BuyCurrency, MATURITY_IN - 10);
-    let pnl = hedge::pnl(Side::BuyCurrency, NOTIONAL, HEDGE_LOCKED, rate, HEDGE_MARGIN);
+    let pnl = hedge::pnl(&s.env, Side::BuyCurrency, NOTIONAL, HEDGE_LOCKED, rate, HEDGE_MARGIN);
     s.pool.close_early(&id);
 
     let expected = hedge::HedgeClosedEarly { hedge_id: id, owner: s.lucia.clone(), close_rate: rate, pnl, payout: HEDGE_MARGIN + pnl };
