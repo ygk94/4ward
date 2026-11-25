@@ -77,6 +77,8 @@ pub enum HedgeError {
     SupplierAlreadyPaid = 218,
     /// `settle_and_pay` sur une couverture SellCurrency : l'exportateur reçoit la devise, il n'a rien à payer.
     NotAPayment = 219,
+    /// `settle_and_pay` après la date limite signée par la PME (timestamp du ledger, strictement avant). Rien n'est fait.
+    DeadlinePassed = 220,
 }
 
 /// Clés de stockage de Paiement (à part de `DataKey`, partagé).
@@ -495,11 +497,11 @@ pub(crate) fn payment_route(env: &Env, currency: &Symbol) -> Option<PaymentRoute
 /// 1. `settle` crédite marge ± P&L au solde réclamable (sauté si le robot a déjà réglé) ;
 /// 2. le solde réclamable est versé à la PME ;
 /// 3. Soroswap échange ses USDC contre exactement `notional` en devise (`to` = la PME, qui signe et paie l'entrée),
-///    sans dépasser `max_usdc` : au-delà, refus 217 et rien n'est fait ;
+///    sans dépasser `max_usdc` et avant `deadline` (tous deux signés par la PME) : sinon refus 217 / 220, rien n'est fait ;
 /// 4. la devise part de la PME au fournisseur.
 /// Tout ou rien : si une étape échoue, la transaction est annulée et la couverture reste réglable par `settle`.
 /// Le contrat ne signe jamais pour son propre compte. Retourne l'USDC dépensé dans l'échange.
-pub(crate) fn settle_and_pay(env: &Env, hedge_id: u64, max_usdc: i128) -> i128 {
+pub(crate) fn settle_and_pay(env: &Env, hedge_id: u64, max_usdc: i128, deadline: u64) -> i128 {
     let key = DataKey::Hedge(hedge_id);
     let hedge: Hedge = env
         .storage()
@@ -507,6 +509,9 @@ pub(crate) fn settle_and_pay(env: &Env, hedge_id: u64, max_usdc: i128) -> i128 {
         .get(&key)
         .unwrap_or_else(|| panic_with_error!(env, HedgeError::UnknownHedge));
     hedge.owner.require_auth();
+    if env.ledger().timestamp() >= deadline {
+        panic_with_error!(env, HedgeError::DeadlinePassed);
+    }
     if hedge.side != Side::BuyCurrency {
         panic_with_error!(env, HedgeError::NotAPayment);
     }
@@ -528,7 +533,8 @@ pub(crate) fn settle_and_pay(env: &Env, hedge_id: u64, max_usdc: i128) -> i128 {
     }
 
     pay_out(env, &hedge.owner);
-    let deadline = env.ledger().timestamp() + 1;
+    // date limite **signée par la PME** : elle signe l'appel au routeur avec ses arguments exacts, une date calculée
+    // ici à l'exécution ne correspondrait jamais à celle de la simulation (relecture de Hugo)
     let amounts = router.swap_tokens_for_exact_tokens(&hedge.notional, &max_usdc, &path, &hedge.owner, &deadline);
     token::TokenClient::new(env, &route.token).transfer(&hedge.owner, &hedge.supplier, &hedge.notional);
 

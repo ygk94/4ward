@@ -345,10 +345,11 @@ impl Pool {
     /// Signé par la PME : règle la couverture (si ce n'est pas déjà fait) et paie au fournisseur exactement le
     /// montant de la facture en devise, via un échange USDC → devise sur Soroswap, dans une seule transaction.
     /// `max_usdc` : USDC maximum que la PME accepte de dépenser dans l'échange (refus 217 au-delà, rien n'est fait).
+    /// `deadline` : date limite signée par la PME (timestamp du ledger), passée au routeur ; refus 220 au-delà.
     /// Tout ou rien. Refus : 216 (pas de route pour la devise), 218 (déjà payé), 219 (couverture SellCurrency).
     /// Retourne l'USDC dépensé dans l'échange. Possible en pause.
-    pub fn settle_and_pay(env: Env, hedge_id: u64, max_usdc: i128) -> i128 {
-        hedge::settle_and_pay(&env, hedge_id, max_usdc)
+    pub fn settle_and_pay(env: Env, hedge_id: u64, max_usdc: i128, deadline: u64) -> i128 {
+        hedge::settle_and_pay(&env, hedge_id, max_usdc, deadline)
     }
 
     /// Admin : route de paiement du fournisseur pour une devise (jeton SAC de la devise, routeur Soroswap).

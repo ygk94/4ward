@@ -94,9 +94,10 @@ Le cours utilisé est celui **en vigueur à l'échéance** s'il a au plus 15 min
 Signé par la PME seule. Règle la couverture (sauté si le robot l'a déjà réglée), lui verse son solde réclamable, échange sur **Soroswap** ses USDC contre **exactement** le montant de la facture en devise, et paie le fournisseur, le tout dans une seule transaction (tout ou rien).
 ```sh
 stellar contract invoke --id fx-pool --source-account fx-lucia --network testnet -- \
-  settle_and_pay --hedge_id 0 --max_usdc 560000000000     # 56 000 USDC au plus pour 1 000 000 MXN
+  settle_and_pay --hedge_id 0 --max_usdc 560000000000 \
+  --deadline $(( $(date +%s) + 300 ))                     # 56 000 USDC au plus, valable 5 minutes
 ```
-`--max_usdc` : USDC maximum que la PME accepte de dépenser dans l'échange (devis : `router_get_amounts_in` du routeur). Au-delà : `#217`, rien n'est fait, la couverture reste réglable par `settle`. Retour : l'USDC dépensé. Événement `supplier_paid` (fournisseur, montant en devise, USDC dépensés). Refus : `#216` pas de route pour la devise, `#218` fournisseur déjà payé, `#219` couverture `SellCurrency` (l'exportateur reçoit la devise).
+`--max_usdc` : USDC maximum que la PME accepte de dépenser dans l'échange (devis : `router_get_amounts_in` du routeur). Au-delà : `#217`, rien n'est fait, la couverture reste réglable par `settle`. `--deadline` : date limite (secondes Unix, heure du ledger) signée par la PME et transmise au routeur ; passée : `#220`. Elle doit être un argument signé : la PME signe l'appel au routeur avec ses arguments exacts, une date calculée par le contrat ne correspondrait jamais à celle de la simulation. Retour : l'USDC dépensé. Événement `supplier_paid` (fournisseur, montant en devise, USDC dépensés). Refus : `#216` pas de route pour la devise, `#218` fournisseur déjà payé, `#219` couverture `SellCurrency` (l'exportateur reçoit la devise).
 
 Route de paiement, posée par l'admin pour chaque devise (le jeton de la devise et le routeur), pour qu'une PME ne puisse pas payer son fournisseur en faux jeton :
 ```sh
@@ -235,6 +236,7 @@ Les textes de `panic!` sont effacés dans le WASM déployé : le front ne reçoi
 | #217 `SwapTooExpensive` | Paiement | L'échange coûterait plus que votre maximum : refaire le devis |
 | #218 `SupplierAlreadyPaid` | Paiement | Le fournisseur de cette couverture est déjà payé |
 | #219 `NotAPayment` | Paiement | Couverture de vente : pas de fournisseur à payer |
+| #220 `DeadlinePassed` | Paiement | Délai de la transaction dépassé : relancer le paiement |
 | #100 `InvalidAmount` | Vault | Montant invalide |
 | #101 `InsufficientCapacity` | Vault | Le pool n'a pas assez de capital pour cette protection |
 | #102 `ReleaseExceedsReserved` | Vault | Erreur interne (libération au-delà du capital réservé) |

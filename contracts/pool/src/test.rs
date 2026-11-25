@@ -1472,6 +1472,11 @@ const SWAP_PRICE: i128 = 5_600_000_000_000;
 /// USDC à payer pour exactement 1 000 000 MXN à ce prix : 56 000 USDC.
 const SWAP_COST: i128 = 560_000_000_000;
 
+/// Date limite signée par la PME pour l'échange : 5 minutes après l'heure du ledger.
+fn pay_deadline(s: &Setup) -> u64 {
+    s.env.ledger().timestamp() + 300
+}
+
 /// Peso de test (SAC) + routeur de test financé en pesos, route MXN posée par l'admin. Retourne (peso, routeur).
 fn payment_route<'b>(s: &'b Setup) -> (TokenClient<'b>, Address) {
     let mxn_token = s.env.register_stellar_asset_contract_v2(s.admin.clone()).address();
@@ -1489,7 +1494,7 @@ fn settle_and_pay_pays_the_supplier_exactly_in_one_transaction() {
     let (mxn_token, _) = payment_route(&s);
     at_maturity(&s, SWAP_PRICE);
 
-    let spent = s.pool.settle_and_pay(&id, &SWAP_COST);
+    let spent = s.pool.settle_and_pay(&id, &SWAP_COST, &pay_deadline(&s));
     // événement public (lu avant tout autre appel)
     let events = s.env.events().all().filter_by_contract(&s.pool.address);
     assert_eq!(
@@ -1528,7 +1533,7 @@ fn settle_and_pay_total_cost_is_the_locked_price() {
     let id = open_funded(&s, Side::BuyCurrency);
     let (mxn_token, _) = payment_route(&s);
     at_maturity(&s, SWAP_PRICE); // fixing = prix de l'échange : pas d'écart
-    s.pool.settle_and_pay(&id, &SWAP_COST);
+    s.pool.settle_and_pay(&id, &SWAP_COST, &pay_deadline(&s));
     assert_eq!(mxn_token.balance(&s.supplier), NOTIONAL);
     // coût total pour Lucía (USDC sorti de son wallet) ≈ prix bloqué, à une unité d'arrondi près
     let total_cost = LUCIA_START - s.usdc.balance(&s.lucia);
@@ -1543,7 +1548,7 @@ fn settle_and_pay_fails_rather_than_overpay() {
     at_maturity(&s, SWAP_PRICE);
 
     // maximum signé sous le prix de l'échange : refus, rien ne bouge, la couverture reste réglable
-    assert_eq!(s.pool.try_settle_and_pay(&id, &(SWAP_COST - 1)), Err(Ok(contract_err(HedgeError::SwapTooExpensive as u32))));
+    assert_eq!(s.pool.try_settle_and_pay(&id, &(SWAP_COST - 1), &pay_deadline(&s)), Err(Ok(contract_err(HedgeError::SwapTooExpensive as u32))));
     assert_eq!(mxn_token.balance(&s.supplier), 0);
     assert!(!s.pool.get_hedge(&id).unwrap().settled);
     assert_eq!(s.usdc.balance(&s.lucia), LUCIA_START - HEDGE_MARGIN);
@@ -1559,11 +1564,11 @@ fn settle_and_pay_after_the_keeper_settled() {
     // le robot règle d'abord : le versement est crédité, la PME paie ensuite son fournisseur avec
     s.pool.settle(&id);
     assert!(s.pool.claimable(&s.lucia) > 0);
-    s.pool.settle_and_pay(&id, &SWAP_COST);
+    s.pool.settle_and_pay(&id, &SWAP_COST, &pay_deadline(&s));
     assert_eq!(mxn_token.balance(&s.supplier), NOTIONAL);
     assert_eq!(s.pool.claimable(&s.lucia), 0);
     // une seule fois par couverture
-    assert_eq!(s.pool.try_settle_and_pay(&id, &SWAP_COST), Err(Ok(contract_err(HedgeError::SupplierAlreadyPaid as u32))));
+    assert_eq!(s.pool.try_settle_and_pay(&id, &SWAP_COST, &pay_deadline(&s)), Err(Ok(contract_err(HedgeError::SupplierAlreadyPaid as u32))));
 }
 
 #[test]
@@ -1574,18 +1579,18 @@ fn settle_and_pay_guards() {
 
     // pas de route de paiement pour la devise
     at_maturity(&s, SWAP_PRICE);
-    assert_eq!(s.pool.try_settle_and_pay(&id, &SWAP_COST), Err(Ok(contract_err(HedgeError::NoPaymentRoute as u32))));
+    assert_eq!(s.pool.try_settle_and_pay(&id, &SWAP_COST, &pay_deadline(&s)), Err(Ok(contract_err(HedgeError::NoPaymentRoute as u32))));
     let (_, router) = payment_route(&s);
     assert_eq!(s.pool.payment_route(&mxn), Some(hedge::PaymentRoute { token: s.pool.payment_route(&mxn).unwrap().token, router }));
 
     // couverture inconnue
-    assert_eq!(s.pool.try_settle_and_pay(&99, &SWAP_COST), Err(Ok(contract_err(HedgeError::UnknownHedge as u32))));
+    assert_eq!(s.pool.try_settle_and_pay(&99, &SWAP_COST, &pay_deadline(&s)), Err(Ok(contract_err(HedgeError::UnknownHedge as u32))));
 
     // exportateur : il reçoit la devise, il n'a pas de fournisseur à payer
     set_spot(&s, SPOT_0);
     let sell = s.pool.open_hedge(&s.lucia, &s.supplier, &mxn, &Side::SellCurrency, &NOTIONAL, &MATURITY_IN, &1000, &None);
     at_maturity(&s, SWAP_PRICE);
-    assert_eq!(s.pool.try_settle_and_pay(&sell, &SWAP_COST), Err(Ok(contract_err(HedgeError::NotAPayment as u32))));
+    assert_eq!(s.pool.try_settle_and_pay(&sell, &SWAP_COST, &pay_deadline(&s)), Err(Ok(contract_err(HedgeError::NotAPayment as u32))));
     let _ = id;
 }
 
@@ -1595,11 +1600,53 @@ fn settle_and_pay_needs_the_owner_signature() {
     let id = open_funded(&s, Side::BuyCurrency);
     payment_route(&s);
     at_maturity(&s, SWAP_PRICE);
-    s.pool.settle_and_pay(&id, &SWAP_COST);
+    s.pool.settle_and_pay(&id, &SWAP_COST, &pay_deadline(&s));
     // seule Lucía signe ; sa signature couvre l'échange et le paiement du fournisseur
     let auths = s.env.auths();
     assert_eq!(auths.len(), 1);
     assert_eq!(auths[0].0, s.lucia);
+}
+
+/// Relecture de Hugo : la PME signe l'appel au routeur avec ses arguments exacts. La date limite doit donc être
+/// un argument qu'elle signe, pas une valeur calculée par le contrat à l'exécution (qui ne correspondrait jamais à
+/// celle de la simulation). On vérifie que le routeur reçoit exactement la date signée.
+#[test]
+fn settle_and_pay_passes_the_signed_deadline_to_the_router() {
+    use soroban_sdk::testutils::AuthorizedFunction;
+    let s = setup();
+    let id = open_funded(&s, Side::BuyCurrency);
+    let (_, router) = payment_route(&s);
+    at_maturity(&s, SWAP_PRICE);
+    let deadline = s.env.ledger().timestamp() + 1_234;
+    s.pool.settle_and_pay(&id, &SWAP_COST, &deadline);
+
+    // l'arbre signé par Lucía contient l'échange, avec exactement sa date limite et son maximum
+    let auths = s.env.auths();
+    let swap = auths[0]
+        .1
+        .sub_invocations
+        .iter()
+        .find_map(|i| match &i.function {
+            AuthorizedFunction::Contract((c, f, args)) if *c == router && *f == Symbol::new(&s.env, "swap_tokens_for_exact_tokens") => Some(args.clone()),
+            _ => None,
+        })
+        .expect("échange signé par Lucía");
+    let signed_max: i128 = soroban_sdk::FromVal::from_val(&s.env, &swap.get(1).unwrap());
+    let signed_deadline: u64 = soroban_sdk::FromVal::from_val(&s.env, &swap.get(4).unwrap());
+    assert_eq!((signed_max, signed_deadline), (SWAP_COST, deadline));
+}
+
+#[test]
+fn settle_and_pay_refused_after_the_deadline() {
+    let s = setup();
+    let id = open_funded(&s, Side::BuyCurrency);
+    let (mxn_token, _) = payment_route(&s);
+    at_maturity(&s, SWAP_PRICE);
+    let now = s.env.ledger().timestamp();
+    assert_eq!(s.pool.try_settle_and_pay(&id, &SWAP_COST, &now), Err(Ok(contract_err(HedgeError::DeadlinePassed as u32))));
+    // rien n'est fait
+    assert_eq!(mxn_token.balance(&s.supplier), 0);
+    assert!(!s.pool.get_hedge(&id).unwrap().settled);
 }
 
 #[test]

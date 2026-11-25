@@ -289,7 +289,7 @@ fn open_hedge(owner: Address, supplier: Address, currency: Symbol, side: Side,
               notional: i128, duration_secs: u64, cap_bps: u32,
               worst_rate: Option<i128>) -> u64;          // rejected (#210) if the locked rate is worse than worst_rate
 fn settle(hedge_id: u64) -> i128;                        // permissionless after maturity: credits margin ± P&L to the owner's claimable balance
-fn settle_and_pay(hedge_id: u64, max_usdc: i128) -> i128; // SME: settle + swap USDC→currency on Soroswap (exact output) + pay the supplier, one transaction
+fn settle_and_pay(hedge_id: u64, max_usdc: i128, deadline: u64) -> i128; // SME: settle + swap USDC→currency on Soroswap (exact output) + pay the supplier, one transaction
 fn set_payment_route(currency: Symbol, token: Address, router: Address); // admin
 fn claim(owner: Address) -> i128;                        // owner: receive the whole claimable balance
 fn claim_for(owner: Address) -> i128;                    // permissionless (keeper): pay the owner's claimable balance to the owner
