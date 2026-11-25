@@ -77,8 +77,17 @@ MXN_SAC=$(stellar contract id asset --asset "$MXN" --network $NET)
 echo "   USDC SAC = $USDC_SAC"
 echo "   MXN SAC  = $MXN_SAC"
 
+# Mode démo : échéance réelle = durée annoncée / DEMO_TIME_FACTOR ; le prix reste calculé sur la durée annoncée.
+# 25920 : 90 jours (7 776 000 s) → 300 s. DEMO_TIME_FACTOR=1 : version de production (sans la feature `demo`,
+# échéances réelles, `set_time_factor` refusé en 208), à utiliser pour les couvertures du sprint Instaward.
+DEMO_TIME_FACTOR=${DEMO_TIME_FACTOR:-25920}
+
 say "Build des contrats"
 stellar contract build --quiet
+if [ "$DEMO_TIME_FACTOR" != 1 ]; then
+  # le pool est recompilé avec le mode démo (même fichier .wasm, écrasé)
+  stellar contract build --quiet --package pool --features demo
+fi
 
 say "Déploiement mock-oracle"
 ORACLE=$(stellar contract deploy --wasm target/wasm32v1-none/release/mock_oracle.wasm \
@@ -125,13 +134,18 @@ for c in "MXN 500" "BRL 700" "ARS 1500" "EUR 300"; do
     set_min_cap --currency $1 --cap_bps $2 >/dev/null
 done
 
-say "Mode démo : 90 jours en 5 minutes (time_factor)"
-# Échéance réelle = durée annoncée / DEMO_TIME_FACTOR ; le prix reste calculé sur la durée annoncée.
-# 25920 : 90 jours (7 776 000 s) → 300 s. DEMO_TIME_FACTOR=1 pour le temps réel.
-DEMO_TIME_FACTOR=${DEMO_TIME_FACTOR:-25920}
+if [ "$DEMO_TIME_FACTOR" != 1 ]; then
+  say "Mode démo : 90 jours en 5 minutes (time_factor)"
+  stellar contract invoke --id $POOL --source-account $ADMIN --network $NET --quiet --     set_time_factor --factor $DEMO_TIME_FACTOR >/dev/null
+  echo "   time_factor = $DEMO_TIME_FACTOR"
+else
+  say "Version de production : pas de mode démo, échéances réelles"
+fi
+
+say "PME de la démo dans la liste blanche du pilote (active par défaut : sinon open_hedge refuse en 211)"
 stellar contract invoke --id $POOL --source-account $ADMIN --network $NET --quiet -- \
-  set_time_factor --factor $DEMO_TIME_FACTOR >/dev/null
-echo "   time_factor = $DEMO_TIME_FACTOR"
+  set_allowed --role Sme --who $USER --allowed true >/dev/null
+echo "   $USER autorisée à ouvrir des couvertures"
 
 say "Dépôt du LP dans le pool (1 000 000 USDC contre des parts)"
 LP_DEPOSIT=10000000000000   # 1 000 000 USDC, 7 décimales

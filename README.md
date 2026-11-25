@@ -286,12 +286,25 @@ fn set_min_cap(currency: Symbol, cap_bps: u32);          // admin
 fn set_spread(spread_bps: u32);                          // admin
 // Hedges / payment
 fn open_hedge(owner: Address, supplier: Address, currency: Symbol, side: Side,
-              notional: i128, duration_secs: u64, cap_bps: u32) -> u64;
-fn settle(hedge_id: u64) -> i128;                        // permissionless after maturity
+              notional: i128, duration_secs: u64, cap_bps: u32,
+              worst_rate: Option<i128>) -> u64;          // rejected (#210) if the locked rate is worse than worst_rate
+fn settle(hedge_id: u64) -> i128;                        // permissionless after maturity: credits margin ± P&L to the owner's claimable balance
+fn settle_and_pay(hedge_id: u64, max_usdc: i128, deadline: u64) -> i128; // SME: settle + swap USDC→currency on Soroswap (exact output) + pay the supplier, one transaction
+fn set_payment_route(currency: Symbol, token: Address, router: Address); // admin
+fn claim(owner: Address) -> i128;                        // owner: receive the whole claimable balance
+fn claim_for(owner: Address) -> i128;                    // permissionless (keeper): pay the owner's claimable balance to the owner
+fn claimable(owner: Address) -> i128;
+fn total_claimable() -> i128;
+fn set_allowed(role: Role, who: Address, allowed: bool);   // admin, pilot allowlists (Lp, Sme), on by default
+fn set_hedge_limits(max_hedge_notional: Option<i128>, max_duration_secs: Option<u64>,
+                    max_open_per_sme: Option<u32>);       // admin, pilot limits per hedge (#211-#215)
+fn pilot_limits() -> PilotLimits;
 fn close_early(hedge_id: u64) -> i128;                   // owner only, before maturity: close at market price
+fn record_fixing(hedge_id: u64) -> i128;                 // permissionless after maturity: lock the maturity rate without settling
+fn settle_fallback(hedge_id: u64) -> i128;               // admin only, only once no maturity rate exists or can come: zero P&L, margin returned
 fn get_hedge(hedge_id: u64) -> Option<Hedge>;
 fn time_factor() -> u32;                                 // 1 = real time
-fn set_time_factor(factor: u32);                         // admin, demo: 25,920 → 90 d in 5 real minutes
+fn set_time_factor(factor: u32);                         // admin, demo build only (else #208): 25,920 → 90 d in 5 real minutes
 ```
 
 ---
@@ -310,7 +323,7 @@ Reflector FX testnet covers: EUR, GBP, CHF, CAD, **MXN, ARS, BRL**, THB, XAU (US
 
 The pool is redeployed on every `./scripts/setup-testnet.sh`, which also makes the LP deposit (1,000,000 USDC via `deposit_lp`). Current IDs are in `.env.testnet`.
 
-**Demo mode:** setup sets `set_time_factor 25920`: the price is computed over the stated duration (90 days), but the actual maturity falls 5 minutes after opening. This is what lets us settle a "90-day" hedge live in the video.
+**Demo mode:** setup sets `set_time_factor 25920`: the price is computed over the stated duration (90 days), but the actual maturity falls 5 minutes after opening. This is what lets us settle a "90-day" hedge live in the video. Demo mode only exists in a pool built with the `demo` cargo feature (`stellar contract build --package pool --features demo`), which `scripts/setup-testnet.sh` does by default; `DEMO_TIME_FACTOR=1 scripts/setup-testnet.sh` deploys the production build instead (real maturities, `set_time_factor` rejected with #208). Tests: `cargo test` covers the production build, `cargo test -p pool --features demo` the demo build. Randomized settlement tests replay 40 seeded scenarios (opens in both directions, peso moves, settlements, early closes, fallback, claims) and check after every step that USDC is conserved, that pool and SMEs play a zero-sum game, and that every payout stays within [0, 2 × margin]; `POOL_SCENARIOS=1000 cargo test -p pool random_scenarios` runs a longer pass.
 
 **Testnet MVP limitations:** supplier payment from the app in MXN only (the only currency with a test asset and a DEX offer placed by the setup; BRL, ARS and EUR hedges settle normally); demo oracle (SEP-40 mock-oracle, for the crash) instead of Reflector, copied from Reflector by `keepalive.sh --live` outside of filming; test USDC and MXN issued by the ISSUER account, MXN/USDC DEX offer placed by us; gross capacity rule (sum of margins, no netting); interest rates read from the Etherfuse API and pushed by the admin (`scripts/sync-rates.sh`), not read by the contract.
 
@@ -386,8 +399,8 @@ TODO.md                # setup and work items
 
 Fixes planned after the hackathon; details in `docs/points-a-trancher.md`.
 
-- **Fixing: single price, no escape path yet.** `settle` uses the price in effect at maturity if it is at most 15 minutes old, otherwise the first price published within the following hour; until then it fails with 312 and the hedge stays open. The rate can be locked without settling, which matters because Reflector forgets its prices after about 24 hours. Still missing, planned for the Instaward sprint: a time-weighted average over ~30 minutes with consistency bounds instead of a single price, and the `settle_fallback` escape path (zero P&L once the contract has established that no price exists), without which a hedge whose fixing is lost stays locked.
-- **Demo mode (`time_factor` > 1)**: the price covers the stated duration and maturity is shortened, so carry is not neutralized (arbitrage possible against the pool). `time_factor` must be 1 in production; `set_time_factor` moves behind a `demo` cargo feature during the Instaward sprint.
+- **Fixing: single price.** `settle` uses the price in effect at maturity if it is at most 15 minutes old, otherwise the first price published within the following hour; until then it fails with 312 and the hedge stays open. `record_fixing` locks the rate without settling (Reflector forgets its prices after about 24 hours), and `settle_fallback` (admin only, so that it is not a free option for the losing side) closes a hedge at zero P&L once the contract has established that no price exists, so funds can no longer stay locked. Still missing, planned for the Instaward sprint: a time-weighted average over ~30 minutes with consistency bounds instead of a single price.
+- **Demo mode (`time_factor` > 1)**: the price covers the stated duration and maturity is shortened, so carry is not neutralized (arbitrage possible against the pool). `time_factor` must be 1 in production: `set_time_factor` now only exists in the `demo` build (#208 otherwise) and `time_factor` is always 1 without it.
 - **Deposit just before a winning `settle`**: the fixing is known at maturity, so an LP can enter at full price just before settlement and exit right after. To be fixed with an entry delay or by blocking `deposit_lp` while a matured hedge is unsettled.
 - **Tranches**: accrued senior interest lowers the junior value, which can fall below reserved capital (negative capacity) or below 20% without any operation; `withdraw_senior` does not yet check that the remaining capital covers the reserved amount. Fix written (capped Safe withdrawals, junior share floor), under review before merge.
 

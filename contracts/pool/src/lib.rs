@@ -73,13 +73,11 @@ pub struct Hedge {
 pub enum Role {
     /// Apporteur de capital (dépôts junior et senior) : vault.rs.
     Lp,
-    /// PME qui ouvre des couvertures : hedge.rs (moitié de Clément, pas encore branchée).
+    /// PME qui ouvre des couvertures : hedge.rs.
     Sme,
 }
 
 /// Réglages et compteurs du pilote (B9), en lecture pour le front.
-/// Les champs côté couvertures (liste PME, plafonds par couverture et de durée, nombre maximal
-/// de couvertures ouvertes) seront ajoutés par la moitié hedge de B9.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PilotLimits {
@@ -89,6 +87,14 @@ pub struct PilotLimits {
     pub notional_cap: Option<i128>,
     /// Σ notionnels des couvertures ouvertes, USDC 7 décimales au taux bloqué.
     pub total_notional: i128,
+    /// Liste blanche des PME active (true par défaut : pilote fermé).
+    pub sme_allowlist_on: bool,
+    /// Montant maximal d'une couverture, USDC 7 décimales au taux bloqué ; `None` = sans limite.
+    pub max_hedge_notional: Option<i128>,
+    /// Durée maximale d'une couverture (durée annoncée), en secondes ; `None` = sans limite.
+    pub max_duration_secs: Option<u64>,
+    /// Nombre maximal de couvertures ouvertes par PME ; `None` = sans limite.
+    pub max_open_per_sme: Option<u32>,
 }
 
 #[contracttype]
@@ -226,7 +232,7 @@ impl Pool {
     pub fn set_allowed(env: Env, role: Role, who: Address, allowed: bool) {
         match role {
             Role::Lp => vault::set_lp_allowed(&env, &who, allowed),
-            Role::Sme => admin::sme_not_implemented(&env),
+            Role::Sme => hedge::set_sme_allowed(&env, &who, allowed),
         }
     }
 
@@ -234,7 +240,7 @@ impl Pool {
     pub fn is_allowed(env: Env, role: Role, who: Address) -> bool {
         match role {
             Role::Lp => vault::is_lp_allowed(&env, &who),
-            Role::Sme => admin::sme_not_implemented(&env),
+            Role::Sme => hedge::is_sme_allowed(&env, &who),
         }
     }
 
@@ -242,7 +248,7 @@ impl Pool {
     pub fn set_allowlist_enabled(env: Env, role: Role, enabled: bool) {
         match role {
             Role::Lp => vault::set_lp_allowlist_enabled(&env, enabled),
-            Role::Sme => admin::sme_not_implemented(&env),
+            Role::Sme => hedge::set_sme_allowlist_enabled(&env, enabled),
         }
     }
 
@@ -257,11 +263,23 @@ impl Pool {
         vault::total_notional(&env)
     }
 
+    /// Admin : limites du pilote par couverture. `max_hedge_notional` en USDC (7 décimales) au taux bloqué,
+    /// `max_duration_secs` sur la durée annoncée, `max_open_per_sme` couvertures ouvertes en même temps par PME.
+    /// `None` = sans limite ; 0 refusé (215). Contrôlées à l'ouverture seulement.
+    pub fn set_hedge_limits(env: Env, max_hedge_notional: Option<i128>, max_duration_secs: Option<u64>, max_open_per_sme: Option<u32>) {
+        hedge::set_limits(&env, max_hedge_notional, max_duration_secs, max_open_per_sme)
+    }
+
     pub fn pilot_limits(env: Env) -> PilotLimits {
+        let limits = hedge::limits(&env);
         PilotLimits {
             lp_allowlist_on: vault::lp_allowlist_on(&env),
             notional_cap: vault::notional_cap(&env),
             total_notional: vault::total_notional(&env),
+            sme_allowlist_on: hedge::sme_allowlist_on(&env),
+            max_hedge_notional: limits.max_hedge_notional,
+            max_duration_secs: limits.max_duration_secs,
+            max_open_per_sme: limits.max_open_per_sme,
         }
     }
 
@@ -285,7 +303,9 @@ impl Pool {
 
     // ---- Couvertures / paiement ----
 
-    /// Ouvre une couverture et retourne son id.
+    /// Ouvre une couverture et retourne son id. `worst_rate` : taux limite signé par la PME (USD par unité,
+    /// 14 décimales), typiquement le taux du devis affiché ; refus 210 si le taux bloqué est moins bon (plus haut
+    /// pour BuyCurrency, plus bas pour SellCurrency). `None` = sans limite.
     pub fn open_hedge(
         env: Env,
         owner: Address,
@@ -295,14 +315,70 @@ impl Pool {
         notional: i128,
         duration_secs: u64,
         cap_bps: u32,
+        worst_rate: Option<i128>,
     ) -> u64 {
         admin::require_not_paused(&env);
-        hedge::open(&env, &owner, &supplier, &currency, side, notional, duration_secs, cap_bps)
+        hedge::open(&env, &owner, &supplier, &currency, side, notional, duration_secs, cap_bps, worst_rate)
     }
 
-    /// Permissionless après l'échéance. Retourne le montant USDC versé au propriétaire.
+    /// Permissionless après l'échéance. Le versement (marge ± P&L) est **crédité** au solde réclamable du
+    /// propriétaire (`claim` / `claim_for` pour le recevoir). Retourne ce montant en USDC.
     pub fn settle(env: Env, hedge_id: u64) -> i128 {
         hedge::settle(&env, hedge_id)
+    }
+
+    /// Sans signature, après l'échéance : fige le cours d'échéance sans régler et le renvoie (répétable).
+    /// À appeler par le robot dans les 24 h qui suivent chaque échéance : Reflector oublie ses cours ensuite.
+    /// 312 tant qu'aucun cours n'est lisible.
+    pub fn record_fixing(env: Env, hedge_id: u64) -> i128 {
+        hedge::record_fixing(&env, hedge_id)
+    }
+
+    /// Admin seul, après l'échéance : voie de secours quand le cours d'échéance est définitivement absent.
+    /// Réservée à l'admin : ouverte à tous, ce serait une option gratuite pour le perdant (attendre 24 h).
+    /// Clôture à P&L nul (marge créditée au solde réclamable). Refus 209 si un cours existe ou peut encore arriver.
+    /// Retourne le montant USDC crédité au propriétaire.
+    pub fn settle_fallback(env: Env, hedge_id: u64) -> i128 {
+        hedge::settle_fallback(&env, hedge_id)
+    }
+
+    /// Signé par la PME : règle la couverture (si ce n'est pas déjà fait) et paie au fournisseur exactement le
+    /// montant de la facture en devise, via un échange USDC → devise sur Soroswap, dans une seule transaction.
+    /// `max_usdc` : USDC maximum que la PME accepte de dépenser dans l'échange (refus 217 au-delà, rien n'est fait).
+    /// `deadline` : date limite signée par la PME (timestamp du ledger), passée au routeur ; refus 220 au-delà.
+    /// Tout ou rien. Refus : 216 (pas de route pour la devise), 218 (déjà payé), 219 (couverture SellCurrency).
+    /// Retourne l'USDC dépensé dans l'échange. Possible en pause.
+    pub fn settle_and_pay(env: Env, hedge_id: u64, max_usdc: i128, deadline: u64) -> i128 {
+        hedge::settle_and_pay(&env, hedge_id, max_usdc, deadline)
+    }
+
+    /// Admin : route de paiement du fournisseur pour une devise (jeton SAC de la devise, routeur Soroswap).
+    pub fn set_payment_route(env: Env, currency: Symbol, token: Address, router: Address) {
+        hedge::set_payment_route(&env, &currency, &token, &router)
+    }
+
+    pub fn payment_route(env: Env, currency: Symbol) -> Option<hedge::PaymentRoute> {
+        hedge::payment_route(&env, &currency)
+    }
+
+    /// Signé par `owner` : lui verse tout son solde réclamable. 0 s'il n'a rien. Possible en pause.
+    pub fn claim(env: Env, owner: Address) -> i128 {
+        hedge::claim(&env, &owner)
+    }
+
+    /// Sans signature (robot) : verse à `owner` tout son solde réclamable. 0 s'il n'a rien. Possible en pause.
+    pub fn claim_for(env: Env, owner: Address) -> i128 {
+        hedge::claim_for(&env, &owner)
+    }
+
+    /// Solde réclamable de `owner` en USDC (7 décimales).
+    pub fn claimable(env: Env, owner: Address) -> i128 {
+        hedge::claimable(&env, &owner)
+    }
+
+    /// Σ des soldes réclamables en USDC : avec le capital des LPs et les marges ouvertes, c'est tout l'USDC du contrat.
+    pub fn total_claimable(env: Env) -> i128 {
+        hedge::total_claimable(&env)
     }
 
     /// Propriétaire seul, avant l'échéance : clôture au prix du marché (forward du jour pour la durée restante,
@@ -316,12 +392,13 @@ impl Pool {
     }
 
     /// Mode démo : échéance réelle = durée annoncée / `time_factor` (le prix reste calculé sur la
-    /// durée annoncée). 1 par défaut = temps réel.
+    /// durée annoncée). 1 par défaut = temps réel ; toujours 1 sans la feature `demo`.
     pub fn time_factor(env: Env) -> u32 {
         hedge::time_factor(&env)
     }
 
-    /// Admin, testnet / démo uniquement : ex. 25 920 → une couverture à 90 jours échoit en 300 s.
+    /// Admin, version de démo uniquement (feature `demo`, sinon erreur 208) : ex. 25 920 → une couverture à
+    /// 90 jours échoit en 300 s.
     pub fn set_time_factor(env: Env, factor: u32) {
         hedge::set_time_factor(&env, factor)
     }

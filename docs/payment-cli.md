@@ -25,7 +25,7 @@ stellar contract invoke --id fx-mock-oracle --source-account fx-admin --network 
 ```sh
 stellar contract invoke --id fx-pool --source-account fx-admin --network testnet --   set_time_factor --factor 25920                                      # échéance réelle = durée / 25 920
 ```
-Le prix reste calculé sur la durée annoncée (`--duration_secs 7776000` = 90 jours → prix à 90 jours), l'échéance réelle tombe 300 s après l'ouverture. Événement `time_factor_set`. Lecture : `-- time_factor` (1 = temps réel).
+Seulement sur un pool compilé avec la feature `demo` (sinon `#208`). Le prix reste calculé sur la durée annoncée (`--duration_secs 7776000` = 90 jours → prix à 90 jours), l'échéance réelle tombe 300 s après l'ouverture. Événement `time_factor_set`. Lecture : `-- time_factor` (1 = temps réel).
 
 ## 1. Le LP remplit le pool (fx-lp)
 
@@ -35,14 +35,29 @@ stellar contract invoke --id fx-pool --source-account fx-lp --network testnet --
 ```
 Retour : les parts du LP. Contrôle : `-- capacity` augmente de `1000000000000` (le setup a déjà déposé 1 000 000 USDC).
 
+## Pilote : PME autorisées et limites (fx-admin)
+
+La liste blanche des PME est **active par défaut** : une PME doit être autorisée avant sa première couverture (sinon `#211`). `setup-testnet.sh` autorise `fx-lucia`, `seed-testnet.sh` ses PME.
+```sh
+stellar contract invoke --id fx-pool --source-account fx-admin --network testnet -- \
+  set_allowed --role Sme --who fx-lucia --allowed true          # false pour la retirer
+stellar contract invoke --id fx-pool --source-account fx-admin --network testnet -- \
+  set_allowlist_enabled --role Sme --enabled false              # ouvrir à toutes les PME
+stellar contract invoke --id fx-pool --source-account fx-admin --network testnet -- \
+  set_hedge_limits --max_hedge_notional 1000000000000 --max_duration_secs 10368000 --max_open_per_sme 3
+```
+Limites (facultatives, absentes = sans limite ; 0 refusé en `#215`) : montant maximal d'une couverture en USDC au taux bloqué (`#212`), durée maximale annoncée (`#213`, ici 120 jours), nombre de couvertures ouvertes en même temps par PME (`#214`). Contrôlées à l'ouverture seulement : une PME retirée ou une limite abaissée ne bloque jamais le règlement des couvertures déjà ouvertes. Lecture : `pilot_limits` (avec les réglages LP), `is_allowed --role Sme --who …`. Événements : `sme_allowed_set`, `allowlist_toggled`, `hedge_limits_set`.
+
 ## 2. Lucía bloque son taux (fx-lucia)
 
 ```sh
 stellar contract invoke --id fx-pool --source-account fx-lucia --network testnet -- \
   open_hedge --owner fx-lucia --supplier fx-supplier --currency MXN --side BuyCurrency \
-  --notional 10000000000000 --duration_secs 7776000 --cap_bps 1000    # 1 000 000 MXN, 90 jours, 10 %
+  --notional 10000000000000 --duration_secs 7776000 --cap_bps 1000 \
+  --worst_rate 5501281368668                                           # 1 000 000 MXN, 90 jours, 10 %, taux du devis
 ```
 Retour : l'id de la couverture (`0` pour la première). Signature : **Lucía seule**.
+`--worst_rate` (facultatif) : taux limite, en général le `forward_rate` du devis affiché. Si le cours a bougé entre le devis et l'exécution et que le taux bloqué est moins bon (plus haut pour `BuyCurrency`, plus bas pour `SellCurrency`), refus `#210` et rien n'est prélevé. Sans `--worst_rate`, pas de limite.
 Effets : transfert USDC Lucía → pool de la marge, événement `hedge_opened`, `capacity` baisse de la marge, `exposure MXN` augmente.
 
 ## 3. Crash du peso (fx-admin)
@@ -61,8 +76,53 @@ Attendre l'échéance réelle (`get_hedge` → champ `maturity`, en secondes Uni
 stellar contract invoke --id fx-pool --source-account fx-supplier --network testnet -- \
   settle --hedge_id 0
 ```
-Retour : l'USDC versé à Lucía (marge ± P&L, entre 0 et 2 × marge). Effets : transfert USDC pool → Lucía, événement `hedge_settled` (spot de fixing, P&L, versement).
-Le cours utilisé est celui **en vigueur à l'échéance**, quel que soit le moment de l'appel : un prix posé après l'échéance ne compte pas. Régler peu après l'échéance : l'historique de Reflector ne remonte qu'à ~12 h, celui du mock à 64 prix (au-delà : #312).
+Retour : le montant dû à Lucía (marge ± P&L, entre 0 et 2 × marge). Effets : ce montant est **crédité à son solde réclamable** (rien ne lui est envoyé), événement `hedge_settled` (spot de fixing, P&L, versement). Ainsi le règlement ne dépend jamais du compte de la PME : une ligne USDC supprimée ne bloque pas le règlement, seulement son propre versement.
+
+### Recevoir le versement : `claim` / `claim_for`
+
+```sh
+stellar contract invoke --id fx-pool --source-account fx-lucia --network testnet -- \
+  claim --owner fx-lucia                 # signé par la PME : lui verse tout son solde
+stellar contract invoke --id fx-pool --source-account fx-admin --network testnet -- \
+  claim_for --owner fx-lucia             # sans signature (robot) : l'argent va toujours à la PME
+```
+Retour : l'USDC versé (0 s'il n'y a rien, sans erreur). Événement `claimed` (propriétaire, montant). Possible en pause. Lectures : `claimable --owner …` (solde d'une PME) et `total_claimable` (somme de tous les soldes). La clôture anticipée (`close_early`, signée par la PME) verse toujours directement.
+Le cours utilisé est celui **en vigueur à l'échéance** s'il a au plus 15 minutes, sinon le premier publié dans l'heure qui suit, quel que soit le moment de l'appel. Tant qu'aucun cours n'est lisible : #312, la couverture reste ouverte. Régler (ou figer le cours) dans les 24 h : Reflector oublie ses cours ensuite.
+
+### Régler et payer le fournisseur en une transaction : `settle_and_pay`
+
+Signé par la PME seule. Règle la couverture (sauté si le robot l'a déjà réglée), lui verse son solde réclamable, échange sur **Soroswap** ses USDC contre **exactement** le montant de la facture en devise, et paie le fournisseur, le tout dans une seule transaction (tout ou rien).
+```sh
+stellar contract invoke --id fx-pool --source-account fx-lucia --network testnet -- \
+  settle_and_pay --hedge_id 0 --max_usdc 560000000000 \
+  --deadline $(( $(date +%s) + 300 ))                     # 56 000 USDC au plus, valable 5 minutes
+```
+`--max_usdc` : USDC maximum que la PME accepte de dépenser dans l'échange (devis : `router_get_amounts_in` du routeur). Au-delà : `#217`, rien n'est fait, la couverture reste réglable par `settle`. `--deadline` : date limite (secondes Unix, heure du ledger) signée par la PME et transmise au routeur ; passée : `#220`. Elle doit être un argument signé : la PME signe l'appel au routeur avec ses arguments exacts, une date calculée par le contrat ne correspondrait jamais à celle de la simulation. Retour : l'USDC dépensé. Événement `supplier_paid` (fournisseur, montant en devise, USDC dépensés). Refus : `#216` pas de route pour la devise, `#218` fournisseur déjà payé, `#219` couverture `SellCurrency` (l'exportateur reçoit la devise).
+
+Route de paiement, posée par l'admin pour chaque devise (le jeton de la devise et le routeur), pour qu'une PME ne puisse pas payer son fournisseur en faux jeton :
+```sh
+stellar contract invoke --id fx-pool --source-account fx-admin --network testnet -- \
+  set_payment_route --currency MXN --token $MXN_SAC --router CCJUD55AG6W5HAI5LRVNKAE5WDP5XGZBUDS5WNTIVDU7O264UZZE7BRD
+```
+Routeur Soroswap testnet d'après `public/testnet.contracts.json` du dépôt `soroswap/core` (le testnet peut être réinitialisé : vérifier l'adresse). La paire USDC/MXN de test est à créer et financer sur Soroswap (factory testnet `CDP3HMUH6SMS3S7NPGNDJLULCOXXEPSHY4JKUKMBNQMATHDHWXRRJTBY`). Tests : routeur de test à l'interface identique (`mock_soroswap` dans les tests du contrat) ; pas encore essayé sur le vrai Soroswap.
+
+### Figer le cours sans régler : `record_fixing`
+
+Sans signature, après l'échéance. Fige le cours d'échéance de la couverture et le renvoie ; `settle` l'utilisera même après l'oubli de l'historique de l'oracle. Répétable (renvoie le cours déjà figé). C'est l'appel du robot, peu après chaque échéance.
+```sh
+stellar contract invoke --id fx-pool --source-account fx-admin --network testnet -- \
+  record_fixing --hedge_id 0
+```
+Refus : #200, #201, #202 (pas encore échue), #312 (pas encore de cours, ou plus aucun).
+
+### Voie de secours : `settle_fallback`
+
+**Admin seul**, après l'échéance, **seulement si aucun cours n'existe ni ne peut plus arriver** (rien de figé, aucun cours dans l'heure après l'échéance, ou historique oublié). Clôture à P&L nul : la marge est rendue au propriétaire, la réserve du pool libérée. Événement `hedge_fallback_settled` (versement).
+```sh
+stellar contract invoke --id fx-pool --source-account fx-admin --network testnet -- \
+  settle_fallback --hedge_id 0                           # signé par l'admin
+```
+Refus #209 tant qu'un cours existe (figé ou lisible) ou peut encore être publié : utiliser `settle`, ou attendre la fin de l'heure qui suit l'échéance. Réservée à l'admin (relecture de Hugo, 25/11) : ouverte à tous, ce serait une option gratuite pour le perdant, qui n'aurait qu'à attendre que personne ne fige le cours pendant 24 h. D'où le robot, qui fige le cours (`record_fixing`) avant chaque règlement.
 
 ### Clôture anticipée (avant l'échéance)
 
@@ -83,7 +143,7 @@ Au lieu d'appeler `settle` à la main, `scripts/keeper.sh` surveille les couvert
 ./scripts/keeper.sh --dry-run       # affiche ce qu'il réglerait, sans rien envoyer
 POOL=fx-pool SOURCE=fx-admin ./scripts/keeper.sh --interval 5
 ```
-Il parcourt les couvertures depuis l'id 0, compare leur échéance à l'heure du dernier ledger et affiche la raison d'un refus (#202 réseau en retard d'un ledger, #302, #312). Le lancer avant l'échéance règle aussi la limite d'historique de Reflector (~12 h) : le règlement part dans les secondes qui suivent l'échéance.
+Il parcourt les couvertures depuis l'id 0, compare leur échéance à l'heure du dernier ledger, fige le cours de chaque couverture échue (`record_fixing`), la règle, puis pousse le versement à la PME (`claim_for`), et affiche la raison d'un refus (#202 réseau en retard d'un ledger, #312 pas encore de cours). Une heure après l'échéance, si aucun cours n'existe (#312), il passe par la voie de secours (`settle_fallback`, admin seul : seulement si `SOURCE` est l'admin). Le lancer avant l'échéance règle aussi la limite d'historique de Reflector (~12 h) : le règlement part dans les secondes qui suivent l'échéance.
 Testé sur testnet : couverture de 45 s réelles réglée par le keeper en boucle 10 s après l'échéance, sans intervention ([tx](https://stellar.expert/explorer/testnet/tx/656d79533ce6d192d21f3a5824722fc4ebc66a2bd202dcadcfb8f9993e490773)).
 
 ## 5. Réaligner l'offre DEX sur le nouveau prix (fx-admin)
@@ -163,6 +223,20 @@ Les textes de `panic!` sont effacés dans le WASM déployé : le front ne reçoi
 | #203 `InvalidNotional` | Paiement | Montant de facture invalide |
 | #204 `InvalidDuration` | Paiement | Échéance invalide |
 | #206 `AlreadyMatured` | Paiement | Échéance atteinte : régler (`settle`) au lieu de clôturer |
+| #207 `Overflow` | Paiement | Montant ou cours hors de toute plage réaliste (calcul du P&L) |
+| #208 `DemoDisabled` | Paiement (admin) | Mode démo indisponible : contrat compilé sans la feature `demo` |
+| #209 `FixingAvailable` | Paiement | Un cours d'échéance existe ou peut encore arriver : régler normalement au lieu du secours |
+| #210 `RateWorseThanLimit` | Paiement | Le cours a bougé depuis le devis : taux moins bon que votre limite, refaire un devis |
+| #211 `SmeNotAllowed` | Paiement | Ce compte ne fait pas partie du pilote |
+| #212 `HedgeTooLarge` | Paiement | Montant au-delà du maximum par couverture du pilote |
+| #213 `HedgeTooLong` | Paiement | Échéance au-delà de la durée maximale du pilote |
+| #214 `TooManyOpenHedges` | Paiement | Nombre maximal de couvertures ouvertes atteint : attendre un règlement |
+| #215 `InvalidLimit` | Paiement (admin) | Limite nulle : laisser vide pour « sans limite » |
+| #216 `NoPaymentRoute` | Paiement | Paiement direct du fournisseur pas encore ouvert pour cette devise |
+| #217 `SwapTooExpensive` | Paiement | L'échange coûterait plus que votre maximum : refaire le devis |
+| #218 `SupplierAlreadyPaid` | Paiement | Le fournisseur de cette couverture est déjà payé |
+| #219 `NotAPayment` | Paiement | Couverture de vente : pas de fournisseur à payer |
+| #220 `DeadlinePassed` | Paiement | Délai de la transaction dépassé : relancer le paiement |
 | #100 `InvalidAmount` | Vault | Montant invalide |
 | #101 `InsufficientCapacity` | Vault | Le pool n'a pas assez de capital pour cette protection |
 | #102 `ReleaseExceedsReserved` | Vault | Erreur interne (libération au-delà du capital réservé) |

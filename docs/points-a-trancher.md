@@ -63,7 +63,7 @@ Aucune n'est corrigée dans le contrat avant la soumission ; elles sont résumé
 
 **c. Dépôt juste avant un `settle` gagnant.** Le fixing est public dès l'échéance, alors que `settle` est appelé plus tard : un LP peut déposer au prix plein juste avant un règlement gagnant pour le pool, puis retirer juste après. *Correctif :* délai d'entrée, ou blocage de `deposit_lp` tant qu'une couverture échue n'est pas réglée.
 
-**d. Versement poussé dans `settle`.** Si le transfert USDC au propriétaire échoue (trustline supprimée, compte désautorisé par l'émetteur), tout le `settle` échoue et le capital réservé reste bloqué tant que le propriétaire ne corrige pas. *Correctif :* modèle pull (solde réclamable + `claim()`).
+**d. Versement poussé dans `settle`.** Si le transfert USDC au propriétaire échoue (trustline supprimée, compte désautorisé par l'émetteur), tout le `settle` échoue et le capital réservé reste bloqué tant que le propriétaire ne corrige pas. *Correctif :* modèle pull (solde réclamable + `claim()`). **Fait le 25/11 (B4)** : `settle` et `settle_fallback` créditent un solde réclamable, `claim` / `claim_for` le versent.
 
 **e. Tranches : intérêts senior et `Reserved`.** Les intérêts senior (4,5 %/an, temps réel) sont pris sur le junior : la valeur junior peut passer sous `Reserved` (capacité négative) ou sous 20 % sans aucune opération, et `withdraw_senior` ne vérifie pas que le capital restant couvre `Reserved` (un `settle` perdant pour le pool échouerait alors en 103). *Correctif :* dans `withdraw_senior`, refuser si `total_deposits - amount < reserved` (nouveau code 113).
 
