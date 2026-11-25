@@ -692,8 +692,6 @@ const MARGIN: i128 = 54_870_000_000;
 /// Environnement de test commun : USDC (SAC), mock-oracle (MXN à 0.055), pool, et les acteurs.
 struct Setup<'a> {
     env: Env,
-    // lu seulement par les tests du mode démo
-    #[cfg_attr(not(feature = "demo"), allow(dead_code))]
     admin: Address,
     lucia: Address,
     supplier: Address,
@@ -1372,6 +1370,122 @@ fn settle_refused_while_no_rate_and_hedge_stays_open() {
     s.env.ledger().set_timestamp(now + MATURITY_IN + 86_401);
     assert_eq!(s.pool.try_settle(&id), Err(Ok(contract_err(PricingError::NoFixing as u32))));
     assert!(!s.pool.get_hedge(&id).unwrap().settled);
+}
+
+// ---- Cours figé et règlement de secours ----
+
+/// Un jour plus une seconde : Reflector (et le mock) ont oublié le cours d'échéance.
+const AFTER_HISTORY: u64 = 86_401;
+
+#[test]
+fn record_fixing_locks_rate_for_a_later_settle() {
+    let s = setup();
+    let now = s.env.ledger().timestamp();
+    let id = open_funded(&s, Side::BuyCurrency);
+
+    // crash +12 % juste avant l'échéance ; le robot fige le cours une minute après, sans signature
+    price_at(&s, now + MATURITY_IN - 10, 6_160_000_000_000);
+    s.env.ledger().set_timestamp(now + MATURITY_IN + 60);
+    assert_eq!(s.pool.set_auths(&[]).record_fixing(&id), 6_160_000_000_000);
+    // appel répétable : même cours, rien ne change
+    assert_eq!(s.pool.record_fixing(&id), 6_160_000_000_000);
+    assert!(!s.pool.get_hedge(&id).unwrap().settled);
+
+    // règlement plus de 24 h après : l'oracle a oublié, le cours figé sert
+    s.env.ledger().set_timestamp(now + MATURITY_IN + AFTER_HISTORY);
+    let paid = s.pool.settle(&id);
+    assert_settled(&s, id, paid, 2 * HEDGE_MARGIN, -HEDGE_MARGIN);
+}
+
+#[test]
+fn record_fixing_guards() {
+    let s = setup();
+    let now = s.env.ledger().timestamp();
+    let id = open_funded(&s, Side::BuyCurrency);
+
+    assert_eq!(s.pool.try_record_fixing(&99), Err(Ok(contract_err(HedgeError::UnknownHedge as u32))));
+    assert_eq!(s.pool.try_record_fixing(&id), Err(Ok(contract_err(HedgeError::NotMatured as u32))));
+
+    // échéance passée mais pas encore de cours utilisable
+    s.env.ledger().set_timestamp(now + MATURITY_IN + AFTER_HISTORY);
+    assert_eq!(s.pool.try_record_fixing(&id), Err(Ok(contract_err(PricingError::NoFixing as u32))));
+
+    // couverture réglée : plus rien à figer (cours frais pour pouvoir ouvrir)
+    set_spot(&s, SPOT_0);
+    let id2 = s.pool.open_hedge(&s.lucia, &s.supplier, &Symbol::new(&s.env, "MXN"), &Side::BuyCurrency, &NOTIONAL, &MATURITY_IN, &1000);
+    at_maturity(&s, SPOT_0);
+    s.pool.settle(&id2);
+    assert_eq!(s.pool.try_record_fixing(&id2), Err(Ok(contract_err(HedgeError::AlreadySettled as u32))));
+}
+
+#[test]
+fn settle_fallback_closes_without_gain_or_loss() {
+    let s = setup();
+    let now = s.env.ledger().timestamp();
+    let id = open_funded(&s, Side::BuyCurrency);
+
+    // personne n'a figé ni réglé pendant 24 h : plus aucun cours, n'importe qui clôt sans signature
+    s.env.ledger().set_timestamp(now + MATURITY_IN + AFTER_HISTORY);
+    let paid = s.pool.set_auths(&[]).settle_fallback(&id);
+    // événement public (lu avant tout autre appel : les tests ne gardent que ceux du dernier appel)
+    let expected = hedge::HedgeFallbackSettled { hedge_id: id, owner: s.lucia.clone(), payout: HEDGE_MARGIN };
+    let events = s.env.events().all().filter_by_contract(&s.pool.address);
+    assert_eq!(events.events().last(), Some(&expected.to_xdr(&s.env, &s.pool.address)));
+
+    // marge rendue telle quelle, P&L nul, capital libéré, exposition à zéro
+    assert_settled(&s, id, paid, HEDGE_MARGIN, 0);
+    assert_eq!(s.pool.exposure(&Symbol::new(&s.env, "MXN")).buy_margin, 0);
+
+    // une seule fois
+    assert_eq!(s.pool.try_settle_fallback(&id), Err(Ok(contract_err(HedgeError::AlreadySettled as u32))));
+    assert_eq!(s.pool.try_settle(&id), Err(Ok(contract_err(HedgeError::AlreadySettled as u32))));
+}
+
+#[test]
+fn settle_fallback_refused_while_a_rate_exists_or_may_come() {
+    let s = setup();
+    let now = s.env.ledger().timestamp();
+    let id = open_funded(&s, Side::BuyCurrency);
+
+    assert_eq!(s.pool.try_settle_fallback(&99), Err(Ok(contract_err(HedgeError::UnknownHedge as u32))));
+    assert_eq!(s.pool.try_settle_fallback(&id), Err(Ok(contract_err(HedgeError::NotMatured as u32))));
+
+    // cours disponible à l'échéance : il faut régler normalement
+    at_maturity(&s, 6_160_000_000_000);
+    assert_eq!(s.pool.try_settle_fallback(&id), Err(Ok(contract_err(HedgeError::FixingAvailable as u32))));
+
+    // cours figé puis oublié par l'oracle : le cours figé compte toujours, pas de secours
+    s.pool.record_fixing(&id);
+    s.env.ledger().set_timestamp(now + MATURITY_IN + AFTER_HISTORY);
+    assert_eq!(s.pool.try_settle_fallback(&id), Err(Ok(contract_err(HedgeError::FixingAvailable as u32))));
+    assert!(!s.pool.get_hedge(&id).unwrap().settled);
+}
+
+#[test]
+fn settle_fallback_refused_during_grace_window() {
+    let s = setup();
+    fund_pool(&s);
+    let now = s.env.ledger().timestamp();
+    // échéance à 2 000 s, aucun cours posé depuis l'ouverture : un cours peut encore arriver pendant une heure
+    let id = s.pool.open_hedge(&s.lucia, &s.supplier, &Symbol::new(&s.env, "MXN"), &Side::BuyCurrency, &NOTIONAL, &2_000, &1000);
+    s.env.ledger().set_timestamp(now + 2_000 + 1_800);
+    assert_eq!(s.pool.try_settle_fallback(&id), Err(Ok(contract_err(HedgeError::FixingAvailable as u32))));
+    assert!(!s.pool.get_hedge(&id).unwrap().settled);
+}
+
+#[test]
+fn record_fixing_and_fallback_work_while_paused() {
+    let s = setup();
+    let now = s.env.ledger().timestamp();
+    let id = open_funded(&s, Side::BuyCurrency);
+    let id2 = s.pool.open_hedge(&s.lucia, &s.supplier, &Symbol::new(&s.env, "MXN"), &Side::BuyCurrency, &NOTIONAL, &MATURITY_IN, &1000);
+    s.pool.pause(&s.admin);
+
+    // on ne bloque jamais l'argent des gens : figer et clore en secours restent possibles en pause
+    at_maturity(&s, SPOT_0);
+    assert_eq!(s.pool.record_fixing(&id), SPOT_0);
+    s.env.ledger().set_timestamp(now + MATURITY_IN + AFTER_HISTORY);
+    assert_eq!(s.pool.settle_fallback(&id2), s.pool.get_hedge(&id2).unwrap().margin);
 }
 
 // ---- Clôture anticipée ----

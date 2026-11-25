@@ -62,7 +62,25 @@ stellar contract invoke --id fx-pool --source-account fx-supplier --network test
   settle --hedge_id 0
 ```
 Retour : l'USDC versé à Lucía (marge ± P&L, entre 0 et 2 × marge). Effets : transfert USDC pool → Lucía, événement `hedge_settled` (spot de fixing, P&L, versement).
-Le cours utilisé est celui **en vigueur à l'échéance**, quel que soit le moment de l'appel : un prix posé après l'échéance ne compte pas. Régler peu après l'échéance : l'historique de Reflector ne remonte qu'à ~12 h, celui du mock à 64 prix (au-delà : #312).
+Le cours utilisé est celui **en vigueur à l'échéance** s'il a au plus 15 minutes, sinon le premier publié dans l'heure qui suit, quel que soit le moment de l'appel. Tant qu'aucun cours n'est lisible : #312, la couverture reste ouverte. Régler (ou figer le cours) dans les 24 h : Reflector oublie ses cours ensuite.
+
+### Figer le cours sans régler : `record_fixing`
+
+Sans signature, après l'échéance. Fige le cours d'échéance de la couverture et le renvoie ; `settle` l'utilisera même après l'oubli de l'historique de l'oracle. Répétable (renvoie le cours déjà figé). C'est l'appel du robot, peu après chaque échéance.
+```sh
+stellar contract invoke --id fx-pool --source-account fx-admin --network testnet -- \
+  record_fixing --hedge_id 0
+```
+Refus : #200, #201, #202 (pas encore échue), #312 (pas encore de cours, ou plus aucun).
+
+### Voie de secours : `settle_fallback`
+
+Sans signature, après l'échéance, **seulement si aucun cours n'existe ni ne peut plus arriver** (rien de figé, aucun cours dans l'heure après l'échéance, ou historique oublié). Clôture à P&L nul : la marge est rendue au propriétaire, la réserve du pool libérée. Événement `hedge_fallback_settled` (versement).
+```sh
+stellar contract invoke --id fx-pool --source-account fx-admin --network testnet -- \
+  settle_fallback --hedge_id 0
+```
+Refus #209 tant qu'un cours existe (figé ou lisible) ou peut encore être publié : utiliser `settle`, ou attendre la fin de l'heure qui suit l'échéance.
 
 ### Clôture anticipée (avant l'échéance)
 
@@ -165,6 +183,7 @@ Les textes de `panic!` sont effacés dans le WASM déployé : le front ne reçoi
 | #206 `AlreadyMatured` | Paiement | Échéance atteinte : régler (`settle`) au lieu de clôturer |
 | #207 `Overflow` | Paiement | Montant ou cours hors de toute plage réaliste (calcul du P&L) |
 | #208 `DemoDisabled` | Paiement (admin) | Mode démo indisponible : contrat compilé sans la feature `demo` |
+| #209 `FixingAvailable` | Paiement | Un cours d'échéance existe ou peut encore arriver : régler normalement au lieu du secours |
 | #100 `InvalidAmount` | Vault | Montant invalide |
 | #101 `InsufficientCapacity` | Vault | Le pool n'a pas assez de capital pour cette protection |
 | #102 `ReleaseExceedsReserved` | Vault | Erreur interne (libération au-delà du capital réservé) |

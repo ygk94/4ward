@@ -305,6 +305,20 @@ impl Pool {
         hedge::settle(&env, hedge_id)
     }
 
+    /// Sans signature, après l'échéance : fige le cours d'échéance sans régler et le renvoie (répétable).
+    /// À appeler par le robot dans les 24 h qui suivent chaque échéance : Reflector oublie ses cours ensuite.
+    /// 312 tant qu'aucun cours n'est lisible.
+    pub fn record_fixing(env: Env, hedge_id: u64) -> i128 {
+        hedge::record_fixing(&env, hedge_id)
+    }
+
+    /// Sans signature, après l'échéance : voie de secours quand le cours d'échéance est définitivement absent.
+    /// Clôture à P&L nul (marge rendue). Refus 209 si un cours existe ou peut encore arriver.
+    /// Retourne le montant USDC versé au propriétaire.
+    pub fn settle_fallback(env: Env, hedge_id: u64) -> i128 {
+        hedge::settle_fallback(&env, hedge_id)
+    }
+
     /// Propriétaire seul, avant l'échéance : clôture au prix du marché (forward du jour pour la durée restante,
     /// spread inclus). Le perdant paie. Retourne le montant USDC versé au propriétaire.
     pub fn close_early(env: Env, hedge_id: u64) -> i128 {

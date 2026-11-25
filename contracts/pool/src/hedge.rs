@@ -10,6 +10,10 @@
 //! close_early : avant l'échéance, le propriétaire seul. Clôture au prix du marché : taux de sortie = forward du jour
 //!        pour la durée restante, dans le sens inverse (spread contre l'utilisateur, comme à l'ouverture : c'est le
 //!        frais de sortie) ; même P&L borné, même versement que settle. Le perdant paie, le pool libère sa réserve.
+//! record_fixing : après l'échéance, sans signature, fige le cours d'échéance (pricing::record_fixing) pour que la
+//!        couverture reste réglable après l'oubli de l'historique de l'oracle (~24 h sur Reflector). Pour le robot.
+//! settle_fallback : après l'échéance, sans signature, si aucun cours n'existe ni ne peut plus arriver
+//!        (pricing::fixing_missing) : clôture à P&L nul, marge rendue. Sinon refus 209.
 //! Ensuite, côté front : path payment USDC → devise vers `supplier` pour exactement `notional`.
 //! Mode démo : `time_factor` (admin, 1 par défaut) raccourcit l'échéance réelle (`durée / facteur`)
 //! sans changer le prix, calculé sur la durée annoncée. Ex. 25 920 : 90 jours → 300 s.
@@ -45,6 +49,9 @@ pub enum HedgeError {
     Overflow = 207,
     /// `set_time_factor` sur une version compilée sans la feature `demo` : le mode démo n'existe pas en production.
     DemoDisabled = 208,
+    /// `settle_fallback` alors qu'un cours d'échéance existe (figé ou lisible) ou peut encore être publié
+    /// (fenêtre d'une heure après l'échéance) : régler avec `settle`, ou attendre.
+    FixingAvailable = 209,
 }
 
 /// Clés de stockage de Paiement (à part de `DataKey`, partagé).
@@ -89,6 +96,17 @@ pub struct HedgeSettled {
     pub owner: Address,
     pub spot: i128,
     pub pnl: i128,
+    pub payout: i128,
+}
+
+/// Couverture close par la voie de secours, faute de cours d'échéance : P&L nul, marge rendue telle quelle.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HedgeFallbackSettled {
+    #[topic]
+    pub hedge_id: u64,
+    #[topic]
+    pub owner: Address,
     pub payout: i128,
 }
 
@@ -188,6 +206,39 @@ pub(crate) fn settle(env: &Env, hedge_id: u64) -> i128 {
     let spot = pricing::settlement_fixing(env, hedge_id, &hedge.currency, hedge.maturity);
     let (pnl, payout) = close(env, &key, &mut hedge, spot);
     HedgeSettled { hedge_id, owner: hedge.owner, spot, pnl, payout }.publish(env);
+    payout
+}
+
+/// Fige le cours d'échéance d'une couverture échue, sans la régler, et le renvoie. Sans signature (robot).
+/// Reflector oublie ses cours au bout d'environ 24 h : appelé peu après l'échéance, il garantit que la couverture
+/// reste réglable au bon cours même si `settle` passe plus tard. Répétable (renvoie le cours déjà figé).
+/// Erreurs : `UnknownHedge`, `AlreadySettled`, `NotMatured`, et `NoFixing` (312) tant qu'aucun cours n'est lisible.
+pub(crate) fn record_fixing(env: &Env, hedge_id: u64) -> i128 {
+    let hedge = load_open(env, &DataKey::Hedge(hedge_id));
+    if env.ledger().timestamp() < hedge.maturity {
+        panic_with_error!(env, HedgeError::NotMatured);
+    }
+    pricing::record_fixing(env, hedge_id, &hedge.currency, hedge.maturity)
+}
+
+/// Voie de secours, sans signature : clôt une couverture échue dont le cours d'échéance est définitivement
+/// absent (rien de figé, aucun cours dans l'heure après l'échéance, ou historique de l'oracle oublié).
+/// P&L nul : la marge est rendue au propriétaire, la réserve du pool libérée, personne ne gagne ni ne perd.
+/// Refus `FixingAvailable` (209) tant qu'un cours existe ou peut encore arriver : il faut alors `settle`.
+/// Retourne le montant USDC versé (la marge).
+pub(crate) fn settle_fallback(env: &Env, hedge_id: u64) -> i128 {
+    let key = DataKey::Hedge(hedge_id);
+    let mut hedge = load_open(env, &key);
+    if env.ledger().timestamp() < hedge.maturity {
+        panic_with_error!(env, HedgeError::NotMatured);
+    }
+    if !pricing::fixing_missing(env, hedge_id, &hedge.currency, hedge.maturity) {
+        panic_with_error!(env, HedgeError::FixingAvailable);
+    }
+    // au taux bloqué, le P&L est nul par construction
+    let rate = hedge.locked_rate;
+    let (_, payout) = close(env, &key, &mut hedge, rate);
+    HedgeFallbackSettled { hedge_id, owner: hedge.owner, payout }.publish(env);
     payout
 }
 

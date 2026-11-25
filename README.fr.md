@@ -287,6 +287,8 @@ fn open_hedge(owner: Address, supplier: Address, currency: Symbol, side: Side,
               notional: i128, duration_secs: u64, cap_bps: u32) -> u64;
 fn settle(hedge_id: u64) -> i128;                        // permissionless après l'échéance
 fn close_early(hedge_id: u64) -> i128;                   // propriétaire seul, avant l'échéance : clôture au prix du marché
+fn record_fixing(hedge_id: u64) -> i128;                 // sans signature, après l'échéance : fige le cours d'échéance sans régler
+fn settle_fallback(hedge_id: u64) -> i128;               // sans signature, seulement si aucun cours n'existe ni ne peut arriver : P&L nul, marge rendue
 fn get_hedge(hedge_id: u64) -> Option<Hedge>;
 fn time_factor() -> u32;                                 // 1 = temps réel
 fn set_time_factor(factor: u32);                         // admin, version démo seulement (sinon #208) : 25 920 → 90 j en 5 min réelles
@@ -384,7 +386,7 @@ TODO.md                # setup et chantiers
 
 Correctifs prévus après le hackathon ; détail dans `docs/points-a-trancher.md`.
 
-- **Fixing : cours unique, pas encore de voie de secours.** `settle` prend le cours en vigueur à l'échéance s'il a au plus 15 minutes, sinon le premier cours publié dans l'heure qui suit ; d'ici là il échoue en 312 et la couverture reste ouverte. Le cours peut être figé sans régler, ce qui compte car Reflector oublie ses cours au bout d'environ 24 h. Manquent encore, prévus pour le sprint Instaward : une moyenne pondérée sur ~30 minutes avec bornes de cohérence à la place du cours unique, et la voie de secours `settle_fallback` (P&L nul une fois l'absence de cours constatée par le contrat), sans laquelle une couverture dont le fixing est perdu reste bloquée.
+- **Fixing : cours unique.** `settle` prend le cours en vigueur à l'échéance s'il a au plus 15 minutes, sinon le premier cours publié dans l'heure qui suit ; d'ici là il échoue en 312 et la couverture reste ouverte. `record_fixing` fige le cours sans régler (Reflector oublie ses cours au bout d'environ 24 h), et `settle_fallback` clôt une couverture à P&L nul une fois l'absence de cours constatée par le contrat : les fonds ne peuvent plus rester bloqués. Manque encore, prévu pour le sprint Instaward : une moyenne pondérée sur ~30 minutes avec bornes de cohérence à la place du cours unique.
 - **Mode démo (`time_factor` > 1)** : le prix porte sur la durée annoncée et l'échéance est raccourcie, donc le carry n'est pas neutralisé (arbitrage possible contre le pool). `time_factor` doit valoir 1 en production : `set_time_factor` n'existe plus que dans la version `demo` (#208 sinon) et `time_factor` vaut toujours 1 sans elle.
 - **Dépôt juste avant un `settle` gagnant** : le fixing est connu dès l'échéance, un LP peut entrer au prix plein juste avant le règlement et ressortir juste après. À corriger par un délai d'entrée ou un blocage de `deposit_lp` tant qu'une couverture échue n'est pas réglée.
 - **Tranches** : les intérêts senior courus font baisser la valeur junior, qui peut passer sous le capital réservé (capacité négative) ou sous 20 % sans aucune opération ; `withdraw_senior` ne vérifie pas encore que le capital restant couvre le réservé. Correctif écrit (retraits Safe plafonnés, plancher de parts junior), en relecture avant fusion.
