@@ -340,10 +340,15 @@ TODO.md                # setup et chantiers
 
 ## Roadmap
 
-**Juste après le hackathon**
-- Paiement atomique : régler la couverture et payer le fournisseur dans une seule transaction (swap via un DEX Soroban)
+**Ensuite : sprint Instaward de 30 jours (chapitre Stellar Türkiye, testnet uniquement)**
+- Fixing robuste : pool redéployé sur Reflector FX testnet ; fixing d'échéance en moyenne pondérée dans le temps sur ~30 minutes, avec bornes de cohérence et contrôle de fraîcheur ; `settle_fallback` pour qu'une couverture sans fixing puisse toujours être clôturée ; correction des limites connues du contrat ci-dessous ; `time_factor` derrière une feature de build `demo` ; property tests du fixing et du règlement
+- Régler et payer en une transaction : une transaction Soroban règle la couverture, échange l'USDC contre des MXN (montant de sortie exact) sur un AMM Soroban (Soroswap ou Aquarius) et paie au fournisseur le montant exact de la facture ; la PME signe un maximum d'USDC ; « Settle & pay supplier » dans l'app
+- Pilote : sessions guidées sur testnet avec au moins 5 PME importatrices, accueil plus clair (plafond et marge expliqués, saisie de la facture, confirmation téléchargeable), rapport de pilote public
+- Hors périmètre du sprint : mainnet, audit, KYC et juridique, vraie liquidité, paiement atomique dans d'autres devises, netting, bons du Trésor
+
+**Après le sprint**
 - Marge productive : la marge de la PME placée en bons du Trésor tokenisés pendant la couverture
-- Fixing robuste : TWAP, bornes de cohérence, plusieurs oracles
+- Plusieurs oracles pour le fixing
 
 **Pool et risque**
 - Netting par devise et par échéance (PME qui paient en devise / PME qui en reçoivent)
@@ -379,10 +384,10 @@ TODO.md                # setup et chantiers
 
 Correctifs prévus après le hackathon ; détail dans `docs/points-a-trancher.md`.
 
-- **Fixing indisponible (302/312) = couverture irréglable.** `settle` règle au cours en vigueur à l'échéance (`pricing::fixing`). Si l'oracle n'a aucun prix de moins de 900 s avant l'échéance (302), ou si l'échéance dépasse son historique (312), la couverture ne peut plus être réglée : la marge de la PME et le capital réservé restent bloqués. Voie de secours `settle_fallback` (admin, après l'échéance + délai de grâce, P&L nul) en roadmap.
-- **Mode démo (`time_factor` > 1)** : le prix porte sur la durée annoncée et l'échéance est raccourcie, donc le carry n'est pas neutralisé (arbitrage possible contre le pool). `time_factor` doit valoir 1 en production (à terme : `set_time_factor` derrière une feature cargo).
+- **Fixing : cours unique, pas encore de voie de secours.** `settle` prend le cours en vigueur à l'échéance s'il a au plus 15 minutes, sinon le premier cours publié dans l'heure qui suit ; d'ici là il échoue en 312 et la couverture reste ouverte. Le cours peut être figé sans régler, ce qui compte car Reflector oublie ses cours au bout d'environ 24 h. Manquent encore, prévus pour le sprint Instaward : une moyenne pondérée sur ~30 minutes avec bornes de cohérence à la place du cours unique, et la voie de secours `settle_fallback` (P&L nul une fois l'absence de cours constatée par le contrat), sans laquelle une couverture dont le fixing est perdu reste bloquée.
+- **Mode démo (`time_factor` > 1)** : le prix porte sur la durée annoncée et l'échéance est raccourcie, donc le carry n'est pas neutralisé (arbitrage possible contre le pool). `time_factor` doit valoir 1 en production ; `set_time_factor` passe derrière une feature cargo `demo` pendant le sprint Instaward.
 - **Dépôt juste avant un `settle` gagnant** : le fixing est connu dès l'échéance, un LP peut entrer au prix plein juste avant le règlement et ressortir juste après. À corriger par un délai d'entrée ou un blocage de `deposit_lp` tant qu'une couverture échue n'est pas réglée.
-- **Tranches** : les intérêts senior courus font baisser la valeur junior, qui peut passer sous le capital réservé (capacité négative) ou sous 20 % sans aucune opération ; `withdraw_senior` ne vérifie pas encore que le capital restant couvre le réservé.
+- **Tranches** : les intérêts senior courus font baisser la valeur junior, qui peut passer sous le capital réservé (capacité négative) ou sous 20 % sans aucune opération ; `withdraw_senior` ne vérifie pas encore que le capital restant couvre le réservé. Correctif écrit (retraits Safe plafonnés, plancher de parts junior), en relecture avant fusion.
 
 ## Concurrence
 

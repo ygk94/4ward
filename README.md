@@ -342,10 +342,15 @@ TODO.md                # setup and work items
 
 ## Roadmap
 
-**Right after the hackathon**
-- Atomic payment: settle the hedge and pay the supplier in a single transaction (swap via a Soroban DEX)
+**Next: 30-day Instaward sprint (Stellar Türkiye chapter, testnet only)**
+- Robust fixing: pool redeployed on Reflector FX testnet; maturity fixing as a time-weighted average over ~30 minutes, with consistency bounds and staleness checks; `settle_fallback` so a hedge without a fixing can always be closed; the known contract limitations below fixed; `time_factor` behind a `demo` build feature; property tests for fixing and settlement
+- Atomic settle and pay: one Soroban transaction settles the hedge, swaps USDC to MXN (exact output) on a Soroban AMM (Soroswap or Aquarius) and pays the supplier the exact invoiced amount; the SME signs a maximum USDC input; "Settle & pay supplier" in the web app
+- Pilot: guided testnet sessions with at least 5 importing SMEs, clearer onboarding (cap and margin explained, invoice entry, downloadable hedge confirmation), public pilot report
+- Out of scope for the sprint: mainnet, audit, KYC and legal, real liquidity, atomic payment in other currencies, netting, Treasury bills
+
+**After the sprint**
 - Productive margin: the SME's margin invested in tokenized Treasury bills during the hedge
-- Robust fixing: TWAP, consistency bounds, multiple oracles
+- Multiple oracles for the fixing
 
 **Pool and risk**
 - Netting per currency and per maturity (SMEs paying in a currency / SMEs receiving it)
@@ -381,10 +386,10 @@ TODO.md                # setup and work items
 
 Fixes planned after the hackathon; details in `docs/points-a-trancher.md`.
 
-- **Fixing unavailable (302/312) = hedge cannot be settled.** `settle` settles at the rate in effect at maturity (`pricing::fixing`). If the oracle has no price less than 900 s before maturity (302), or if maturity is beyond its history (312), the hedge can no longer be settled: the SME's margin and the reserved capital stay locked. A `settle_fallback` escape path (admin, after maturity + grace period, zero P&L) is on the roadmap.
-- **Demo mode (`time_factor` > 1)**: the price covers the stated duration and maturity is shortened, so carry is not neutralized (arbitrage possible against the pool). `time_factor` must be 1 in production (eventually: `set_time_factor` behind a cargo feature).
+- **Fixing: single price, no escape path yet.** `settle` uses the price in effect at maturity if it is at most 15 minutes old, otherwise the first price published within the following hour; until then it fails with 312 and the hedge stays open. The rate can be locked without settling, which matters because Reflector forgets its prices after about 24 hours. Still missing, planned for the Instaward sprint: a time-weighted average over ~30 minutes with consistency bounds instead of a single price, and the `settle_fallback` escape path (zero P&L once the contract has established that no price exists), without which a hedge whose fixing is lost stays locked.
+- **Demo mode (`time_factor` > 1)**: the price covers the stated duration and maturity is shortened, so carry is not neutralized (arbitrage possible against the pool). `time_factor` must be 1 in production; `set_time_factor` moves behind a `demo` cargo feature during the Instaward sprint.
 - **Deposit just before a winning `settle`**: the fixing is known at maturity, so an LP can enter at full price just before settlement and exit right after. To be fixed with an entry delay or by blocking `deposit_lp` while a matured hedge is unsettled.
-- **Tranches**: accrued senior interest lowers the junior value, which can fall below reserved capital (negative capacity) or below 20% without any operation; `withdraw_senior` does not yet check that the remaining capital covers the reserved amount.
+- **Tranches**: accrued senior interest lowers the junior value, which can fall below reserved capital (negative capacity) or below 20% without any operation; `withdraw_senior` does not yet check that the remaining capital covers the reserved amount. Fix written (capped Safe withdrawals, junior share floor), under review before merge.
 
 ## Competition
 
