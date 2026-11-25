@@ -176,6 +176,14 @@ Les textes de `panic!` sont effacés dans le WASM déployé : le front ne reçoi
 | #110 `Overflow` | Vault | Montant trop grand |
 | #111 `JuniorRatioTooLow` | Vault | La tranche dynamique doit rester ≥ 20 % du capital |
 | #112 `InsufficientSeniorShares` | Vault | Pas autant de parts prudentes |
+| #113 (réservé) | Vault | Réservé au refus des dépôts tant qu'une couverture échue n'est pas réglée (B3) |
+| #114 `LpNotAllowed` | Vault | LP absent de la liste blanche (active par défaut) |
+| #115 `NotionalCapExceeded` | Vault | Plafond du notionnel total du pilote atteint |
+| #116 `LastShareLocked` | Vault | Retrait refusé : il laisserait moins de 1 USDC de parts dynamiques tant que du capital est réservé |
+| #117 `SeniorWithdrawBelowReserved` | Vault | Retrait prudent refusé : le capital restant ne couvrirait plus le capital réservé |
+| #118 `SeniorArrears` | Vault | Dépôt prudent refusé pendant un retard d'intérêts |
+| #119 `SeniorDepositsClosed` | Vault | Dépôts prudents fermés (fermés par défaut) |
+| #120 `OwnerReserveCapExceeded` | Vault | Plafond de capital réservé par entreprise atteint (désactivé par défaut) |
 | #10 (contrat USDC / SAC) | Token USDC | Solde USDC insuffisant (marge de `open_hedge`, `deposit_lp`, `deposit_senior`) |
 | #205 `InvalidTimeFactor` | Paiement (admin) | Facteur de démo invalide |
 | #302 `StalePrice` | Pricing | Cours de l'oracle trop ancien : réessayer dans un instant |

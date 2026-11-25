@@ -765,7 +765,7 @@ pub(crate) fn book_gain(env: &Env, amount: i128) {
 }
 
 /// Le pool paie une perte (la PME est protégée) : `TotalDeposits -= amount`.
-/// Le transfert vers la PME est fait par hedge.rs avec la restitution de la marge.
+/// hedge.rs crédite ensuite la PME (marge ± P&L) sur son solde réclamable (B4), sans transfert.
 /// `amount == 0` est accepté (P&L nul) ; `InvalidAmount` si négatif,
 /// `LossExceedsCapital` si le capital des LPs deviendrait négatif.
 pub(crate) fn book_loss(env: &Env, amount: i128) {
