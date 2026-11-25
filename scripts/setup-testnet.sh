@@ -142,6 +142,11 @@ else
   say "Version de production : pas de mode démo, échéances réelles"
 fi
 
+say "PME de la démo dans la liste blanche du pilote (active par défaut : sinon open_hedge refuse en 211)"
+stellar contract invoke --id $POOL --source-account $ADMIN --network $NET --quiet -- \
+  set_allowed --role Sme --who $USER --allowed true >/dev/null
+echo "   $USER autorisée à ouvrir des couvertures"
+
 say "Dépôt du LP dans le pool (1 000 000 USDC contre des parts)"
 LP_DEPOSIT=10000000000000   # 1 000 000 USDC, 7 décimales
 LP_USDC=$(stellar contract invoke --id $USDC_SAC --source-account $LP --network $NET --quiet -- \

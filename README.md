@@ -293,6 +293,10 @@ fn claim(owner: Address) -> i128;                        // owner: receive the w
 fn claim_for(owner: Address) -> i128;                    // permissionless (keeper): pay the owner's claimable balance to the owner
 fn claimable(owner: Address) -> i128;
 fn total_claimable() -> i128;
+fn set_allowed(role: Role, who: Address, allowed: bool);   // admin, pilot allowlists (Lp, Sme), on by default
+fn set_hedge_limits(max_hedge_notional: Option<i128>, max_duration_secs: Option<u64>,
+                    max_open_per_sme: Option<u32>);       // admin, pilot limits per hedge (#211-#215)
+fn pilot_limits() -> PilotLimits;
 fn close_early(hedge_id: u64) -> i128;                   // owner only, before maturity: close at market price
 fn record_fixing(hedge_id: u64) -> i128;                 // permissionless after maturity: lock the maturity rate without settling
 fn settle_fallback(hedge_id: u64) -> i128;               // permissionless, only once no maturity rate exists or can come: zero P&L, margin returned

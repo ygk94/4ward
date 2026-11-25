@@ -59,6 +59,16 @@ pub enum HedgeError {
     /// `open` : le taux bloqué est moins bon que la limite signée par la PME (`worst_rate`) : plus haut pour un
     /// importateur (BuyCurrency), plus bas pour un exportateur (SellCurrency). Le cours a bougé depuis le devis.
     RateWorseThanLimit = 210,
+    /// `open` par une PME hors de la liste blanche du pilote (active par défaut).
+    SmeNotAllowed = 211,
+    /// `open` au-delà du montant maximal par couverture du pilote (USDC au taux bloqué).
+    HedgeTooLarge = 212,
+    /// `open` au-delà de la durée maximale du pilote.
+    HedgeTooLong = 213,
+    /// `open` alors que la PME a déjà le nombre maximal de couvertures ouvertes du pilote.
+    TooManyOpenHedges = 214,
+    /// `set_hedge_limits` avec une limite nulle ou négative (`None` pour « sans limite »).
+    InvalidLimit = 215,
 }
 
 /// Clés de stockage de Paiement (à part de `DataKey`, partagé).
@@ -70,6 +80,44 @@ enum HedgeKey {
     Claimable(Address),
     /// Σ des soldes réclamables : USDC du contrat qui n'appartient ni aux LPs ni aux marges ouvertes.
     TotalClaimable,
+    /// Liste blanche des PME active (instance) ; absente = active (pilote fermé par défaut).
+    SmeAllowlistOn,
+    /// PME autorisée à ouvrir des couvertures (persistent, présente = autorisée).
+    SmeAllowed(Address),
+    /// Limites du pilote par couverture (instance) ; absentes = sans limite.
+    Limits,
+    /// Nombre de couvertures ouvertes d'une PME (persistent).
+    OpenCount(Address),
+}
+
+/// Limites du pilote côté couvertures. `None` = sans limite.
+#[contracttype]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct HedgeLimits {
+    /// Montant maximal d'une couverture, USDC 7 décimales au taux bloqué.
+    pub max_hedge_notional: Option<i128>,
+    /// Durée maximale d'une couverture (durée annoncée), en secondes.
+    pub max_duration_secs: Option<u64>,
+    /// Nombre maximal de couvertures ouvertes en même temps par une PME.
+    pub max_open_per_sme: Option<u32>,
+}
+
+/// L'admin a ajouté (`allowed`) ou retiré une PME de la liste blanche.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SmeAllowedSet {
+    #[topic]
+    pub sme: Address,
+    pub allowed: bool,
+}
+
+/// L'admin a changé les limites du pilote par couverture.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HedgeLimitsSet {
+    pub max_hedge_notional: Option<i128>,
+    pub max_duration_secs: Option<u64>,
+    pub max_open_per_sme: Option<u32>,
 }
 
 /// Solde réclamable versé à son propriétaire par `claim` ou `claim_for`.
@@ -162,6 +210,10 @@ pub(crate) fn open(
     worst_rate: Option<i128>,
 ) -> u64 {
     owner.require_auth();
+    if !is_sme_allowed(env, owner) {
+        panic_with_error!(env, HedgeError::SmeNotAllowed);
+    }
+    let limits = limits(env);
     if notional <= 0 {
         panic_with_error!(env, HedgeError::InvalidNotional);
     }
@@ -169,6 +221,13 @@ pub(crate) fn open(
         panic_with_error!(env, HedgeError::InvalidDuration);
     }
     pricing::check_cap(env, currency, cap_bps);
+    if limits.max_duration_secs.is_some_and(|max| duration_secs > max) {
+        panic_with_error!(env, HedgeError::HedgeTooLong);
+    }
+    let open_count = open_count(env, owner);
+    if limits.max_open_per_sme.is_some_and(|max| open_count >= max) {
+        panic_with_error!(env, HedgeError::TooManyOpenHedges);
+    }
 
     let locked_rate = pricing::forward_rate(env, currency, side, duration_secs);
     // taux limite signé par la PME : protège contre un mouvement entre le devis affiché et l'exécution
@@ -181,6 +240,10 @@ pub(crate) fn open(
             panic_with_error!(env, HedgeError::RateWorseThanLimit);
         }
     }
+    if limits.max_hedge_notional.is_some_and(|max| pricing::to_usdc(env, notional, locked_rate) > max) {
+        panic_with_error!(env, HedgeError::HedgeTooLarge);
+    }
+    set_open_count(env, owner, open_count + 1);
     // même calcul que `quote` : la marge déposée est celle affichée (arrondie vers le haut)
     let margin = pricing::margin_for(env, pricing::to_usdc(env, notional, locked_rate), cap_bps);
 
@@ -326,6 +389,7 @@ fn close(env: &Env, key: &DataKey, hedge: &mut Hedge, rate: i128, payout_to: Pay
     let pnl = pnl(env, hedge.side, hedge.notional, hedge.locked_rate, rate, hedge.margin);
 
     vault::close_position(env, hedge);
+    set_open_count(env, &hedge.owner, open_count(env, &hedge.owner).saturating_sub(1));
     if pnl > 0 {
         vault::book_loss(env, pnl);
     } else if pnl < 0 {
@@ -344,6 +408,77 @@ fn close(env: &Env, key: &DataKey, hedge: &mut Hedge, rate: i128, payout_to: Pay
     hedge.settled = true;
     env.storage().persistent().set(key, hedge);
     (pnl, payout)
+}
+
+// ---- pilote côté couvertures (B9) ----
+
+/// Liste blanche des PME active ? Vrai tant que l'admin ne l'a pas désactivée.
+pub(crate) fn sme_allowlist_on(env: &Env) -> bool {
+    env.storage().instance().get(&HedgeKey::SmeAllowlistOn).unwrap_or(true)
+}
+
+/// Admin : active ou désactive la liste blanche des PME.
+pub(crate) fn set_sme_allowlist_enabled(env: &Env, enabled: bool) {
+    crate::admin(env).require_auth();
+    env.storage().instance().set(&HedgeKey::SmeAllowlistOn, &enabled);
+    vault::AllowlistToggled { role: crate::Role::Sme, enabled }.publish(env);
+}
+
+/// La PME peut-elle ouvrir ? Toujours vrai quand la liste est désactivée.
+pub(crate) fn is_sme_allowed(env: &Env, sme: &Address) -> bool {
+    !sme_allowlist_on(env) || env.storage().persistent().has(&HedgeKey::SmeAllowed(sme.clone()))
+}
+
+/// Admin : ajoute ou retire une PME. Le retrait ne touche pas à ses couvertures ouvertes, qui se règlent normalement.
+pub(crate) fn set_sme_allowed(env: &Env, sme: &Address, allowed: bool) {
+    crate::admin(env).require_auth();
+    let key = HedgeKey::SmeAllowed(sme.clone());
+    if allowed {
+        env.storage().persistent().set(&key, &true);
+        env.storage().persistent().extend_ttl(&key, HEDGE_TTL_THRESHOLD, HEDGE_TTL_EXTEND_TO);
+    } else {
+        env.storage().persistent().remove(&key);
+    }
+    SmeAllowedSet { sme: sme.clone(), allowed }.publish(env);
+}
+
+/// Limites du pilote par couverture (toutes à `None` par défaut).
+pub(crate) fn limits(env: &Env) -> HedgeLimits {
+    env.storage().instance().get(&HedgeKey::Limits).unwrap_or_default()
+}
+
+/// Admin : pose les limites du pilote par couverture. `None` = sans limite ; une limite à 0 est refusée (215).
+/// Contrôlées à l'ouverture seulement : une couverture ouverte se règle toujours.
+pub(crate) fn set_limits(
+    env: &Env,
+    max_hedge_notional: Option<i128>,
+    max_duration_secs: Option<u64>,
+    max_open_per_sme: Option<u32>,
+) {
+    crate::admin(env).require_auth();
+    if max_hedge_notional.is_some_and(|v| v <= 0)
+        || max_duration_secs == Some(0)
+        || max_open_per_sme == Some(0)
+    {
+        panic_with_error!(env, HedgeError::InvalidLimit);
+    }
+    let limits = HedgeLimits { max_hedge_notional, max_duration_secs, max_open_per_sme };
+    env.storage().instance().set(&HedgeKey::Limits, &limits);
+    HedgeLimitsSet { max_hedge_notional, max_duration_secs, max_open_per_sme }.publish(env);
+}
+
+fn open_count(env: &Env, owner: &Address) -> u32 {
+    env.storage().persistent().get(&HedgeKey::OpenCount(owner.clone())).unwrap_or(0)
+}
+
+fn set_open_count(env: &Env, owner: &Address, count: u32) {
+    let key = HedgeKey::OpenCount(owner.clone());
+    if count == 0 {
+        env.storage().persistent().remove(&key);
+    } else {
+        env.storage().persistent().set(&key, &count);
+        env.storage().persistent().extend_ttl(&key, HEDGE_TTL_THRESHOLD, HEDGE_TTL_EXTEND_TO);
+    }
 }
 
 // ---- solde réclamable (B4) ----

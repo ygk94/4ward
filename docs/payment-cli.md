@@ -35,6 +35,19 @@ stellar contract invoke --id fx-pool --source-account fx-lp --network testnet --
 ```
 Retour : les parts du LP. Contrôle : `-- capacity` augmente de `1000000000000` (le setup a déjà déposé 1 000 000 USDC).
 
+## Pilote : PME autorisées et limites (fx-admin)
+
+La liste blanche des PME est **active par défaut** : une PME doit être autorisée avant sa première couverture (sinon `#211`). `setup-testnet.sh` autorise `fx-lucia`, `seed-testnet.sh` ses PME.
+```sh
+stellar contract invoke --id fx-pool --source-account fx-admin --network testnet -- \
+  set_allowed --role Sme --who fx-lucia --allowed true          # false pour la retirer
+stellar contract invoke --id fx-pool --source-account fx-admin --network testnet -- \
+  set_allowlist_enabled --role Sme --enabled false              # ouvrir à toutes les PME
+stellar contract invoke --id fx-pool --source-account fx-admin --network testnet -- \
+  set_hedge_limits --max_hedge_notional 1000000000000 --max_duration_secs 10368000 --max_open_per_sme 3
+```
+Limites (facultatives, absentes = sans limite ; 0 refusé en `#215`) : montant maximal d'une couverture en USDC au taux bloqué (`#212`), durée maximale annoncée (`#213`, ici 120 jours), nombre de couvertures ouvertes en même temps par PME (`#214`). Contrôlées à l'ouverture seulement : une PME retirée ou une limite abaissée ne bloque jamais le règlement des couvertures déjà ouvertes. Lecture : `pilot_limits` (avec les réglages LP), `is_allowed --role Sme --who …`. Événements : `sme_allowed_set`, `allowlist_toggled`, `hedge_limits_set`.
+
 ## 2. Lucía bloque son taux (fx-lucia)
 
 ```sh
@@ -197,6 +210,11 @@ Les textes de `panic!` sont effacés dans le WASM déployé : le front ne reçoi
 | #208 `DemoDisabled` | Paiement (admin) | Mode démo indisponible : contrat compilé sans la feature `demo` |
 | #209 `FixingAvailable` | Paiement | Un cours d'échéance existe ou peut encore arriver : régler normalement au lieu du secours |
 | #210 `RateWorseThanLimit` | Paiement | Le cours a bougé depuis le devis : taux moins bon que votre limite, refaire un devis |
+| #211 `SmeNotAllowed` | Paiement | Ce compte ne fait pas partie du pilote |
+| #212 `HedgeTooLarge` | Paiement | Montant au-delà du maximum par couverture du pilote |
+| #213 `HedgeTooLong` | Paiement | Échéance au-delà de la durée maximale du pilote |
+| #214 `TooManyOpenHedges` | Paiement | Nombre maximal de couvertures ouvertes atteint : attendre un règlement |
+| #215 `InvalidLimit` | Paiement (admin) | Limite nulle : laisser vide pour « sans limite » |
 | #100 `InvalidAmount` | Vault | Montant invalide |
 | #101 `InsufficientCapacity` | Vault | Le pool n'a pas assez de capital pour cette protection |
 | #102 `ReleaseExceedsReserved` | Vault | Erreur interne (libération au-delà du capital réservé) |

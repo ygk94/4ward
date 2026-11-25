@@ -726,6 +726,7 @@ fn setup<'a>() -> Setup<'a> {
     let pool_id = env.register(Pool, (&admin, &usdc_id, &oracle_id, 50u32));
     let pool = PoolClient::new(&env, &pool_id);
     pool.set_allowed(&Role::Lp, &lp, &true); // liste blanche des LP active par défaut (B9)
+    pool.set_allowed(&Role::Sme, &lucia, &true); // liste blanche des PME active par défaut (B9)
     // taux de test arbitraires (anciens taux 400/700, ≠ snapshot 360/555 : voir `demo_figures`)
     // et MXN ouverte (plafond minimum 5 %)
     pool.set_rate(&Symbol::new(&env, "USD"), &400);
@@ -1400,6 +1401,138 @@ fn settle_refused_while_no_rate_and_hedge_stays_open() {
 
 /// Un jour plus une seconde : Reflector (et le mock) ont oublié le cours d'échéance.
 const AFTER_HISTORY: u64 = 86_401;
+
+// ---- Pilote côté couvertures (B9) ----
+
+/// Une PME hors liste blanche, avec de quoi payer une marge.
+fn outsider(s: &Setup) -> Address {
+    let who = Address::generate(&s.env);
+    StellarAssetClient::new(&s.env, &s.usdc.address).mint(&who, &LUCIA_START);
+    who
+}
+
+fn open_as(s: &Setup, who: &Address) -> Result<u64, soroban_sdk::Error> {
+    match s.pool.try_open_hedge(who, &s.supplier, &Symbol::new(&s.env, "MXN"), &Side::BuyCurrency, &NOTIONAL, &MATURITY_IN, &1000, &None) {
+        Ok(Ok(id)) => Ok(id),
+        Err(Ok(e)) => Err(e),
+        other => panic!("résultat inattendu : {:?}", other),
+    }
+}
+
+#[test]
+fn sme_allowlist_is_on_by_default() {
+    let s = setup();
+    fund_pool(&s);
+    let bob = outsider(&s);
+    assert!(s.pool.pilot_limits().sme_allowlist_on);
+    assert!(!s.pool.is_allowed(&Role::Sme, &bob));
+    assert_eq!(open_as(&s, &bob), Err(contract_err(HedgeError::SmeNotAllowed as u32)));
+
+    // l'admin l'ajoute : il peut ouvrir
+    s.pool.set_allowed(&Role::Sme, &bob, &true);
+    assert_eq!(s.env.auths()[0].0, s.admin);
+    let events = s.env.events().all().filter_by_contract(&s.pool.address);
+    assert_eq!(
+        events.events().last(),
+        Some(&hedge::SmeAllowedSet { sme: bob.clone(), allowed: true }.to_xdr(&s.env, &s.pool.address))
+    );
+    assert!(s.pool.is_allowed(&Role::Sme, &bob));
+    assert!(open_as(&s, &bob).is_ok());
+}
+
+#[test]
+fn sme_allowlist_can_be_turned_off() {
+    let s = setup();
+    fund_pool(&s);
+    let bob = outsider(&s);
+    s.pool.set_allowlist_enabled(&Role::Sme, &false);
+    assert!(!s.pool.pilot_limits().sme_allowlist_on);
+    assert!(s.pool.is_allowed(&Role::Sme, &bob));
+    assert!(open_as(&s, &bob).is_ok());
+    // l'interrupteur des PME ne touche pas à celui des LP
+    assert!(s.pool.pilot_limits().lp_allowlist_on);
+}
+
+/// Une PME retirée de la liste ne peut plus ouvrir, mais ses couvertures ouvertes se règlent normalement.
+#[test]
+fn removed_sme_keeps_its_open_hedges() {
+    let s = setup();
+    let id = open_funded(&s, Side::BuyCurrency);
+    s.pool.set_allowed(&Role::Sme, &s.lucia, &false);
+    assert_eq!(open_as(&s, &s.lucia), Err(contract_err(HedgeError::SmeNotAllowed as u32)));
+    at_maturity(&s, 5_940_000_000_000);
+    let paid = s.pool.settle(&id);
+    assert_settled(&s, id, paid, 96_525_028_394, -41_250_031_549);
+}
+
+#[test]
+fn hedge_limits_cap_size_duration_and_open_count() {
+    let s = setup();
+    fund_pool(&s);
+    let mxn = Symbol::new(&s.env, "MXN");
+    let open = |notional: i128, duration: u64| {
+        s.pool.try_open_hedge(&s.lucia, &s.supplier, &mxn, &Side::BuyCurrency, &notional, &duration, &1000, &None)
+    };
+
+    // montant : 55 274,99 USDC maximum par couverture, juste sous la facture de démo
+    s.pool.set_hedge_limits(&Some(HEDGE_COST - 1), &None, &None);
+    assert_eq!(open(NOTIONAL, MATURITY_IN), Err(Ok(contract_err(HedgeError::HedgeTooLarge as u32))));
+    s.pool.set_hedge_limits(&Some(HEDGE_COST), &None, &None);
+    let first = open(NOTIONAL, MATURITY_IN).unwrap().unwrap();
+
+    // durée : 60 s maximum
+    s.pool.set_hedge_limits(&None, &Some(MATURITY_IN), &None);
+    assert_eq!(open(NOTIONAL, MATURITY_IN + 1), Err(Ok(contract_err(HedgeError::HedgeTooLong as u32))));
+
+    // nombre : une seule couverture ouverte par PME ; une fois réglée, la place se libère
+    s.pool.set_hedge_limits(&None, &None, &Some(1));
+    assert_eq!(open(NOTIONAL, MATURITY_IN), Err(Ok(contract_err(HedgeError::TooManyOpenHedges as u32))));
+    at_maturity(&s, SPOT_0);
+    s.pool.settle(&first);
+    set_spot(&s, SPOT_0);
+    assert!(open(NOTIONAL, MATURITY_IN).is_ok());
+
+    let limits = s.pool.pilot_limits();
+    assert_eq!((limits.max_hedge_notional, limits.max_duration_secs, limits.max_open_per_sme), (None, None, Some(1)));
+}
+
+#[test]
+fn open_count_is_released_by_every_way_out() {
+    let s = setup();
+    fund_pool(&s);
+    let now = s.env.ledger().timestamp();
+    s.pool.set_hedge_limits(&None, &None, &Some(1));
+    // clôture anticipée
+    let id = open_as(&s, &s.lucia).unwrap();
+    s.env.ledger().set_timestamp(now + 10);
+    set_spot(&s, SPOT_0);
+    s.pool.close_early(&id);
+    // voie de secours
+    let id = open_as(&s, &s.lucia).unwrap();
+    s.env.ledger().set_timestamp(now + 10 + MATURITY_IN + AFTER_HISTORY);
+    s.pool.settle_fallback(&id);
+    set_spot(&s, SPOT_0);
+    assert!(open_as(&s, &s.lucia).is_ok());
+}
+
+#[test]
+fn hedge_limits_are_admin_only_public_and_checked() {
+    let s = setup();
+    s.pool.set_hedge_limits(&Some(HEDGE_COST), &Some(120 * 86_400), &Some(3));
+    assert_eq!(s.env.auths()[0].0, s.admin);
+    let events = s.env.events().all().filter_by_contract(&s.pool.address);
+    assert_eq!(
+        events.events().last(),
+        Some(
+            &hedge::HedgeLimitsSet { max_hedge_notional: Some(HEDGE_COST), max_duration_secs: Some(120 * 86_400), max_open_per_sme: Some(3) }
+                .to_xdr(&s.env, &s.pool.address)
+        )
+    );
+    let invalid = Err(Ok(contract_err(HedgeError::InvalidLimit as u32)));
+    assert_eq!(s.pool.try_set_hedge_limits(&Some(0), &None, &None), invalid);
+    assert_eq!(s.pool.try_set_hedge_limits(&None, &Some(0), &None), invalid);
+    assert_eq!(s.pool.try_set_hedge_limits(&None, &None, &Some(0)), invalid);
+}
 
 // ---- Taux limite à l'ouverture (B8) ----
 

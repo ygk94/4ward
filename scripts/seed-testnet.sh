@@ -96,6 +96,10 @@ LPS=(seed-lp-diane seed-lp-emre)
 PME=(seed-pme-tequila seed-pme-cafe seed-pme-vins seed-pme-mate seed-pme-export seed-pme-soja)
 for a in "${LPJ[@]}" "${LPS[@]}"; do ensure_account $a 300000; done
 for a in "${PME[@]}"; do ensure_account $a 60000; done
+# liste blanche des PME du pilote, active par défaut : sinon open_hedge refuse en 211
+for a in "${PME[@]}"; do
+  invoke $ADMIN set_allowed --role Sme --who $a --allowed true >/dev/null && ok "$a autorisée à ouvrir des couvertures" || ko "$a non autorisée : $OUT"
+done
 
 say "Dépôts LP : tranche dynamique (junior) puis prudente (senior)"
 dep() { invoke $1 $2 --lp $1 --amount $(($3 * U)) && ok "$1 : $2 $3 USDC → $OUT parts" || ko "$1 $2 $3 : $OUT"; }

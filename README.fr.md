@@ -291,6 +291,10 @@ fn claim(owner: Address) -> i128;                        // propriétaire : reç
 fn claim_for(owner: Address) -> i128;                    // sans signature (robot) : verse au propriétaire son solde réclamable
 fn claimable(owner: Address) -> i128;
 fn total_claimable() -> i128;
+fn set_allowed(role: Role, who: Address, allowed: bool);   // admin, listes blanches du pilote (Lp, Sme), actives par défaut
+fn set_hedge_limits(max_hedge_notional: Option<i128>, max_duration_secs: Option<u64>,
+                    max_open_per_sme: Option<u32>);       // admin, limites du pilote par couverture (#211-#215)
+fn pilot_limits() -> PilotLimits;
 fn close_early(hedge_id: u64) -> i128;                   // propriétaire seul, avant l'échéance : clôture au prix du marché
 fn record_fixing(hedge_id: u64) -> i128;                 // sans signature, après l'échéance : fige le cours d'échéance sans régler
 fn settle_fallback(hedge_id: u64) -> i128;               // sans signature, seulement si aucun cours n'existe ni ne peut arriver : P&L nul, marge rendue

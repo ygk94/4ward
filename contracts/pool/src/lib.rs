@@ -73,13 +73,11 @@ pub struct Hedge {
 pub enum Role {
     /// Apporteur de capital (dépôts junior et senior) : vault.rs.
     Lp,
-    /// PME qui ouvre des couvertures : hedge.rs (moitié de Clément, pas encore branchée).
+    /// PME qui ouvre des couvertures : hedge.rs.
     Sme,
 }
 
 /// Réglages et compteurs du pilote (B9), en lecture pour le front.
-/// Les champs côté couvertures (liste PME, plafonds par couverture et de durée, nombre maximal
-/// de couvertures ouvertes) seront ajoutés par la moitié hedge de B9.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PilotLimits {
@@ -89,6 +87,14 @@ pub struct PilotLimits {
     pub notional_cap: Option<i128>,
     /// Σ notionnels des couvertures ouvertes, USDC 7 décimales au taux bloqué.
     pub total_notional: i128,
+    /// Liste blanche des PME active (true par défaut : pilote fermé).
+    pub sme_allowlist_on: bool,
+    /// Montant maximal d'une couverture, USDC 7 décimales au taux bloqué ; `None` = sans limite.
+    pub max_hedge_notional: Option<i128>,
+    /// Durée maximale d'une couverture (durée annoncée), en secondes ; `None` = sans limite.
+    pub max_duration_secs: Option<u64>,
+    /// Nombre maximal de couvertures ouvertes par PME ; `None` = sans limite.
+    pub max_open_per_sme: Option<u32>,
 }
 
 #[contracttype]
@@ -226,7 +232,7 @@ impl Pool {
     pub fn set_allowed(env: Env, role: Role, who: Address, allowed: bool) {
         match role {
             Role::Lp => vault::set_lp_allowed(&env, &who, allowed),
-            Role::Sme => admin::sme_not_implemented(&env),
+            Role::Sme => hedge::set_sme_allowed(&env, &who, allowed),
         }
     }
 
@@ -234,7 +240,7 @@ impl Pool {
     pub fn is_allowed(env: Env, role: Role, who: Address) -> bool {
         match role {
             Role::Lp => vault::is_lp_allowed(&env, &who),
-            Role::Sme => admin::sme_not_implemented(&env),
+            Role::Sme => hedge::is_sme_allowed(&env, &who),
         }
     }
 
@@ -242,7 +248,7 @@ impl Pool {
     pub fn set_allowlist_enabled(env: Env, role: Role, enabled: bool) {
         match role {
             Role::Lp => vault::set_lp_allowlist_enabled(&env, enabled),
-            Role::Sme => admin::sme_not_implemented(&env),
+            Role::Sme => hedge::set_sme_allowlist_enabled(&env, enabled),
         }
     }
 
@@ -257,11 +263,23 @@ impl Pool {
         vault::total_notional(&env)
     }
 
+    /// Admin : limites du pilote par couverture. `max_hedge_notional` en USDC (7 décimales) au taux bloqué,
+    /// `max_duration_secs` sur la durée annoncée, `max_open_per_sme` couvertures ouvertes en même temps par PME.
+    /// `None` = sans limite ; 0 refusé (215). Contrôlées à l'ouverture seulement.
+    pub fn set_hedge_limits(env: Env, max_hedge_notional: Option<i128>, max_duration_secs: Option<u64>, max_open_per_sme: Option<u32>) {
+        hedge::set_limits(&env, max_hedge_notional, max_duration_secs, max_open_per_sme)
+    }
+
     pub fn pilot_limits(env: Env) -> PilotLimits {
+        let limits = hedge::limits(&env);
         PilotLimits {
             lp_allowlist_on: vault::lp_allowlist_on(&env),
             notional_cap: vault::notional_cap(&env),
             total_notional: vault::total_notional(&env),
+            sme_allowlist_on: hedge::sme_allowlist_on(&env),
+            max_hedge_notional: limits.max_hedge_notional,
+            max_duration_secs: limits.max_duration_secs,
+            max_open_per_sme: limits.max_open_per_sme,
         }
     }
 
