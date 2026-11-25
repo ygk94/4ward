@@ -25,7 +25,7 @@ stellar contract invoke --id fx-mock-oracle --source-account fx-admin --network 
 ```sh
 stellar contract invoke --id fx-pool --source-account fx-admin --network testnet --   set_time_factor --factor 25920                                      # échéance réelle = durée / 25 920
 ```
-Le prix reste calculé sur la durée annoncée (`--duration_secs 7776000` = 90 jours → prix à 90 jours), l'échéance réelle tombe 300 s après l'ouverture. Événement `time_factor_set`. Lecture : `-- time_factor` (1 = temps réel).
+Seulement sur un pool compilé avec la feature `demo` (sinon `#208`). Le prix reste calculé sur la durée annoncée (`--duration_secs 7776000` = 90 jours → prix à 90 jours), l'échéance réelle tombe 300 s après l'ouverture. Événement `time_factor_set`. Lecture : `-- time_factor` (1 = temps réel).
 
 ## 1. Le LP remplit le pool (fx-lp)
 
@@ -164,6 +164,7 @@ Les textes de `panic!` sont effacés dans le WASM déployé : le front ne reçoi
 | #204 `InvalidDuration` | Paiement | Échéance invalide |
 | #206 `AlreadyMatured` | Paiement | Échéance atteinte : régler (`settle`) au lieu de clôturer |
 | #207 `Overflow` | Paiement | Montant ou cours hors de toute plage réaliste (calcul du P&L) |
+| #208 `DemoDisabled` | Paiement (admin) | Mode démo indisponible : contrat compilé sans la feature `demo` |
 | #100 `InvalidAmount` | Vault | Montant invalide |
 | #101 `InsufficientCapacity` | Vault | Le pool n'a pas assez de capital pour cette protection |
 | #102 `ReleaseExceedsReserved` | Vault | Erreur interne (libération au-delà du capital réservé) |

@@ -692,6 +692,8 @@ const MARGIN: i128 = 54_870_000_000;
 /// Environnement de test commun : USDC (SAC), mock-oracle (MXN à 0.055), pool, et les acteurs.
 struct Setup<'a> {
     env: Env,
+    // lu seulement par les tests du mode démo
+    #[cfg_attr(not(feature = "demo"), allow(dead_code))]
     admin: Address,
     lucia: Address,
     supplier: Address,
@@ -1132,8 +1134,10 @@ fn open_refused_over_currency_limit() {
 }
 
 /// 90 jours, en secondes : l'échéance racontée dans la démo.
+#[cfg(feature = "demo")]
 const DAYS_90: u64 = 7_776_000;
 /// Facteur de démo : 90 jours annoncés → 300 s réelles.
+#[cfg(feature = "demo")]
 const DEMO_FACTOR: u32 = 25_920;
 
 #[test]
@@ -1142,6 +1146,21 @@ fn time_factor_defaults_to_one() {
     assert_eq!(s.pool.time_factor(), 1);
 }
 
+/// Version de production (sans la feature `demo`) : le mode démo n'existe pas. `set_time_factor` est refusé
+/// (208) et les échéances restent réelles, quoi qu'il y ait dans le stockage.
+#[cfg(not(feature = "demo"))]
+#[test]
+fn production_build_refuses_demo_mode() {
+    let s = setup();
+    fund_pool(&s);
+    assert_eq!(s.pool.try_set_time_factor(&25_920), Err(Ok(contract_err(HedgeError::DemoDisabled as u32))));
+    assert_eq!(s.pool.time_factor(), 1);
+    let now = s.env.ledger().timestamp();
+    let id = s.pool.open_hedge(&s.lucia, &s.supplier, &Symbol::new(&s.env, "MXN"), &Side::BuyCurrency, &NOTIONAL, &MATURITY_IN, &1000);
+    assert_eq!(s.pool.get_hedge(&id).unwrap().maturity, now + MATURITY_IN);
+}
+
+#[cfg(feature = "demo")]
 #[test]
 fn accelerated_hedge_prices_on_announced_duration() {
     let s = setup();
@@ -1158,6 +1177,7 @@ fn accelerated_hedge_prices_on_announced_duration() {
     assert_eq!(h.maturity, now + 300);
 }
 
+#[cfg(feature = "demo")]
 #[test]
 fn accelerated_hedge_settles_after_real_maturity() {
     let s = setup();
@@ -1178,6 +1198,7 @@ fn accelerated_hedge_settles_after_real_maturity() {
 /// Chiffres exacts de la vidéo et du README : taux de `scripts/rates.snapshot` (USD 360, MXN 555),
 /// spot 0,055, 1 000 000 MXN à 90 jours, plafond 10 %, mode démo, crash +12 % avant l'échéance.
 /// Mêmes valeurs que `sim/contract.py` (auto-test) et `docs/points-a-trancher.md`.
+#[cfg(feature = "demo")]
 #[test]
 fn demo_figures() {
     let s = setup();
@@ -1205,6 +1226,7 @@ fn demo_figures() {
     assert_eq!(s.pool.settle(&id), 110_025_627_374);
 }
 
+#[cfg(feature = "demo")]
 #[test]
 fn set_time_factor_is_admin_only_and_public() {
     let s = setup();
@@ -1224,6 +1246,7 @@ fn set_time_factor_is_admin_only_and_public() {
     assert_eq!(s.pool.try_set_time_factor(&0), Err(Ok(contract_err(HedgeError::InvalidTimeFactor as u32))));
 }
 
+#[cfg(feature = "demo")]
 #[test]
 fn accelerated_maturity_is_at_least_one_second() {
     let s = setup();

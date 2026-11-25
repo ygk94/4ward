@@ -13,6 +13,8 @@
 //! Ensuite, côté front : path payment USDC → devise vers `supplier` pour exactement `notional`.
 //! Mode démo : `time_factor` (admin, 1 par défaut) raccourcit l'échéance réelle (`durée / facteur`)
 //! sans changer le prix, calculé sur la durée annoncée. Ex. 25 920 : 90 jours → 300 s.
+//! Seulement dans la version compilée avec la feature `demo` (`stellar contract build --package pool --features demo`) :
+//! sans elle, `set_time_factor` est refusé (208) et `time_factor` vaut toujours 1.
 //! Erreurs : `HedgeError`, codes 200+ (Vault 100+, Pricing 300+, Admin 400+). Les textes de panic! sont effacés dans le WASM :
 //! seul un code d'erreur permet au front d'afficher la bonne raison d'un refus.
 use crate::{pricing, vault, DataKey, Hedge, Side};
@@ -41,6 +43,8 @@ pub enum HedgeError {
     /// Calcul du P&L hors de toute plage réaliste (notionnel × écart de cours dépasse i128) : refus avec un code
     /// au lieu d'un piège de la VM sans explication.
     Overflow = 207,
+    /// `set_time_factor` sur une version compilée sans la feature `demo` : le mode démo n'existe pas en production.
+    DemoDisabled = 208,
 }
 
 /// Clés de stockage de Paiement (à part de `DataKey`, partagé).
@@ -264,12 +268,21 @@ pub(crate) fn pnl(env: &Env, side: Side, notional: i128, locked_rate: i128, spot
 }
 
 /// Facteur d'accélération du temps : échéance réelle = durée annoncée / facteur.
+/// Toujours 1 sans la feature `demo` : une version de production a des échéances réelles, quoi qu'il y ait
+/// dans le stockage (par exemple après une mise à jour du code depuis une version de démo).
 pub(crate) fn time_factor(env: &Env) -> u32 {
+    if !cfg!(feature = "demo") {
+        return 1;
+    }
     env.storage().instance().get(&HedgeKey::TimeFactor).unwrap_or(1)
 }
 
-/// Admin : règle le facteur (1 = temps réel). Réservé au testnet / à la démo.
+/// Admin : règle le facteur (1 = temps réel). N'existe que dans la version de démo (feature `demo`) :
+/// ailleurs, refus `DemoDisabled` (208).
 pub(crate) fn set_time_factor(env: &Env, factor: u32) {
+    if !cfg!(feature = "demo") {
+        panic_with_error!(env, HedgeError::DemoDisabled);
+    }
     crate::admin(env).require_auth();
     if factor == 0 {
         panic_with_error!(env, HedgeError::InvalidTimeFactor);

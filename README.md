@@ -291,7 +291,7 @@ fn settle(hedge_id: u64) -> i128;                        // permissionless after
 fn close_early(hedge_id: u64) -> i128;                   // owner only, before maturity: close at market price
 fn get_hedge(hedge_id: u64) -> Option<Hedge>;
 fn time_factor() -> u32;                                 // 1 = real time
-fn set_time_factor(factor: u32);                         // admin, demo: 25,920 → 90 d in 5 real minutes
+fn set_time_factor(factor: u32);                         // admin, demo build only (else #208): 25,920 → 90 d in 5 real minutes
 ```
 
 ---
@@ -310,7 +310,7 @@ Reflector FX testnet covers: EUR, GBP, CHF, CAD, **MXN, ARS, BRL**, THB, XAU (US
 
 The pool is redeployed on every `./scripts/setup-testnet.sh`, which also makes the LP deposit (1,000,000 USDC via `deposit_lp`). Current IDs are in `.env.testnet`.
 
-**Demo mode:** setup sets `set_time_factor 25920`: the price is computed over the stated duration (90 days), but the actual maturity falls 5 minutes after opening. This is what lets us settle a "90-day" hedge live in the video.
+**Demo mode:** setup sets `set_time_factor 25920`: the price is computed over the stated duration (90 days), but the actual maturity falls 5 minutes after opening. This is what lets us settle a "90-day" hedge live in the video. Demo mode only exists in a pool built with the `demo` cargo feature (`stellar contract build --package pool --features demo`), which `scripts/setup-testnet.sh` does by default; `DEMO_TIME_FACTOR=1 scripts/setup-testnet.sh` deploys the production build instead (real maturities, `set_time_factor` rejected with #208). Tests: `cargo test` covers the production build, `cargo test -p pool --features demo` the demo build.
 
 **Testnet MVP limitations:** supplier payment from the app in MXN only (the only currency with a test asset and a DEX offer placed by the setup; BRL, ARS and EUR hedges settle normally); demo oracle (SEP-40 mock-oracle, for the crash) instead of Reflector, copied from Reflector by `keepalive.sh --live` outside of filming; test USDC and MXN issued by the ISSUER account, MXN/USDC DEX offer placed by us; gross capacity rule (sum of margins, no netting); interest rates read from the Etherfuse API and pushed by the admin (`scripts/sync-rates.sh`), not read by the contract.
 
@@ -387,7 +387,7 @@ TODO.md                # setup and work items
 Fixes planned after the hackathon; details in `docs/points-a-trancher.md`.
 
 - **Fixing: single price, no escape path yet.** `settle` uses the price in effect at maturity if it is at most 15 minutes old, otherwise the first price published within the following hour; until then it fails with 312 and the hedge stays open. The rate can be locked without settling, which matters because Reflector forgets its prices after about 24 hours. Still missing, planned for the Instaward sprint: a time-weighted average over ~30 minutes with consistency bounds instead of a single price, and the `settle_fallback` escape path (zero P&L once the contract has established that no price exists), without which a hedge whose fixing is lost stays locked.
-- **Demo mode (`time_factor` > 1)**: the price covers the stated duration and maturity is shortened, so carry is not neutralized (arbitrage possible against the pool). `time_factor` must be 1 in production; `set_time_factor` moves behind a `demo` cargo feature during the Instaward sprint.
+- **Demo mode (`time_factor` > 1)**: the price covers the stated duration and maturity is shortened, so carry is not neutralized (arbitrage possible against the pool). `time_factor` must be 1 in production: `set_time_factor` now only exists in the `demo` build (#208 otherwise) and `time_factor` is always 1 without it.
 - **Deposit just before a winning `settle`**: the fixing is known at maturity, so an LP can enter at full price just before settlement and exit right after. To be fixed with an entry delay or by blocking `deposit_lp` while a matured hedge is unsettled.
 - **Tranches**: accrued senior interest lowers the junior value, which can fall below reserved capital (negative capacity) or below 20% without any operation; `withdraw_senior` does not yet check that the remaining capital covers the reserved amount. Fix written (capped Safe withdrawals, junior share floor), under review before merge.
 

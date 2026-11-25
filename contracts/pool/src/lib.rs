@@ -316,12 +316,13 @@ impl Pool {
     }
 
     /// Mode démo : échéance réelle = durée annoncée / `time_factor` (le prix reste calculé sur la
-    /// durée annoncée). 1 par défaut = temps réel.
+    /// durée annoncée). 1 par défaut = temps réel ; toujours 1 sans la feature `demo`.
     pub fn time_factor(env: Env) -> u32 {
         hedge::time_factor(&env)
     }
 
-    /// Admin, testnet / démo uniquement : ex. 25 920 → une couverture à 90 jours échoit en 300 s.
+    /// Admin, version de démo uniquement (feature `demo`, sinon erreur 208) : ex. 25 920 → une couverture à
+    /// 90 jours échoit en 300 s.
     pub fn set_time_factor(env: Env, factor: u32) {
         hedge::set_time_factor(&env, factor)
     }
