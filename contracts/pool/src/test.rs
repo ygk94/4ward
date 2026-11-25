@@ -1402,6 +1402,244 @@ fn settle_refused_while_no_rate_and_hedge_stays_open() {
 /// Un jour plus une seconde : Reflector (et le mock) ont oublié le cours d'échéance.
 const AFTER_HISTORY: u64 = 86_401;
 
+// ---- Tests aléatoires du règlement (dossier Instaward, livrable 1) ----
+//
+// Des scénarios tirés au hasard (graine fixe, donc rejouables) enchaînent ouvertures dans les deux sens, mouvements du
+// peso, passage du temps, règlements, clôtures anticipées, voie de secours et réclamations. Après chaque étape on
+// vérifie les propriétés qui doivent tenir quoi qu'il arrive :
+// 1. conservation de l'USDC : solde du contrat = capital des LPs + marges des couvertures ouvertes + soldes réclamables ;
+// 2. jeu à somme nulle : ce que le pool a gagné ou perdu = − Σ P&L des PME sur les couvertures closes ;
+// 3. bornes : chaque versement est entre 0 et 2 × marge, et la réserve du pool = Σ marges ouvertes ;
+// 4. l'argent de la PME : son wallet + son solde réclamable + ses marges ouvertes = départ + Σ P&L.
+
+extern crate std;
+use std::{format, vec::Vec};
+
+/// Générateur pseudo-aléatoire minimal (xorshift64*), sans dépendance : même graine, même scénario.
+struct Rng(u64);
+
+impl Rng {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 >> 12;
+        self.0 ^= self.0 << 25;
+        self.0 ^= self.0 >> 27;
+        self.0.wrapping_mul(0x2545_F491_4F6C_DD1D)
+    }
+    /// Entier dans [lo, hi].
+    fn range(&mut self, lo: i128, hi: i128) -> i128 {
+        lo + (self.next() % ((hi - lo + 1) as u64)) as i128
+    }
+}
+
+/// Couverture ouverte suivie par le test.
+struct Open {
+    id: u64,
+    margin: i128,
+    maturity: u64,
+}
+
+/// État attendu, tenu à côté du contrat.
+#[derive(Default)]
+struct Books {
+    /// Σ P&L des PME sur les couvertures closes (versement − marge).
+    user_pnl: i128,
+    closed: u32,
+    fallbacks: u32,
+}
+
+fn check_invariants(s: &Setup, open: &[Open], books: &Books, step: &str) {
+    let margins: i128 = open.iter().map(|h| h.margin).sum();
+    let total = s.pool.total_assets();
+    let claimable = s.pool.total_claimable();
+    // 1. conservation de l'USDC
+    assert_eq!(s.usdc.balance(&s.pool.address), total + margins + claimable, "conservation ({step})");
+    // 2. somme nulle entre le pool et les PME
+    assert_eq!(total - LP_CAPITAL, -books.user_pnl, "somme nulle ({step})");
+    // 3. réserve = marges ouvertes
+    let e = s.pool.exposure(&Symbol::new(&s.env, "MXN"));
+    assert_eq!(e.buy_margin + e.sell_margin, margins, "réserve ({step})");
+    // 4. l'argent de Lucía
+    assert_eq!(
+        s.usdc.balance(&s.lucia) + s.pool.claimable(&s.lucia) + margins,
+        LUCIA_START + books.user_pnl,
+        "argent de la PME ({step})"
+    );
+}
+
+/// Clôt une couverture échue comme le ferait le robot : `settle` si un cours existe, sinon `settle_fallback` si
+/// l'absence de cours est constatée. `None` si ni l'un ni l'autre n'est encore possible (cours en attente).
+fn close_matured(s: &Setup, id: u64, margin: i128, books: &mut Books) -> Option<i128> {
+    if let Ok(Ok(payout)) = s.pool.try_settle(&id) {
+        return Some(payout);
+    }
+    match s.pool.try_settle_fallback(&id) {
+        Ok(Ok(payout)) => {
+            assert_eq!(payout, margin, "secours : marge rendue telle quelle");
+            books.fallbacks += 1;
+            Some(payout)
+        }
+        // un cours existe ou peut encore arriver : le secours refuse, c'est voulu
+        Err(Ok(e)) if e == contract_err(HedgeError::FixingAvailable as u32) => None,
+        other => panic!("clôture inattendue : {:?}", other),
+    }
+}
+
+/// Ferme `h` par `settle`, `close_early` ou `settle_fallback` et vérifie les bornes du versement.
+fn record_close(open: &mut Vec<Open>, idx: usize, payout: i128, books: &mut Books) {
+    let h = open.swap_remove(idx);
+    assert!((0..=2 * h.margin).contains(&payout), "versement {payout} hors de [0, 2 × {}]", h.margin);
+    books.user_pnl += payout - h.margin;
+    books.closed += 1;
+}
+
+fn run_scenario(seed: u64) -> Books {
+    let s = setup();
+    fund_pool(&s);
+    s.pool.set_rate(&Symbol::new(&s.env, "USD"), &400);
+    let mxn = Symbol::new(&s.env, "MXN");
+    let mut rng = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
+    let mut open: Vec<Open> = Vec::new();
+    let mut books = Books::default();
+    let mut spot = SPOT_0;
+    let mut now = s.env.ledger().timestamp();
+
+    for step in 0..40 {
+        // le temps passe (au plus 5 min, sous l'âge maximal du prix) et le peso bouge de ±3 % au plus
+        now += rng.range(1, 300) as u64;
+        spot = (spot * rng.range(9_700, 10_300) / 10_000).clamp(SPOT_0 / 2, SPOT_0 * 2);
+        price_at(&s, now, spot);
+
+        match rng.range(0, 9) {
+            // ouvrir, dans un sens ou l'autre (un refus de capacité ou de limite est normal)
+            0..=3 => {
+                let side = if rng.range(0, 1) == 0 { Side::BuyCurrency } else { Side::SellCurrency };
+                let notional = rng.range(1, 2_000_000) * 10_000_000;
+                let duration = rng.range(60, 1_200) as u64;
+                let cap = rng.range(500, 2_000) as u32;
+                if let Ok(Ok(id)) = s.pool.try_open_hedge(&s.lucia, &s.supplier, &mxn, &side, &notional, &duration, &cap, &None) {
+                    let h = s.pool.get_hedge(&id).unwrap();
+                    open.push(Open { id, margin: h.margin, maturity: h.maturity });
+                }
+            }
+            // régler tout ce qui est échu
+            4..=5 => {
+                let mut i = 0;
+                while i < open.len() {
+                    if open[i].maturity <= now {
+                        if let Some(payout) = close_matured(&s, open[i].id, open[i].margin, &mut books) {
+                            record_close(&mut open, i, payout, &mut books);
+                            continue;
+                        }
+                    }
+                    i += 1;
+                }
+            }
+            // clôture anticipée d'une couverture pas encore échue
+            6 => {
+                if let Some(i) = open.iter().position(|h| h.maturity > now) {
+                    let payout = s.pool.close_early(&open[i].id);
+                    record_close(&mut open, i, payout, &mut books);
+                }
+            }
+            // la PME réclame (ou le robot pousse) son solde
+            7 => {
+                if rng.range(0, 1) == 0 { s.pool.claim(&s.lucia) } else { s.pool.claim_for(&s.lucia) };
+                assert_eq!(s.pool.claimable(&s.lucia), 0);
+            }
+            // personne ne règle pendant plus d'un jour : l'oracle oublie, voie de secours à P&L nul
+            8 => {
+                if let Some(i) = open.iter().position(|h| h.maturity <= now) {
+                    // au-delà de l'heure de grâce plus 24 h : plus aucun cours de la fenêtre n'est lisible
+                    now = now.max(open[i].maturity + 3_600) + 86_401;
+                    s.env.ledger().set_timestamp(now);
+                    let (id, margin) = (open[i].id, open[i].margin);
+                    let fallbacks = books.fallbacks;
+                    let payout = close_matured(&s, id, margin, &mut books).expect("plus aucun cours : secours possible");
+                    assert_eq!(books.fallbacks, fallbacks + 1, "c'est bien la voie de secours qui a servi");
+                    record_close(&mut open, i, payout, &mut books);
+                    // prix frais pour la suite
+                    price_at(&s, now, spot);
+                }
+            }
+            _ => {}
+        }
+        check_invariants(&s, &open, &books, &format!("graine {seed}, étape {step}"));
+    }
+
+    // fin : tout ce qui reste est réglé (ou clos en secours), tout est réclamé, le pool retrouve sa capacité
+    // le robot repasse jusqu'à ce que tout soit clos : règlement si un cours existe, secours sinon
+    for _ in 0..5 {
+        now += 1_200;
+        price_at(&s, now, spot);
+        now += 300; // pas de lecture de 300 s du pricing : le cours devient lisible
+        s.env.ledger().set_timestamp(now);
+        let mut i = 0;
+        while i < open.len() {
+            if let Some(payout) = close_matured(&s, open[i].id, open[i].margin, &mut books) {
+                record_close(&mut open, i, payout, &mut books);
+            } else {
+                i += 1;
+            }
+        }
+        if open.is_empty() {
+            break;
+        }
+        now += 86_400 + 3_600; // ce qui reste en attente finit en secours
+        s.env.ledger().set_timestamp(now);
+    }
+    assert!(open.is_empty(), "graine {seed} : couvertures jamais closes");
+    s.pool.claim(&s.lucia);
+    check_invariants(&s, &open, &books, &format!("graine {seed}, fin"));
+    assert_eq!(s.pool.total_claimable(), 0);
+    assert_eq!(s.usdc.balance(&s.pool.address), s.pool.total_assets());
+    books
+}
+
+/// 40 scénarios par défaut (~20 s) ; `POOL_SCENARIOS=1000 cargo test -p pool random_scenarios` pour une passe longue.
+#[test]
+fn random_scenarios_keep_settlement_invariants() {
+    let n: u64 = std::env::var("POOL_SCENARIOS").ok().and_then(|v| v.parse().ok()).unwrap_or(40);
+    let (mut closed, mut fallbacks) = (0u64, 0u64);
+    for seed in 1..=n {
+        let b = run_scenario(seed);
+        closed += b.closed as u64;
+        fallbacks += b.fallbacks as u64;
+    }
+    // les scénarios exercent vraiment chaque voie de sortie
+    assert!(closed > 7 * n, "{closed} couvertures closes seulement");
+    assert!(fallbacks > n / 4, "{fallbacks} passages par la voie de secours seulement");
+}
+
+#[test]
+fn pnl_is_bounded_and_rounds_for_the_pool() {
+    let env = Env::default();
+    let mut rng = Rng(0xDEAD_BEEF);
+    for _ in 0..20_000 {
+        let side = if rng.range(0, 1) == 0 { Side::BuyCurrency } else { Side::SellCurrency };
+        let notional = rng.range(1, 100_000_000) * 10_000_000;
+        let locked = rng.range(1_000_000_000, 100_000_000_000_000);
+        let spot = rng.range(1_000_000_000, 100_000_000_000_000);
+        let margin = rng.range(1, 1_000_000_000_000);
+        let pnl = hedge::pnl(&env, side, notional, locked, spot, margin);
+        // bornée à ±marge
+        assert!((-margin..=margin).contains(&pnl));
+        // jamais plus que le P&L exact : l'arrondi va au pool
+        let diff = match side {
+            Side::BuyCurrency => spot - locked,
+            Side::SellCurrency => locked - spot,
+        };
+        let exact_scaled = notional * diff; // P&L exact × 10^14
+        assert!(pnl * 100_000_000_000_000 <= exact_scaled.max(-margin * 100_000_000_000_000));
+        // même sens que le marché (sauf arrondi d'une unité contre la PME)
+        if diff > 0 {
+            assert!(pnl >= 0);
+        }
+        if diff < 0 {
+            assert!(pnl < 0);
+        }
+    }
+}
+
 // ---- Pilote côté couvertures (B9) ----
 
 /// Une PME hors liste blanche, avec de quoi payer une marge.
