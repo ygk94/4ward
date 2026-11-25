@@ -188,13 +188,14 @@ impl<'a> World<'a> {
     /// PME avec `usdc` USDC pour ses marges.
     fn sme(&self, usdc: i128) -> Address {
         let sme = Address::generate(&self.env);
+        self.pool.set_allowed(&Role::Sme, &sme, &true); // liste blanche PME active par défaut
         self.mint(&sme, usdc);
         sme
     }
 
     fn open(&self, sme: &Address, code: &str, side: Side, notional: i128, duration: u64, cap_bps: u32) -> u64 {
         let supplier = Address::generate(&self.env);
-        let id = self.pool.open_hedge(sme, &supplier, &self.sym(code), &side, &notional, &duration, &cap_bps);
+        let id = self.pool.open_hedge(sme, &supplier, &self.sym(code), &side, &notional, &duration, &cap_bps, &None);
         self.hedges.borrow_mut().push(id);
         id
     }
@@ -219,9 +220,30 @@ impl<'a> World<'a> {
             .collect()
     }
 
-    /// Σ soldes réclamables (B4 : PME + protocole). 0 tant que B4 / B11 n'existent pas.
+    /// Propriétaires distincts des couvertures ouvertes par ce monde.
+    fn owners(&self) -> Vec<Address> {
+        let mut v: Vec<Address> = Vec::new();
+        for id in self.hedges.borrow().iter() {
+            let o = self.pool.get_hedge(id).unwrap().owner;
+            if !v.contains(&o) {
+                v.push(o);
+            }
+        }
+        v
+    }
+
+    /// Σ soldes réclamables (B4), recalculé par propriétaire et recoupé avec `total_claimable`.
     fn claimable_total(&self) -> i128 {
-        0
+        let sum: i128 = self.owners().iter().map(|o| self.pool.claimable(o)).sum();
+        assert_eq!(sum, self.pool.total_claimable(), "Σ claimable(owner) = total_claimable");
+        sum
+    }
+
+    /// Pousse tous les soldes réclamables vers leurs propriétaires (robot, `claim_for`).
+    fn claim_all(&self) {
+        for o in self.owners() {
+            self.pool.claim_for(&o);
+        }
     }
 
     /// Vérification d'état au repos, par les seules lectures publiques + le solde USDC du contrat.
@@ -311,11 +333,13 @@ fn w_multi_currency_round_trip() {
         let h = w.pool.get_hedge(&id).unwrap();
         let before = w.pool.total_assets();
         let sme_before = w.balance(&h.owner);
+        let claim_before = w.pool.claimable(&h.owner);
         let paid = w.settle_at(id, code, price);
-        let pnl = hedge::pnl(h.side, h.notional, h.locked_rate, price, h.margin);
+        let pnl = hedge::pnl(&w.env, h.side, h.notional, h.locked_rate, price, h.margin);
         assert_eq!(paid, h.margin + pnl);
         assert_eq!(w.pool.total_assets(), before - pnl, "T bouge de −P&L");
-        assert_eq!(w.balance(&h.owner), sme_before + paid);
+        assert_eq!(w.balance(&h.owner), sme_before, "B4 : rien n'est transféré au règlement");
+        assert_eq!(w.pool.claimable(&h.owner), claim_before + paid, "B4 : versement crédité");
         w.assert_state();
         pnl
     };
@@ -336,6 +360,7 @@ fn w_multi_currency_round_trip() {
         }
     }
     assert_eq!(w.pool.total_assets(), 0);
+    w.claim_all();
     assert_eq!(w.balance(&w.pool.address), 0, "plus un stroop dans le contrat");
     let _ = j1;
 }
@@ -358,7 +383,7 @@ fn w_pause_blocks_entries_not_exits() {
     assert_err(w.pool.try_deposit_senior(&lp, &(1_000 * USDC)), E_PAUSED);
     let supplier = Address::generate(&w.env);
     assert_err(
-        w.pool.try_open_hedge(&sme, &supplier, &w.sym("MXN"), &Side::BuyCurrency, &(1_000 * UNIT), &DAY, &1000),
+        w.pool.try_open_hedge(&sme, &supplier, &w.sym("MXN"), &Side::BuyCurrency, &(1_000 * UNIT), &DAY, &1000, &None),
         E_PAUSED,
     );
 
@@ -416,7 +441,7 @@ fn w_notional_cap_at_bound() {
     // 20 stroops de MXN = 1 stroop d'USDC (marge arrondie à 1) : 115.
     let supplier = Address::generate(&w.env);
     assert_err(
-        w.pool.try_open_hedge(&sme, &supplier, &w.sym("MXN"), &Side::SellCurrency, &20, &DAY, &1000),
+        w.pool.try_open_hedge(&sme, &supplier, &w.sym("MXN"), &Side::SellCurrency, &20, &DAY, &1000, &None),
         E_NOTIONAL_CAP,
     );
     w.assert_state();
@@ -550,6 +575,7 @@ fn r_inflation_by_exit_discount() {
     assert!(999 * USDC - got <= 1_000, "victime : perte de {} stroops", 999 * USDC - got);
     // R = 0 : la sortie totale redevient permise.
     w.pool.withdraw(&attacker, &w.pool.lp_shares(&attacker));
+    w.claim_all();
     assert_eq!(w.balance(&w.pool.address), 0);
 }
 
@@ -651,7 +677,6 @@ fn f_b3_hedge_without_fixing_blocks_deposits_only_during_grace() {
 
 /// FUTUR B1 : `settle_fallback` clôt sans gain ni perte une couverture sans cours ; R retombe à 0
 /// et le dernier LP peut tout retirer (complète `r_last_lp_with_hedge_without_fixing`).
-#[cfg(any())]
 #[test]
 fn f_b1_settle_fallback_releases_reserve() {
     let w = world_mxn();
@@ -661,12 +686,14 @@ fn f_b1_settle_fallback_releases_reserve() {
     let id = w.open(&sme, "MXN", Side::BuyCurrency, 100_000 * UNIT, 2 * 3_600, 1000);
     let m = w.pool.get_hedge(&id).unwrap().maturity;
     w.warp(m + 3_600 - 1);
-    assert!(w.pool.try_settle_fallback(&id).is_err()); // heure non écoulée (207 FixingPending ?)
+    assert_err(w.pool.try_settle_fallback(&id), 209); // heure non écoulée : un cours peut encore arriver
     w.warp(m + 3_600 + 1);
     w.pool.settle_fallback(&id); // B4 : crédite la marge au lieu de la transférer
     assert_eq!(w.pool.total_assets(), 10_000 * USDC); // ni gain ni perte
     assert_eq!(w.balance(&sme) + w.pool.claimable(&sme), before);
     w.pool.withdraw(&j, &w.pool.lp_shares(&j)); // R = 0 : sortie totale
+    assert_eq!(w.balance(&w.pool.address), 500 * USDC, "reste la marge réclamable");
+    w.claim_all();
     assert_eq!(w.balance(&w.pool.address), 0);
 }
 
@@ -675,7 +702,6 @@ fn f_b1_settle_fallback_releases_reserve() {
 /// propriétaire, 209 quand il n'y a rien. Invariant : solde = T + marges ouvertes + réclamables.
 /// Avec B4, `World::claimable_total` devient Σ `pool.claimable(owner)` sur les propriétaires des
 /// couvertures (+ part du protocole avec B11), et `settle_at` peut appeler `claim_for`.
-#[cfg(any())]
 #[test]
 fn f_b4_claimable_balance_and_claim_for() {
     let w = world_mxn();
@@ -700,8 +726,8 @@ fn f_b4_claimable_balance_and_claim_for() {
     assert_eq!(w.pool.claim_for(&sme), 2_400 * USDC);
     assert_eq!(w.balance(&sme), start + 400 * USDC + 500 * USDC);
     assert_eq!(w.pool.claimable(&sme), 0);
-    assert_err(w.pool.try_claim_for(&sme), 209);
-    assert_err(w.pool.try_claim(&sme), 209);
+    assert_eq!(w.pool.claim_for(&sme), 0, "rien à verser : 0, sans erreur");
+    assert_eq!(w.pool.claim(&sme), 0);
     w.assert_state();
 }
 

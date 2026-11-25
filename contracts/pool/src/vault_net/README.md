@@ -17,7 +17,7 @@
 - **ROUGE** : `#[ignore = "…"]`, échoue à cause d'un défaut connu ; retirer le `#[ignore]` avec le correctif.
 - **FUTUR** : dépend d'un lot non écrit. Dans `world.rs`, sous `#[cfg(any())]` (jamais compilé) ; ailleurs, `#[ignore = "FUTUR …"]`. Les noms de fonctions sont tirés des plans, à confirmer.
 
-État au 24/11/2026, après B5 et B6 : `cargo test -p pool` donne 283 réussis, 3 ignorés. Les constats de B5 et B6 ont été supprimés et leurs tests rouges réactivés.
+État au 25/11/2026, après B5, B6, le plafond par propriétaire (120) et la fusion avec le paiement (B4, B1, B7, B9 côté PME) : `cargo test -p pool` donne 326 réussis, 3 ignorés. Les constats de B5 et B6 ont été supprimés et leurs tests rouges réactivés ; `world::f_b1_settle_fallback_releases_reserve` et `world::f_b4_claimable_balance_and_claim_for` sont actifs. Depuis B4, les invariants de solde comptent les soldes réclamables (solde USDC = T + marges ouvertes + `total_claimable`), et chaque aide qui ouvre une couverture inscrit sa PME dans la liste blanche (active par défaut, sinon 211).
 
 | Test encore ignoré | Pourquoi |
 |---|---|
@@ -25,11 +25,11 @@
 | `platform::ttl_120_day_hedge_entries_live_until_settlement_deadline` | Moitié couverture de B9 (Clément) : durée de conservation alignée sur l'échéance |
 | `mutants::senior_served_in_full_after_120_days_saturated` | Décision D1 (`docs/decisions-contrat.md`) : pas de provision d'intérêts dans la capacité pour l'instant |
 
-Constats encore actifs, à supprimer avec leur lot : `platform::transfer_settle_to_frozen_owner_reverts_and_keeps_reserve` (B4), `platform::events_senior_interest_has_no_event_today` (événement d'intérêts senior, non prévu).
+Constat encore actif, à supprimer avec son lot : `platform::events_senior_interest_has_no_event_today` (événement d'intérêts senior, non prévu). Le constat B4 est devenu `platform::transfer_settle_to_frozen_owner_credits_claimable_and_frees_reserve` (le règlement vers une PME gelée réussit et crédite ; seul `claim_for` échoue jusqu'au dégel).
 
 ## Codes d'erreur supposés
 
-`VaultError` : 116 `LastShareLocked` (B6), 117 `SeniorWithdrawBelowReserved` (B5, garde-fou), 118 `SeniorArrears` (B5), 119 `SeniorDepositsClosed` (B5). Le 113 reste réservé au refus des dépôts de B3 (commentaire de `VaultError` aligné sur la note de Lancelot). Certains fichiers gardent ces numéros en constantes locales.
+`VaultError` : 116 `LastShareLocked` (B6), 117 `SeniorWithdrawBelowReserved` (B5, garde-fou), 118 `SeniorArrears` (B5), 119 `SeniorDepositsClosed` (B5), 120 `OwnerReserveCapExceeded` (plafond par propriétaire). Le 113 reste réservé au refus des dépôts de B3 (commentaire de `VaultError` aligné sur la note de Lancelot). Certains fichiers gardent ces numéros en constantes locales.
 
 ## Rejouer une suite aléatoire
 

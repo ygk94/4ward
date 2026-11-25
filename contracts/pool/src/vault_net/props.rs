@@ -135,6 +135,7 @@ impl Net {
             lps.push(lp);
         }
         let sme = Address::generate(&env);
+        PoolClient::new(&env, &pool).set_allowed(&Role::Sme, &sme, &true); // liste blanche PME active par défaut
         StellarAssetClient::new(&env, &usdc).mint(&sme, &(1_000_000_000 * USDC));
         let net = Net { env, pool, usdc, oracle, lps, sme, open: Vec::new(), checks };
         net.set_spot(SPOT_0);
@@ -241,10 +242,11 @@ impl Net {
         if self.on(T_GE_R) && t < r {
             return Err(format!("I1 T < R : T={t} R={r}"));
         }
-        // I2 solde USDC = T + Σ marges ouvertes (VERT ; + Σ réclamable après B4)
+        // I2 solde USDC = T + Σ marges ouvertes + Σ réclamables (B4 : règlements crédités, pas transférés)
         let bal = self.usdc_balance(&self.pool);
-        if bal != t + sum_margin {
-            return Err(format!("I2 solde {bal} ≠ T {t} + marges {sum_margin}"));
+        let claimable = self.client().total_claimable();
+        if claimable < 0 || bal != t + sum_margin + claimable {
+            return Err(format!("I2 solde {bal} ≠ T {t} + marges {sum_margin} + réclamables {claimable}"));
         }
         // I3 R = Σ marges ouvertes = Σ marges des expositions (VERT, une seule devise ici)
         if r != sum_margin || e.buy_margin + e.sell_margin != r {
@@ -421,7 +423,7 @@ impl Net {
             return Ok(String::from("open : notionnel nul, ignorée"));
         }
         let c = self.client();
-        let r = code(c.try_open_hedge(&self.sme, &self.sme, &mxn(&self.env), &side, &notional, &duration, &cap_bps));
+        let r = code(c.try_open_hedge(&self.sme, &self.sme, &mxn(&self.env), &side, &notional, &duration, &cap_bps, &None));
         match r {
             Ok(id) => {
                 let h = c.get_hedge(&id).unwrap();

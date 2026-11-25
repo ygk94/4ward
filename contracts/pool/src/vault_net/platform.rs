@@ -108,6 +108,7 @@ impl Net {
     /// Vraie couverture via `open_hedge` (pas `reserve` appelé à la main). Retourne (id, PME).
     fn open_hedge(&self, notional: i128, duration: u64) -> (u64, Address) {
         let sme = Address::generate(&self.env);
+        self.client().set_allowed(&Role::Sme, &sme, &true); // liste blanche PME active par défaut
         self.mint(&sme, notional); // largement assez pour la marge
         let id = self.client().open_hedge(
             &sme,
@@ -117,6 +118,7 @@ impl Net {
             &notional,
             &duration,
             &1000,
+            &None,
         );
         (id, sme)
     }
@@ -663,23 +665,28 @@ fn transfer_frozen_pool_blocks_flows_without_corrupting_books() {
     assert_eq!(s.books(&lp), before);
 }
 
-/// Règlement vers une PME gelée : `settle` échoue en bloc, la couverture reste ouverte et sa marge
-/// reste réservée (capital des LPs immobilisé). VERT aujourd'hui ; B4 (solde réclamable) le
-/// transforme : `settle` doit réussir et créditer `claimable(owner)` (test FUTUR).
+/// Règlement vers une PME gelée (B4) : `settle` réussit, crédite `claimable(owner)` et libère la
+/// réserve ; seul `claim_for` échoue (code 11 du SAC) et le solde reste dû jusqu'au dégel.
 #[test]
-fn transfer_settle_to_frozen_owner_reverts_and_keeps_reserve() {
+fn transfer_settle_to_frozen_owner_credits_claimable_and_frees_reserve() {
     let s = net();
-    let lp = s.new_lp(100_000 * USDC);
+    let _lp = s.new_lp(100_000 * USDC);
     let (id, sme) = s.open_hedge(MXN_1M, 60);
     s.advance_secs(60);
     s.set_mxn(MXN_SPOT);
     s.sac().set_authorized(&sme, &false);
-    let before = s.books(&lp);
-    let r = s.client().try_settle(&id);
-    assert_eq!(r.err(), sac_err(11));
-    assert_eq!(s.books(&lp), before);
-    assert!(!s.client().get_hedge(&id).unwrap().settled);
-    assert!(s.client().capacity() < s.client().total_assets());
+    let paid = s.client().settle(&id);
+    assert!(s.client().get_hedge(&id).unwrap().settled);
+    assert_eq!(s.client().claimable(&sme), paid);
+    assert_eq!(s.client().total_claimable(), paid);
+    assert_eq!(s.client().capacity(), s.client().total_assets(), "réserve libérée");
+    let sme_before = s.usdc_balance(&sme);
+    assert_eq!(s.client().try_claim_for(&sme).err(), sac_err(11));
+    assert_eq!(s.client().claimable(&sme), paid, "solde toujours dû");
+    s.sac().set_authorized(&sme, &true);
+    assert_eq!(s.client().claim_for(&sme), paid);
+    assert_eq!(s.usdc_balance(&sme), sme_before + paid);
+    assert_eq!(s.client().total_claimable(), 0);
 }
 
 // ======================= 5. Budget de ressources =======================
@@ -739,7 +746,10 @@ fn budget_each_operation_under_ceiling() {
 /// d'entrées avec 1 ou 40 couvertures ouvertes. Échouera si un correctif boucle sur les
 /// couvertures (B3 : borner par le maximum de couvertures ouvertes de B9 et mesurer à ce maximum).
 /// Les instructions, elles, montent d'environ 50 % dans le test env (coût hôte du stockage qui
-/// grossit, pas du code du vault) : seule une borne lâche (×2) est donc posée dessus.
+/// grossit, pas du code du vault) : seule une borne lâche est donc posée dessus. ×2,5 depuis la
+/// fusion avec le paiement (24/11 : 1,64 vault seul ; 1,98 avec les entrées par couverture du
+/// paiement ; 2,26 avec en plus 40 PME en liste blanche, une entrée chacune) : le nombre d'entrées,
+/// lui, reste strictement constant.
 #[test]
 fn budget_constant_in_number_of_open_hedges() {
     fn measure(n: u32) -> [(i64, u32); 3] {
@@ -769,7 +779,7 @@ fn budget_constant_in_number_of_open_hedges() {
     std::println!("1 couverture {one:?}\n40 couvertures {many:?}");
     for (a, b) in one.iter().zip(many.iter()) {
         assert_eq!(a.1, b.1, "nombre d'entrées lues/écrites");
-        assert!(b.0 <= 2 * a.0, "instructions : {} contre {}", a.0, b.0);
+        assert!(2 * b.0 <= 5 * a.0, "instructions : {} contre {}", a.0, b.0);
     }
 }
 

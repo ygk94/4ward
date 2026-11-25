@@ -136,9 +136,10 @@ impl Net {
         self.env.ledger().with_mut(|l| l.timestamp += secs);
     }
 
-    /// Solde USDC du contrat = T + marges ouvertes (chaque `open` poste exactement sa réserve).
+    /// Solde USDC du contrat = T + marges ouvertes + réclamables (chaque `open` poste exactement sa
+    /// réserve ; B4 : `settle` crédite au lieu de transférer).
     fn check(&self) {
-        assert_eq!(self.usdc_of(&self.pool), self.t() + self.r(), "solde USDC = T + R");
+        assert_eq!(self.usdc_of(&self.pool), self.t() + self.r() + self.c().total_claimable(), "solde USDC = T + R + réclamables");
     }
 
     /// Retire toutes les parts junior de `lp`, retourne l'USDC versé.
@@ -609,9 +610,10 @@ fn matured_winning_hedge() -> (Net, Address, u64) {
 
     let honest = n.junior(100_000 * USDC);
     let lucia = Address::generate(&n.env);
+    n.c().set_allowed(&Role::Sme, &lucia, &true);
     n.mint(&lucia, 200_000 * USDC);
     let supplier = Address::generate(&n.env);
-    let id = n.c().open_hedge(&lucia, &supplier, &mxn, &Side::BuyCurrency, &10_000_000_000_000, &60, &1000);
+    let id = n.c().open_hedge(&lucia, &supplier, &mxn, &Side::BuyCurrency, &10_000_000_000_000, &60, &1000, &None);
     n.advance(60);
     oracle.set_price(&Asset::Other(mxn), &5_060_000_000_000);
     (n, honest, id)
