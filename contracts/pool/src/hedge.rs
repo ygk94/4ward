@@ -16,7 +16,7 @@
 //!        frais de sortie) ; même P&L borné, même versement que settle. Le perdant paie, le pool libère sa réserve.
 //! record_fixing : après l'échéance, sans signature, fige le cours d'échéance (pricing::record_fixing) pour que la
 //!        couverture reste réglable après l'oubli de l'historique de l'oracle (~24 h sur Reflector). Pour le robot.
-//! settle_fallback : après l'échéance, sans signature, si aucun cours n'existe ni ne peut plus arriver
+//! settle_fallback : après l'échéance, admin seul, si aucun cours n'existe ni ne peut plus arriver
 //!        (pricing::fixing_missing) : clôture à P&L nul, marge rendue. Sinon refus 209.
 //! Ensuite, côté front : path payment USDC → devise vers `supplier` pour exactement `notional`.
 //! Mode démo : `time_factor` (admin, 1 par défaut) raccourcit l'échéance réelle (`durée / facteur`)
@@ -376,12 +376,15 @@ pub(crate) fn record_fixing(env: &Env, hedge_id: u64) -> i128 {
     pricing::record_fixing(env, hedge_id, &hedge.currency, hedge.maturity)
 }
 
-/// Voie de secours, sans signature : clôt une couverture échue dont le cours d'échéance est définitivement
+/// Voie de secours, **admin seul** : clôt une couverture échue dont le cours d'échéance est définitivement
 /// absent (rien de figé, aucun cours dans l'heure après l'échéance, ou historique de l'oracle oublié).
 /// P&L nul : la marge est rendue au propriétaire, la réserve du pool libérée, personne ne gagne ni ne perd.
 /// Refus `FixingAvailable` (209) tant qu'un cours existe ou peut encore arriver : il faut alors `settle`.
 /// Retourne le montant USDC versé (la marge).
 pub(crate) fn settle_fallback(env: &Env, hedge_id: u64) -> i128 {
+    // réservée à l'admin (relecture de Hugo, 25/11) : ouverte à tous, ce serait une option gratuite pour le perdant,
+    // qui n'aurait qu'à attendre que personne ne fige le cours pendant 24 h
+    crate::admin(env).require_auth();
     let key = DataKey::Hedge(hedge_id);
     let mut hedge = load_open(env, &key);
     if env.ledger().timestamp() < hedge.maturity {

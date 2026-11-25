@@ -2157,9 +2157,9 @@ fn settle_fallback_closes_without_gain_or_loss() {
     let now = s.env.ledger().timestamp();
     let id = open_funded(&s, Side::BuyCurrency);
 
-    // personne n'a figé ni réglé pendant 24 h : plus aucun cours, n'importe qui clôt sans signature
+    // personne n'a figé ni réglé pendant 24 h : plus aucun cours, l'admin clôt en secours
     s.env.ledger().set_timestamp(now + MATURITY_IN + AFTER_HISTORY);
-    let paid = s.pool.set_auths(&[]).settle_fallback(&id);
+    let paid = s.pool.settle_fallback(&id);
     // événement public (lu avant tout autre appel : les tests ne gardent que ceux du dernier appel)
     let expected = hedge::HedgeFallbackSettled { hedge_id: id, owner: s.lucia.clone(), payout: HEDGE_MARGIN };
     let events = s.env.events().all().filter_by_contract(&s.pool.address);
@@ -2172,6 +2172,26 @@ fn settle_fallback_closes_without_gain_or_loss() {
     // une seule fois
     assert_eq!(s.pool.try_settle_fallback(&id), Err(Ok(contract_err(HedgeError::AlreadySettled as u32))));
     assert_eq!(s.pool.try_settle(&id), Err(Ok(contract_err(HedgeError::AlreadySettled as u32))));
+}
+
+/// Relecture de Hugo : ouverte à tous, la voie de secours serait une option gratuite pour le perdant (il attend
+/// que personne ne fige le cours pendant 24 h). Elle est réservée à l'admin.
+#[test]
+fn settle_fallback_is_admin_only() {
+    let s = setup();
+    let now = s.env.ledger().timestamp();
+    let id = open_funded(&s, Side::BuyCurrency);
+    s.env.ledger().set_timestamp(now + MATURITY_IN + AFTER_HISTORY);
+
+    // sans signature (ou signée par la PME) : refusé, la couverture reste ouverte
+    assert!(s.pool.set_auths(&[]).try_settle_fallback(&id).is_err());
+    assert!(!s.pool.get_hedge(&id).unwrap().settled);
+
+    // signée par l'admin : acceptée
+    s.pool.mock_all_auths().settle_fallback(&id);
+    let auths = s.env.auths();
+    assert_eq!(auths.len(), 1);
+    assert_eq!(auths[0].0, s.admin);
 }
 
 #[test]

@@ -301,7 +301,7 @@ fn set_hedge_limits(max_hedge_notional: Option<i128>, max_duration_secs: Option<
 fn pilot_limits() -> PilotLimits;
 fn close_early(hedge_id: u64) -> i128;                   // owner only, before maturity: close at market price
 fn record_fixing(hedge_id: u64) -> i128;                 // permissionless after maturity: lock the maturity rate without settling
-fn settle_fallback(hedge_id: u64) -> i128;               // permissionless, only once no maturity rate exists or can come: zero P&L, margin returned
+fn settle_fallback(hedge_id: u64) -> i128;               // admin only, only once no maturity rate exists or can come: zero P&L, margin returned
 fn get_hedge(hedge_id: u64) -> Option<Hedge>;
 fn time_factor() -> u32;                                 // 1 = real time
 fn set_time_factor(factor: u32);                         // admin, demo build only (else #208): 25,920 → 90 d in 5 real minutes
@@ -399,7 +399,7 @@ TODO.md                # setup and work items
 
 Fixes planned after the hackathon; details in `docs/points-a-trancher.md`.
 
-- **Fixing: single price.** `settle` uses the price in effect at maturity if it is at most 15 minutes old, otherwise the first price published within the following hour; until then it fails with 312 and the hedge stays open. `record_fixing` locks the rate without settling (Reflector forgets its prices after about 24 hours), and `settle_fallback` closes a hedge at zero P&L once the contract has established that no price exists, so funds can no longer stay locked. Still missing, planned for the Instaward sprint: a time-weighted average over ~30 minutes with consistency bounds instead of a single price.
+- **Fixing: single price.** `settle` uses the price in effect at maturity if it is at most 15 minutes old, otherwise the first price published within the following hour; until then it fails with 312 and the hedge stays open. `record_fixing` locks the rate without settling (Reflector forgets its prices after about 24 hours), and `settle_fallback` (admin only, so that it is not a free option for the losing side) closes a hedge at zero P&L once the contract has established that no price exists, so funds can no longer stay locked. Still missing, planned for the Instaward sprint: a time-weighted average over ~30 minutes with consistency bounds instead of a single price.
 - **Demo mode (`time_factor` > 1)**: the price covers the stated duration and maturity is shortened, so carry is not neutralized (arbitrage possible against the pool). `time_factor` must be 1 in production: `set_time_factor` now only exists in the `demo` build (#208 otherwise) and `time_factor` is always 1 without it.
 - **Deposit just before a winning `settle`**: the fixing is known at maturity, so an LP can enter at full price just before settlement and exit right after. To be fixed with an entry delay or by blocking `deposit_lp` while a matured hedge is unsettled.
 - **Tranches**: accrued senior interest lowers the junior value, which can fall below reserved capital (negative capacity) or below 20% without any operation; `withdraw_senior` does not yet check that the remaining capital covers the reserved amount. Fix written (capped Safe withdrawals, junior share floor), under review before merge.

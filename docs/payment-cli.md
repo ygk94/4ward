@@ -116,12 +116,12 @@ Refus : #200, #201, #202 (pas encore échue), #312 (pas encore de cours, ou plus
 
 ### Voie de secours : `settle_fallback`
 
-Sans signature, après l'échéance, **seulement si aucun cours n'existe ni ne peut plus arriver** (rien de figé, aucun cours dans l'heure après l'échéance, ou historique oublié). Clôture à P&L nul : la marge est rendue au propriétaire, la réserve du pool libérée. Événement `hedge_fallback_settled` (versement).
+**Admin seul**, après l'échéance, **seulement si aucun cours n'existe ni ne peut plus arriver** (rien de figé, aucun cours dans l'heure après l'échéance, ou historique oublié). Clôture à P&L nul : la marge est rendue au propriétaire, la réserve du pool libérée. Événement `hedge_fallback_settled` (versement).
 ```sh
 stellar contract invoke --id fx-pool --source-account fx-admin --network testnet -- \
-  settle_fallback --hedge_id 0
+  settle_fallback --hedge_id 0                           # signé par l'admin
 ```
-Refus #209 tant qu'un cours existe (figé ou lisible) ou peut encore être publié : utiliser `settle`, ou attendre la fin de l'heure qui suit l'échéance.
+Refus #209 tant qu'un cours existe (figé ou lisible) ou peut encore être publié : utiliser `settle`, ou attendre la fin de l'heure qui suit l'échéance. Réservée à l'admin (relecture de Hugo, 25/11) : ouverte à tous, ce serait une option gratuite pour le perdant, qui n'aurait qu'à attendre que personne ne fige le cours pendant 24 h. D'où le robot, qui fige le cours (`record_fixing`) avant chaque règlement.
 
 ### Clôture anticipée (avant l'échéance)
 
@@ -142,7 +142,7 @@ Au lieu d'appeler `settle` à la main, `scripts/keeper.sh` surveille les couvert
 ./scripts/keeper.sh --dry-run       # affiche ce qu'il réglerait, sans rien envoyer
 POOL=fx-pool SOURCE=fx-admin ./scripts/keeper.sh --interval 5
 ```
-Il parcourt les couvertures depuis l'id 0, compare leur échéance à l'heure du dernier ledger, règle chaque couverture échue puis pousse le versement à la PME (`claim_for`), et affiche la raison d'un refus (#202 réseau en retard d'un ledger, #312 pas encore de cours). Une heure après l'échéance, si aucun cours n'existe (#312), il passe par la voie de secours (`settle_fallback`). Le lancer avant l'échéance règle aussi la limite d'historique de Reflector (~12 h) : le règlement part dans les secondes qui suivent l'échéance.
+Il parcourt les couvertures depuis l'id 0, compare leur échéance à l'heure du dernier ledger, fige le cours de chaque couverture échue (`record_fixing`), la règle, puis pousse le versement à la PME (`claim_for`), et affiche la raison d'un refus (#202 réseau en retard d'un ledger, #312 pas encore de cours). Une heure après l'échéance, si aucun cours n'existe (#312), il passe par la voie de secours (`settle_fallback`, admin seul : seulement si `SOURCE` est l'admin). Le lancer avant l'échéance règle aussi la limite d'historique de Reflector (~12 h) : le règlement part dans les secondes qui suivent l'échéance.
 Testé sur testnet : couverture de 45 s réelles réglée par le keeper en boucle 10 s après l'échéance, sans intervention ([tx](https://stellar.expert/explorer/testnet/tx/656d79533ce6d192d21f3a5824722fc4ebc66a2bd202dcadcfb8f9993e490773)).
 
 ## 5. Réaligner l'offre DEX sur le nouveau prix (fx-admin)

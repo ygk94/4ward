@@ -334,7 +334,8 @@ impl Pool {
         hedge::record_fixing(&env, hedge_id)
     }
 
-    /// Sans signature, après l'échéance : voie de secours quand le cours d'échéance est définitivement absent.
+    /// Admin seul, après l'échéance : voie de secours quand le cours d'échéance est définitivement absent.
+    /// Réservée à l'admin : ouverte à tous, ce serait une option gratuite pour le perdant (attendre 24 h).
     /// Clôture à P&L nul (marge créditée au solde réclamable). Refus 209 si un cours existe ou peut encore arriver.
     /// Retourne le montant USDC crédité au propriétaire.
     pub fn settle_fallback(env: Env, hedge_id: u64) -> i128 {

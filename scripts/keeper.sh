@@ -91,10 +91,13 @@ claim_for() {
   fi
 }
 
-# Règle la couverture, puis pousse le versement à la PME. Si aucun cours n'existe plus (312 passé l'heure de
-# grâce), passe par la voie de secours : clôture sans gain ni perte (refusée en 209 si un cours existe).
+# Fige d'abord le cours d'échéance (record_fixing : la couverture reste réglable au bon cours même si le règlement
+# échoue ou passe plus tard, Reflector oubliant ses cours au bout de 24 h), règle la couverture, puis pousse le
+# versement à la PME. Si aucun cours n'existe plus (312 passé l'heure de grâce), passe par la voie de secours :
+# clôture sans gain ni perte, réservée à l'admin (SOURCE doit être l'admin) et refusée en 209 si un cours existe.
 settle() {
   local id=$1 owner=$2 maturity=$3 now=$4 out code
+  invoke record_fixing --hedge_id "$id" >/dev/null || true
   if out=$(invoke settle --hedge_id "$id"); then
     echo "   couverture $id réglée : $(echo "$out" | tail -1 | tr -d '"\r') stroops crédités à la PME"
     echo "$out" | grep -o 'https://stellar.expert[^ ]*' | sed 's/^/   /' || true
@@ -104,7 +107,7 @@ settle() {
   code=$(error_code "$out")
   if [ "$code" = 312 ] && [ "$now" -ge $((maturity + FIXING_GRACE_SECS)) ]; then
     if out=$(invoke settle_fallback --hedge_id "$id"); then
-      echo "   couverture $id close par la voie de secours (aucun cours) : $(echo "$out" | tail -1 | tr -d '"\r') stroops crédités"
+      echo "   couverture $id close par la voie de secours (aucun cours, signée par $SOURCE) : $(echo "$out" | tail -1 | tr -d '"\r') stroops crédités"
       claim_for "$owner"
       return
     fi
