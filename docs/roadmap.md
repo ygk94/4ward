@@ -6,7 +6,7 @@ Chacun travaille sur sa branche. Exception à la règle « on ne touche pas au f
 
 ## Engagement Instaward : ce qui prime (ajouté le 25/11)
 
-Le 13/11, on a déposé un dossier Instaward auprès du chapitre Stellar Türkiye : un sprint de 30 jours, qui démarre à la confirmation (pas encore reçue au 25/11). **On sera jugés sur ce dossier**, preuve par preuve. La roadmap du 16/11 a été écrite sans lui : cette section liste ce qu'on a promis, ce qui est déjà fait, ce qui contredit le dossier, et ce qui manque. Les lignes concernées plus bas sont marquées **[Instaward]**.
+Le 13/11, on a déposé un dossier Instaward auprès du chapitre Stellar Türkiye : un sprint de 30 jours, qui démarre à la confirmation (pas encore reçue au 25/11). **On sera jugés sur ce dossier**, preuve par preuve. **Il est envoyé et ne peut plus être modifié** : ce qu'il promet est obligatoire, ce n'est plus une option à trancher. La roadmap du 16/11 a été écrite sans lui : cette section liste ce qu'on a promis, ce qui est déjà fait, ce qui contredit le dossier, et ce qui manque. Les lignes concernées plus bas sont marquées **[Instaward]**.
 
 **Objectif à J30 (texte du dossier).** 4ward tourne sur Reflector FX testnet avec un fixing résistant à la manipulation et une voie de secours sûre, règle la couverture et paie au fournisseur le montant exact en MXN dans **une seule transaction atomique**, et a été testé sur testnet par **au moins 5 PME réelles** dont les retours sont publiés.
 
@@ -20,8 +20,8 @@ Le 13/11, on a déposé un dossier Instaward auprès du chapitre Stellar Türkiy
 
 ### Ce qui contredit le dossier
 
-- **Fixing en cours unique (décision T2 du 16/11, B1 mergé le 24/11).** Le dossier promet un TWAP sur ~30 min avec bornes ; le code prend un seul cours (à l'échéance, sinon le premier publié dans l'heure). Rien n'est à jeter : fenêtre de grâce, cours figé (`record_fixing`) et constat d'absence se gardent. Il faut remplacer la lecture d'un cours par une moyenne (proposition : 6 cours espacés de 300 s qui finissent à l'échéance, lus dans l'historique de Reflector) et refuser un cours trop loin de cette moyenne. **À rouvrir à trois** ; si on garde le cours unique, il faut l'écrire à la responsable du chapitre avant le démarrage.
-- **Solde réclamable (B4) seul.** Le dossier promet que le fournisseur est payé dans la transaction du règlement. B4 n'est pas faux (il protège le pool si le versement échoue), mais il ne suffit pas : il faut ajouter `settle_and_pay`, qui règle puis consomme le versement de la PME dans le swap. **À trancher** : `settle_and_pay` à côté de `settle` + `claim`, ou à la place.
+- **Fixing en cours unique (décision T2 du 16/11, B1 mergé le 24/11).** Le dossier promet un TWAP sur ~30 min avec bornes ; le code prend un seul cours (à l'échéance, sinon le premier publié dans l'heure). Rien n'est à jeter : fenêtre de grâce, cours figé (`record_fixing`) et constat d'absence se gardent. Il faut remplacer la lecture d'un cours par une moyenne (proposition : 6 cours espacés de 300 s qui finissent à l'échéance, lus dans l'historique de Reflector) et refuser un cours trop loin de cette moyenne. **Obligatoire** : le dossier ne peut plus être modifié, le cours unique doit être remplacé par le TWAP avec bornes (Lancelot, B1 pricing).
+- **Solde réclamable (B4) seul.** Le dossier promet que le fournisseur est payé dans la transaction du règlement. B4 n'est pas faux (il protège le pool si le versement échoue), mais il ne suffit pas : il faut ajouter `settle_and_pay`, qui règle puis consomme le versement de la PME dans le swap. **`settle_and_pay` est obligatoire.** Seule question ouverte : garder aussi `settle` + `claim` à côté (pour le robot et les cas où le swap échoue), ou non.
 
 ### Hors périmètre du dossier
 
@@ -54,7 +54,7 @@ Mainnet et vrais fonds, audit externe, réglementaire et KYC, vraie liquidité L
 
 ## Lundi 16/11, à trois (une demi-journée)
 
-1. T2 est réglé (16/11) : cours unique à l'échéance ; clôture sans gain ni perte par n'importe qui, une fois l'absence de cours constatée par le contrat. **[Instaward]** Le cours unique contredit le dossier (TWAP sur ~30 min avec bornes) : à rouvrir. La clôture sans gain ni perte après constat d'absence reste valable (c'est le `settle_fallback` promis).
+1. T2 est réglé (16/11) : cours unique à l'échéance ; clôture sans gain ni perte par n'importe qui, une fois l'absence de cours constatée par le contrat. **[Instaward]** Le cours unique contredit le dossier (TWAP sur ~30 min avec bornes), qui est envoyé et ne peut plus changer : le TWAP remplace le cours unique. La clôture sans gain ni perte après constat d'absence reste valable (c'est le `settle_fallback` promis).
 2. Confirmer qui écrit `admin.rs` (proposition : Lancelot, le moins chargé côté contrat).
 3. Figer la nouvelle interface de `lib.rs` : `open_hedge` avec `worst_rate`, `record_fixing`, `settle_fallback`, `claim`, `claim_for`, `claimable`, `pending_settlements`, `pilot_limits`, `is_allowed`, `paused`, fonctions admin.
 4. Répartir les numéros d'erreur : Vault 113 à 116, Paiement 207 à 215, Pricing 313, Admin 400 et suivants.
@@ -131,7 +131,7 @@ Attribution des modules d'après le `TODO.md` et le deck : Clément au paiement,
 - **B4 avant B1 avant B3.** Clément livre le solde réclamable, puis le cours figé ; Lancelot branche ensuite le refus des dépôts dans `vault.rs`, relu par Hugo.
 - **Le front attend la spec de lundi**, pas la fin des lots : Hugo peut coder contre l'interface figée.
 - **Bascule du testnet.** `open_hedge` change de signature : pool et front sont redéployés ensemble.
-- **[Instaward] TWAP avant `settle_fallback` et le keeper.** Le keeper et la voie de secours dépendent de la façon dont le fixing est lu : trancher TWAP ou cours unique avant que Clément les code.
+- **[Instaward] TWAP et voie de secours.** `record_fixing` et `settle_fallback` (faits par Clément le 25/11) ne dépendent pas de la façon dont le cours est lu : le TWAP se branche dans la lecture du pricing sans les changer. Les tests du règlement devront être relancés une fois le TWAP en place.
 - **[Instaward] B4 et `settle_and_pay`.** Le versement de la PME doit pouvoir être consommé par le swap dans la même transaction : à prévoir dans la forme du solde réclamable.
 - **[Instaward] Pool AMM avant `settle_and_pay`.** Sans pool USDC/MXN financé sur le testnet de l'AMM, rien à tester en S3.
 - **Reflector.** Si aucun cours n'est publié le week-end, on n'accepte que des échéances en jours ouvrés ; à savoir avant de coder B1.
@@ -140,4 +140,4 @@ Attribution des modules d'après le `TODO.md` et le deck : Clément au paiement,
 
 Taux de la part du protocole ; montant demandé ; qui dirige et qui vend ; pays de l'entité (après l'avocat) ; date de réouverture du Safe.
 
-**[Instaward] À trancher à trois avant de coder la suite :** TWAP ou cours unique (et, si cours unique, prévenir la responsable du chapitre) ; `settle_and_pay` à côté de `settle` + `claim` ou à la place ; quel AMM (Soroswap ou Aquarius) ; qui recrute les 5 PME, et quand ; date du sprint une fois la confirmation reçue.
+**[Instaward] Le dossier est envoyé et ne peut plus être modifié** : TWAP avec bornes, `settle_and_pay` atomique et pilote avec 5 PME sont obligatoires. **Reste à trancher à trois :** garder `settle` + `claim` à côté de `settle_and_pay` ou non ; quel AMM (Soroswap ou Aquarius) ; qui recrute les 5 PME, et quand ; date du sprint une fois la confirmation reçue.
