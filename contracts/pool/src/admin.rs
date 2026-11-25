@@ -485,13 +485,13 @@ mod tests {
 
         let shares = c.deposit_lp(&lp, &1_000_000_000_000);
         let senior = c.deposit_senior(&lp, &100_000_000_000);
-        let id = c.open_hedge(&owner, &owner, &mxn, &Side::BuyCurrency, &10_000_000_000_000, &(90 * 86_400), &1000);
+        let id = c.open_hedge(&owner, &owner, &mxn, &Side::BuyCurrency, &10_000_000_000_000, &(90 * 86_400), &1000, &None);
 
         c.pause(&s.admin);
         assert_admin_error(c.try_deposit_lp(&lp, &1_000_000_000), AdminError::Paused);
         assert_admin_error(c.try_deposit_senior(&lp, &1_000_000_000), AdminError::Paused);
         assert_admin_error(
-            c.try_open_hedge(&owner, &owner, &mxn, &Side::BuyCurrency, &10_000_000_000_000, &(90 * 86_400), &1000),
+            c.try_open_hedge(&owner, &owner, &mxn, &Side::BuyCurrency, &10_000_000_000_000, &(90 * 86_400), &1000, &None),
             AdminError::Paused,
         );
 

@@ -286,7 +286,8 @@ fn set_min_cap(currency: Symbol, cap_bps: u32);          // admin
 fn set_spread(spread_bps: u32);                          // admin
 // Hedges / payment
 fn open_hedge(owner: Address, supplier: Address, currency: Symbol, side: Side,
-              notional: i128, duration_secs: u64, cap_bps: u32) -> u64;
+              notional: i128, duration_secs: u64, cap_bps: u32,
+              worst_rate: Option<i128>) -> u64;          // rejected (#210) if the locked rate is worse than worst_rate
 fn settle(hedge_id: u64) -> i128;                        // permissionless after maturity: credits margin ± P&L to the owner's claimable balance
 fn claim(owner: Address) -> i128;                        // owner: receive the whole claimable balance
 fn claim_for(owner: Address) -> i128;                    // permissionless (keeper): pay the owner's claimable balance to the owner

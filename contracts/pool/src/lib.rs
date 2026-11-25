@@ -285,7 +285,9 @@ impl Pool {
 
     // ---- Couvertures / paiement ----
 
-    /// Ouvre une couverture et retourne son id.
+    /// Ouvre une couverture et retourne son id. `worst_rate` : taux limite signé par la PME (USD par unité,
+    /// 14 décimales), typiquement le taux du devis affiché ; refus 210 si le taux bloqué est moins bon (plus haut
+    /// pour BuyCurrency, plus bas pour SellCurrency). `None` = sans limite.
     pub fn open_hedge(
         env: Env,
         owner: Address,
@@ -295,9 +297,10 @@ impl Pool {
         notional: i128,
         duration_secs: u64,
         cap_bps: u32,
+        worst_rate: Option<i128>,
     ) -> u64 {
         admin::require_not_paused(&env);
-        hedge::open(&env, &owner, &supplier, &currency, side, notional, duration_secs, cap_bps)
+        hedge::open(&env, &owner, &supplier, &currency, side, notional, duration_secs, cap_bps, worst_rate)
     }
 
     /// Permissionless après l'échéance. Le versement (marge ± P&L) est **crédité** au solde réclamable du

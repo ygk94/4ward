@@ -40,9 +40,11 @@ Retour : les parts du LP. Contrôle : `-- capacity` augmente de `1000000000000` 
 ```sh
 stellar contract invoke --id fx-pool --source-account fx-lucia --network testnet -- \
   open_hedge --owner fx-lucia --supplier fx-supplier --currency MXN --side BuyCurrency \
-  --notional 10000000000000 --duration_secs 7776000 --cap_bps 1000    # 1 000 000 MXN, 90 jours, 10 %
+  --notional 10000000000000 --duration_secs 7776000 --cap_bps 1000 \
+  --worst_rate 5501281368668                                           # 1 000 000 MXN, 90 jours, 10 %, taux du devis
 ```
 Retour : l'id de la couverture (`0` pour la première). Signature : **Lucía seule**.
+`--worst_rate` (facultatif) : taux limite, en général le `forward_rate` du devis affiché. Si le cours a bougé entre le devis et l'exécution et que le taux bloqué est moins bon (plus haut pour `BuyCurrency`, plus bas pour `SellCurrency`), refus `#210` et rien n'est prélevé. Sans `--worst_rate`, pas de limite.
 Effets : transfert USDC Lucía → pool de la marge, événement `hedge_opened`, `capacity` baisse de la marge, `exposure MXN` augmente.
 
 ## 3. Crash du peso (fx-admin)
@@ -194,6 +196,7 @@ Les textes de `panic!` sont effacés dans le WASM déployé : le front ne reçoi
 | #207 `Overflow` | Paiement | Montant ou cours hors de toute plage réaliste (calcul du P&L) |
 | #208 `DemoDisabled` | Paiement (admin) | Mode démo indisponible : contrat compilé sans la feature `demo` |
 | #209 `FixingAvailable` | Paiement | Un cours d'échéance existe ou peut encore arriver : régler normalement au lieu du secours |
+| #210 `RateWorseThanLimit` | Paiement | Le cours a bougé depuis le devis : taux moins bon que votre limite, refaire un devis |
 | #100 `InvalidAmount` | Vault | Montant invalide |
 | #101 `InsufficientCapacity` | Vault | Le pool n'a pas assez de capital pour cette protection |
 | #102 `ReleaseExceedsReserved` | Vault | Erreur interne (libération au-delà du capital réservé) |

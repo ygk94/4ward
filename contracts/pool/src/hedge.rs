@@ -1,7 +1,8 @@
 // Copyright (c) 2026 Hugo Thomas, Clément Darmon, Lancelot Watelle. All rights reserved. See LICENSE.
 //! PAIEMENT — ouverture et règlement des couvertures.
 //!
-//! open : prix bloqué (pricing::forward_rate), contrôle du plafond (pricing::check_cap),
+//! open : prix bloqué (pricing::forward_rate), refus 210 s'il est moins bon que le taux limite signé (`worst_rate`),
+//!        contrôle du plafond (pricing::check_cap),
 //!        marge = to_usdc(notional, locked_rate) × cap_bps / BPS, transférée owner → contrat,
 //!        vault::open_position(&hedge) (réserve la marge, exposition par devise), stockage (+ extend_ttl), événement.
 //! settle : après l'échéance, spot = pricing::settlement_fixing(maturity) (cours en vigueur à l'échéance) ; P&L = pnl(side, notional, locked, spot, marge)
@@ -55,6 +56,9 @@ pub enum HedgeError {
     /// `settle_fallback` alors qu'un cours d'échéance existe (figé ou lisible) ou peut encore être publié
     /// (fenêtre d'une heure après l'échéance) : régler avec `settle`, ou attendre.
     FixingAvailable = 209,
+    /// `open` : le taux bloqué est moins bon que la limite signée par la PME (`worst_rate`) : plus haut pour un
+    /// importateur (BuyCurrency), plus bas pour un exportateur (SellCurrency). Le cours a bougé depuis le devis.
+    RateWorseThanLimit = 210,
 }
 
 /// Clés de stockage de Paiement (à part de `DataKey`, partagé).
@@ -155,6 +159,7 @@ pub(crate) fn open(
     notional: i128,
     duration_secs: u64,
     cap_bps: u32,
+    worst_rate: Option<i128>,
 ) -> u64 {
     owner.require_auth();
     if notional <= 0 {
@@ -166,6 +171,16 @@ pub(crate) fn open(
     pricing::check_cap(env, currency, cap_bps);
 
     let locked_rate = pricing::forward_rate(env, currency, side, duration_secs);
+    // taux limite signé par la PME : protège contre un mouvement entre le devis affiché et l'exécution
+    if let Some(limit) = worst_rate {
+        let worse = match side {
+            Side::BuyCurrency => locked_rate > limit,
+            Side::SellCurrency => locked_rate < limit,
+        };
+        if worse {
+            panic_with_error!(env, HedgeError::RateWorseThanLimit);
+        }
+    }
     // même calcul que `quote` : la marge déposée est celle affichée (arrondie vers le haut)
     let margin = pricing::margin_for(env, pricing::to_usdc(env, notional, locked_rate), cap_bps);
 
