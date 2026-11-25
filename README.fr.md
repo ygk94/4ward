@@ -287,6 +287,8 @@ fn open_hedge(owner: Address, supplier: Address, currency: Symbol, side: Side,
               notional: i128, duration_secs: u64, cap_bps: u32,
               worst_rate: Option<i128>) -> u64;          // refus (#210) si le taux bloqué est moins bon que worst_rate
 fn settle(hedge_id: u64) -> i128;                        // permissionless après l'échéance : crédite marge ± P&L au solde réclamable du propriétaire
+fn settle_and_pay(hedge_id: u64, max_usdc: i128) -> i128; // PME : règlement + échange USDC→devise sur Soroswap (montant exact) + paiement du fournisseur, une transaction
+fn set_payment_route(currency: Symbol, token: Address, router: Address); // admin
 fn claim(owner: Address) -> i128;                        // propriétaire : reçoit tout son solde réclamable
 fn claim_for(owner: Address) -> i128;                    // sans signature (robot) : verse au propriétaire son solde réclamable
 fn claimable(owner: Address) -> i128;

@@ -1402,6 +1402,214 @@ fn settle_refused_while_no_rate_and_hedge_stays_open() {
 /// Un jour plus une seconde : Reflector (et le mock) ont oublié le cours d'échéance.
 const AFTER_HISTORY: u64 = 86_401;
 
+// ---- Régler et payer le fournisseur en une transaction (dossier Instaward, livrable 2) ----
+
+mod mock_soroswap {
+    //! Routeur de test, même interface que le routeur Soroswap (`soroswap/core`, contracts/router) pour les deux
+    //! fonctions utilisées : `router_get_amounts_in` et `swap_tokens_for_exact_tokens`. Comme Soroswap, `to` signe
+    //! et paie l'entrée, et reçoit la sortie. Prix fixe en USDC par unité de devise (14 décimales), arrondi en faveur
+    //! du routeur ; il détient lui-même la liquidité en devise.
+    use soroban_sdk::{contract, contracterror, contractimpl, contracttype, panic_with_error, token, vec, Address, Env, Vec};
+
+    #[contracterror]
+    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+    #[repr(u32)]
+    pub enum RouterError {
+        DeadlineExpired = 1,
+        ExcessiveInputAmount = 2,
+    }
+
+    #[contracttype]
+    enum Key {
+        Price,
+    }
+
+    #[contract]
+    pub struct MockRouter;
+
+    fn amount_in(env: &Env, amount_out: i128) -> i128 {
+        let price: i128 = env.storage().instance().get(&Key::Price).unwrap();
+        // arrondi vers le haut, comme un AMM
+        (amount_out * price + 99_999_999_999_999) / 100_000_000_000_000
+    }
+
+    #[contractimpl]
+    impl MockRouter {
+        pub fn set_price(env: Env, price: i128) {
+            env.storage().instance().set(&Key::Price, &price);
+        }
+
+        pub fn router_get_amounts_in(env: Env, amount_out: i128, _path: Vec<Address>) -> Vec<i128> {
+            vec![&env, amount_in(&env, amount_out), amount_out]
+        }
+
+        pub fn swap_tokens_for_exact_tokens(
+            env: Env,
+            amount_out: i128,
+            amount_in_max: i128,
+            path: Vec<Address>,
+            to: Address,
+            deadline: u64,
+        ) -> Vec<i128> {
+            to.require_auth();
+            if env.ledger().timestamp() >= deadline {
+                panic_with_error!(&env, RouterError::DeadlineExpired);
+            }
+            let needed = amount_in(&env, amount_out);
+            if needed > amount_in_max {
+                panic_with_error!(&env, RouterError::ExcessiveInputAmount);
+            }
+            let me = env.current_contract_address();
+            token::Client::new(&env, &path.get(0).unwrap()).transfer(&to, &me, &needed);
+            token::Client::new(&env, &path.get(1).unwrap()).transfer(&me, &to, &amount_out);
+            vec![&env, needed, amount_out]
+        }
+    }
+}
+
+/// Prix du routeur de test : 0,0560 USDC par peso (le peso a monté de ~1,8 % depuis le spot de départ).
+const SWAP_PRICE: i128 = 5_600_000_000_000;
+/// USDC à payer pour exactement 1 000 000 MXN à ce prix : 56 000 USDC.
+const SWAP_COST: i128 = 560_000_000_000;
+
+/// Peso de test (SAC) + routeur de test financé en pesos, route MXN posée par l'admin. Retourne (peso, routeur).
+fn payment_route<'b>(s: &'b Setup) -> (TokenClient<'b>, Address) {
+    let mxn_token = s.env.register_stellar_asset_contract_v2(s.admin.clone()).address();
+    let router = s.env.register(mock_soroswap::MockRouter, ());
+    mock_soroswap::MockRouterClient::new(&s.env, &router).set_price(&SWAP_PRICE);
+    StellarAssetClient::new(&s.env, &mxn_token).mint(&router, &(10 * NOTIONAL));
+    s.pool.set_payment_route(&Symbol::new(&s.env, "MXN"), &mxn_token, &router);
+    (TokenClient::new(&s.env, &mxn_token), router)
+}
+
+#[test]
+fn settle_and_pay_pays_the_supplier_exactly_in_one_transaction() {
+    let s = setup();
+    let id = open_funded(&s, Side::BuyCurrency);
+    let (mxn_token, _) = payment_route(&s);
+    at_maturity(&s, SWAP_PRICE);
+
+    let spent = s.pool.settle_and_pay(&id, &SWAP_COST);
+    // événement public (lu avant tout autre appel)
+    let events = s.env.events().all().filter_by_contract(&s.pool.address);
+    assert_eq!(
+        events.events().last(),
+        Some(
+            &hedge::SupplierPaid {
+                hedge_id: id,
+                owner: s.lucia.clone(),
+                supplier: s.supplier.clone(),
+                amount: NOTIONAL,
+                usdc_spent: SWAP_COST,
+            }
+            .to_xdr(&s.env, &s.pool.address)
+        )
+    );
+
+    // le fournisseur reçoit exactement le montant de la facture, en pesos
+    assert_eq!(mxn_token.balance(&s.supplier), NOTIONAL);
+    assert_eq!(spent, SWAP_COST);
+    // la couverture est réglée, son versement a servi au paiement : rien ne reste à réclamer
+    let h = s.pool.get_hedge(&id).unwrap();
+    assert!(h.settled);
+    assert_eq!(s.pool.claimable(&s.lucia), 0);
+    assert_eq!(s.pool.total_claimable(), 0);
+    // coût réel pour Lucía : sa marge + l'USDC de l'échange − le versement de la couverture
+    let payout = h.margin + hedge::pnl(&s.env, Side::BuyCurrency, NOTIONAL, h.locked_rate, SWAP_PRICE, h.margin);
+    assert_eq!(s.usdc.balance(&s.lucia), LUCIA_START - h.margin + payout - SWAP_COST);
+    // tout l'USDC du contrat appartient de nouveau aux LPs
+    assert_eq!(s.usdc.balance(&s.pool.address), s.pool.total_assets());
+}
+
+/// Ce que la PME paie au total est bien le prix bloqué, à l'écart près entre le fixing et le prix de l'échange.
+#[test]
+fn settle_and_pay_total_cost_is_the_locked_price() {
+    let s = setup();
+    let id = open_funded(&s, Side::BuyCurrency);
+    let (mxn_token, _) = payment_route(&s);
+    at_maturity(&s, SWAP_PRICE); // fixing = prix de l'échange : pas d'écart
+    s.pool.settle_and_pay(&id, &SWAP_COST);
+    assert_eq!(mxn_token.balance(&s.supplier), NOTIONAL);
+    // coût total pour Lucía (USDC sorti de son wallet) ≈ prix bloqué, à une unité d'arrondi près
+    let total_cost = LUCIA_START - s.usdc.balance(&s.lucia);
+    assert!((total_cost - HEDGE_COST).abs() <= 1, "coût {total_cost} vs prix bloqué {HEDGE_COST}");
+}
+
+#[test]
+fn settle_and_pay_fails_rather_than_overpay() {
+    let s = setup();
+    let id = open_funded(&s, Side::BuyCurrency);
+    let (mxn_token, _) = payment_route(&s);
+    at_maturity(&s, SWAP_PRICE);
+
+    // maximum signé sous le prix de l'échange : refus, rien ne bouge, la couverture reste réglable
+    assert_eq!(s.pool.try_settle_and_pay(&id, &(SWAP_COST - 1)), Err(Ok(contract_err(HedgeError::SwapTooExpensive as u32))));
+    assert_eq!(mxn_token.balance(&s.supplier), 0);
+    assert!(!s.pool.get_hedge(&id).unwrap().settled);
+    assert_eq!(s.usdc.balance(&s.lucia), LUCIA_START - HEDGE_MARGIN);
+    s.pool.settle(&id);
+}
+
+#[test]
+fn settle_and_pay_after_the_keeper_settled() {
+    let s = setup();
+    let id = open_funded(&s, Side::BuyCurrency);
+    let (mxn_token, _) = payment_route(&s);
+    at_maturity(&s, SWAP_PRICE);
+    // le robot règle d'abord : le versement est crédité, la PME paie ensuite son fournisseur avec
+    s.pool.settle(&id);
+    assert!(s.pool.claimable(&s.lucia) > 0);
+    s.pool.settle_and_pay(&id, &SWAP_COST);
+    assert_eq!(mxn_token.balance(&s.supplier), NOTIONAL);
+    assert_eq!(s.pool.claimable(&s.lucia), 0);
+    // une seule fois par couverture
+    assert_eq!(s.pool.try_settle_and_pay(&id, &SWAP_COST), Err(Ok(contract_err(HedgeError::SupplierAlreadyPaid as u32))));
+}
+
+#[test]
+fn settle_and_pay_guards() {
+    let s = setup();
+    let id = open_funded(&s, Side::BuyCurrency);
+    let mxn = Symbol::new(&s.env, "MXN");
+
+    // pas de route de paiement pour la devise
+    at_maturity(&s, SWAP_PRICE);
+    assert_eq!(s.pool.try_settle_and_pay(&id, &SWAP_COST), Err(Ok(contract_err(HedgeError::NoPaymentRoute as u32))));
+    let (_, router) = payment_route(&s);
+    assert_eq!(s.pool.payment_route(&mxn), Some(hedge::PaymentRoute { token: s.pool.payment_route(&mxn).unwrap().token, router }));
+
+    // couverture inconnue
+    assert_eq!(s.pool.try_settle_and_pay(&99, &SWAP_COST), Err(Ok(contract_err(HedgeError::UnknownHedge as u32))));
+
+    // exportateur : il reçoit la devise, il n'a pas de fournisseur à payer
+    set_spot(&s, SPOT_0);
+    let sell = s.pool.open_hedge(&s.lucia, &s.supplier, &mxn, &Side::SellCurrency, &NOTIONAL, &MATURITY_IN, &1000, &None);
+    at_maturity(&s, SWAP_PRICE);
+    assert_eq!(s.pool.try_settle_and_pay(&sell, &SWAP_COST), Err(Ok(contract_err(HedgeError::NotAPayment as u32))));
+    let _ = id;
+}
+
+#[test]
+fn settle_and_pay_needs_the_owner_signature() {
+    let s = setup();
+    let id = open_funded(&s, Side::BuyCurrency);
+    payment_route(&s);
+    at_maturity(&s, SWAP_PRICE);
+    s.pool.settle_and_pay(&id, &SWAP_COST);
+    // seule Lucía signe ; sa signature couvre l'échange et le paiement du fournisseur
+    let auths = s.env.auths();
+    assert_eq!(auths.len(), 1);
+    assert_eq!(auths[0].0, s.lucia);
+}
+
+#[test]
+fn payment_route_is_admin_only() {
+    let s = setup();
+    payment_route(&s);
+    let auths = s.env.auths();
+    assert_eq!(auths.last().unwrap().0, s.admin);
+}
+
 // ---- Tests aléatoires du règlement (dossier Instaward, livrable 1) ----
 //
 // Des scénarios tirés au hasard (graine fixe, donc rejouables) enchaînent ouvertures dans les deux sens, mouvements du

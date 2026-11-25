@@ -89,6 +89,22 @@ stellar contract invoke --id fx-pool --source-account fx-admin --network testnet
 Retour : l'USDC versé (0 s'il n'y a rien, sans erreur). Événement `claimed` (propriétaire, montant). Possible en pause. Lectures : `claimable --owner …` (solde d'une PME) et `total_claimable` (somme de tous les soldes). La clôture anticipée (`close_early`, signée par la PME) verse toujours directement.
 Le cours utilisé est celui **en vigueur à l'échéance** s'il a au plus 15 minutes, sinon le premier publié dans l'heure qui suit, quel que soit le moment de l'appel. Tant qu'aucun cours n'est lisible : #312, la couverture reste ouverte. Régler (ou figer le cours) dans les 24 h : Reflector oublie ses cours ensuite.
 
+### Régler et payer le fournisseur en une transaction : `settle_and_pay`
+
+Signé par la PME seule. Règle la couverture (sauté si le robot l'a déjà réglée), lui verse son solde réclamable, échange sur **Soroswap** ses USDC contre **exactement** le montant de la facture en devise, et paie le fournisseur, le tout dans une seule transaction (tout ou rien).
+```sh
+stellar contract invoke --id fx-pool --source-account fx-lucia --network testnet -- \
+  settle_and_pay --hedge_id 0 --max_usdc 560000000000     # 56 000 USDC au plus pour 1 000 000 MXN
+```
+`--max_usdc` : USDC maximum que la PME accepte de dépenser dans l'échange (devis : `router_get_amounts_in` du routeur). Au-delà : `#217`, rien n'est fait, la couverture reste réglable par `settle`. Retour : l'USDC dépensé. Événement `supplier_paid` (fournisseur, montant en devise, USDC dépensés). Refus : `#216` pas de route pour la devise, `#218` fournisseur déjà payé, `#219` couverture `SellCurrency` (l'exportateur reçoit la devise).
+
+Route de paiement, posée par l'admin pour chaque devise (le jeton de la devise et le routeur), pour qu'une PME ne puisse pas payer son fournisseur en faux jeton :
+```sh
+stellar contract invoke --id fx-pool --source-account fx-admin --network testnet -- \
+  set_payment_route --currency MXN --token $MXN_SAC --router CCJUD55AG6W5HAI5LRVNKAE5WDP5XGZBUDS5WNTIVDU7O264UZZE7BRD
+```
+Routeur Soroswap testnet d'après `public/testnet.contracts.json` du dépôt `soroswap/core` (le testnet peut être réinitialisé : vérifier l'adresse). La paire USDC/MXN de test est à créer et financer sur Soroswap (factory testnet `CDP3HMUH6SMS3S7NPGNDJLULCOXXEPSHY4JKUKMBNQMATHDHWXRRJTBY`). Tests : routeur de test à l'interface identique (`mock_soroswap` dans les tests du contrat) ; pas encore essayé sur le vrai Soroswap.
+
 ### Figer le cours sans régler : `record_fixing`
 
 Sans signature, après l'échéance. Fige le cours d'échéance de la couverture et le renvoie ; `settle` l'utilisera même après l'oubli de l'historique de l'oracle. Répétable (renvoie le cours déjà figé). C'est l'appel du robot, peu après chaque échéance.
@@ -215,6 +231,10 @@ Les textes de `panic!` sont effacés dans le WASM déployé : le front ne reçoi
 | #213 `HedgeTooLong` | Paiement | Échéance au-delà de la durée maximale du pilote |
 | #214 `TooManyOpenHedges` | Paiement | Nombre maximal de couvertures ouvertes atteint : attendre un règlement |
 | #215 `InvalidLimit` | Paiement (admin) | Limite nulle : laisser vide pour « sans limite » |
+| #216 `NoPaymentRoute` | Paiement | Paiement direct du fournisseur pas encore ouvert pour cette devise |
+| #217 `SwapTooExpensive` | Paiement | L'échange coûterait plus que votre maximum : refaire le devis |
+| #218 `SupplierAlreadyPaid` | Paiement | Le fournisseur de cette couverture est déjà payé |
+| #219 `NotAPayment` | Paiement | Couverture de vente : pas de fournisseur à payer |
 | #100 `InvalidAmount` | Vault | Montant invalide |
 | #101 `InsufficientCapacity` | Vault | Le pool n'a pas assez de capital pour cette protection |
 | #102 `ReleaseExceedsReserved` | Vault | Erreur interne (libération au-delà du capital réservé) |

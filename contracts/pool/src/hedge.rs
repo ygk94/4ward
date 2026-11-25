@@ -26,7 +26,7 @@
 //! Erreurs : `HedgeError`, codes 200+ (Vault 100+, Pricing 300+, Admin 400+). Les textes de panic! sont effacés dans le WASM :
 //! seul un code d'erreur permet au front d'afficher la bonne raison d'un refus.
 use crate::{pricing, vault, DataKey, Hedge, Side};
-use soroban_sdk::{contracterror, contractevent, contracttype, panic_with_error, token, Address, Env, Symbol};
+use soroban_sdk::{contractclient, contracterror, contractevent, contracttype, panic_with_error, token, vec, Address, Env, Symbol, Vec};
 
 /// Erreurs de Paiement. Codes 200+ pour ne pas entrer en collision avec Vault (100+) / Pricing.
 /// Ne jamais réutiliser un numéro : ajouter à la suite.
@@ -69,6 +69,14 @@ pub enum HedgeError {
     TooManyOpenHedges = 214,
     /// `set_hedge_limits` avec une limite nulle ou négative (`None` pour « sans limite »).
     InvalidLimit = 215,
+    /// `settle_and_pay` : aucune route de paiement (jeton de la devise et routeur Soroswap) posée pour la devise.
+    NoPaymentRoute = 216,
+    /// `settle_and_pay` : l'échange coûterait plus d'USDC que le maximum signé par la PME. Rien n'est fait.
+    SwapTooExpensive = 217,
+    /// `settle_and_pay` : le fournisseur de cette couverture a déjà été payé.
+    SupplierAlreadyPaid = 218,
+    /// `settle_and_pay` sur une couverture SellCurrency : l'exportateur reçoit la devise, il n'a rien à payer.
+    NotAPayment = 219,
 }
 
 /// Clés de stockage de Paiement (à part de `DataKey`, partagé).
@@ -88,6 +96,59 @@ enum HedgeKey {
     Limits,
     /// Nombre de couvertures ouvertes d'une PME (persistent).
     OpenCount(Address),
+    /// Route de paiement du fournisseur pour une devise (persistent).
+    Route(Symbol),
+    /// Fournisseur de la couverture payé par `settle_and_pay` (persistent, présent = payé).
+    SupplierPaid(u64),
+}
+
+/// Route de paiement du fournisseur dans une devise : jeton de la devise (SAC) et routeur Soroswap qui l'échange
+/// contre de l'USDC. Posée par l'admin, pour qu'une PME ne puisse pas faire payer son fournisseur en faux jeton.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PaymentRoute {
+    pub token: Address,
+    pub router: Address,
+}
+
+/// Interface du routeur Soroswap (`soroswap/core`, contracts/router), pour les deux fonctions utilisées.
+/// `to` signe et paie l'entrée (`amounts[0]`), et reçoit la sortie. Échéance : timestamp du ledger, strictement après.
+#[allow(dead_code)]
+#[contractclient(name = "SoroswapRouterClient")]
+pub trait SoroswapRouter {
+    fn router_get_amounts_in(env: Env, amount_out: i128, path: Vec<Address>) -> Vec<i128>;
+    fn swap_tokens_for_exact_tokens(
+        env: Env,
+        amount_out: i128,
+        amount_in_max: i128,
+        path: Vec<Address>,
+        to: Address,
+        deadline: u64,
+    ) -> Vec<i128>;
+}
+
+/// Fournisseur payé dans la transaction du règlement : `amount` en devise (exactement le notionnel), contre
+/// `usdc_spent` USDC échangés sur Soroswap.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SupplierPaid {
+    #[topic]
+    pub hedge_id: u64,
+    #[topic]
+    pub owner: Address,
+    pub supplier: Address,
+    pub amount: i128,
+    pub usdc_spent: i128,
+}
+
+/// L'admin a posé la route de paiement d'une devise.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PaymentRouteSet {
+    #[topic]
+    pub currency: Symbol,
+    pub token: Address,
+    pub router: Address,
 }
 
 /// Limites du pilote côté couvertures. `None` = sans limite.
@@ -408,6 +469,71 @@ fn close(env: &Env, key: &DataKey, hedge: &mut Hedge, rate: i128, payout_to: Pay
     hedge.settled = true;
     env.storage().persistent().set(key, hedge);
     (pnl, payout)
+}
+
+// ---- régler et payer le fournisseur en une transaction (dossier Instaward, livrable 2) ----
+
+/// Admin : route de paiement d'une devise (jeton SAC de la devise, routeur Soroswap).
+pub(crate) fn set_payment_route(env: &Env, currency: &Symbol, token: &Address, router: &Address) {
+    crate::admin(env).require_auth();
+    let key = HedgeKey::Route(currency.clone());
+    let route = PaymentRoute { token: token.clone(), router: router.clone() };
+    env.storage().persistent().set(&key, &route);
+    env.storage().persistent().extend_ttl(&key, HEDGE_TTL_THRESHOLD, HEDGE_TTL_EXTEND_TO);
+    PaymentRouteSet { currency: currency.clone(), token: token.clone(), router: router.clone() }.publish(env);
+}
+
+pub(crate) fn payment_route(env: &Env, currency: &Symbol) -> Option<PaymentRoute> {
+    env.storage().persistent().get(&HedgeKey::Route(currency.clone()))
+}
+
+/// Règle la couverture (si ce n'est pas déjà fait) et paie au fournisseur **exactement** le montant de la facture
+/// en devise, dans une seule transaction signée par la PME :
+/// 1. `settle` crédite marge ± P&L au solde réclamable (sauté si le robot a déjà réglé) ;
+/// 2. le solde réclamable est versé à la PME ;
+/// 3. Soroswap échange ses USDC contre exactement `notional` en devise (`to` = la PME, qui signe et paie l'entrée),
+///    sans dépasser `max_usdc` : au-delà, refus 217 et rien n'est fait ;
+/// 4. la devise part de la PME au fournisseur.
+/// Tout ou rien : si une étape échoue, la transaction est annulée et la couverture reste réglable par `settle`.
+/// Le contrat ne signe jamais pour son propre compte. Retourne l'USDC dépensé dans l'échange.
+pub(crate) fn settle_and_pay(env: &Env, hedge_id: u64, max_usdc: i128) -> i128 {
+    let key = DataKey::Hedge(hedge_id);
+    let hedge: Hedge = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or_else(|| panic_with_error!(env, HedgeError::UnknownHedge));
+    hedge.owner.require_auth();
+    if hedge.side != Side::BuyCurrency {
+        panic_with_error!(env, HedgeError::NotAPayment);
+    }
+    let route = payment_route(env, &hedge.currency).unwrap_or_else(|| panic_with_error!(env, HedgeError::NoPaymentRoute));
+    let paid_key = HedgeKey::SupplierPaid(hedge_id);
+    if env.storage().persistent().has(&paid_key) {
+        panic_with_error!(env, HedgeError::SupplierAlreadyPaid);
+    }
+    if !hedge.settled {
+        settle(env, hedge_id);
+    }
+
+    let usdc: Address = env.storage().instance().get(&DataKey::Usdc).unwrap();
+    let router = SoroswapRouterClient::new(env, &route.router);
+    let path = vec![env, usdc, route.token.clone()];
+    let needed = router.router_get_amounts_in(&hedge.notional, &path).get(0).unwrap();
+    if needed > max_usdc {
+        panic_with_error!(env, HedgeError::SwapTooExpensive);
+    }
+
+    pay_out(env, &hedge.owner);
+    let deadline = env.ledger().timestamp() + 1;
+    let amounts = router.swap_tokens_for_exact_tokens(&hedge.notional, &max_usdc, &path, &hedge.owner, &deadline);
+    token::TokenClient::new(env, &route.token).transfer(&hedge.owner, &hedge.supplier, &hedge.notional);
+
+    env.storage().persistent().set(&paid_key, &true);
+    env.storage().persistent().extend_ttl(&paid_key, HEDGE_TTL_THRESHOLD, HEDGE_TTL_EXTEND_TO);
+    let usdc_spent = amounts.get(0).unwrap();
+    SupplierPaid { hedge_id, owner: hedge.owner, supplier: hedge.supplier, amount: hedge.notional, usdc_spent }.publish(env);
+    usdc_spent
 }
 
 // ---- pilote côté couvertures (B9) ----
