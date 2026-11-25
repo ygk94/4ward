@@ -287,7 +287,11 @@ fn set_spread(spread_bps: u32);                          // admin
 // Hedges / payment
 fn open_hedge(owner: Address, supplier: Address, currency: Symbol, side: Side,
               notional: i128, duration_secs: u64, cap_bps: u32) -> u64;
-fn settle(hedge_id: u64) -> i128;                        // permissionless after maturity
+fn settle(hedge_id: u64) -> i128;                        // permissionless after maturity: credits margin ± P&L to the owner's claimable balance
+fn claim(owner: Address) -> i128;                        // owner: receive the whole claimable balance
+fn claim_for(owner: Address) -> i128;                    // permissionless (keeper): pay the owner's claimable balance to the owner
+fn claimable(owner: Address) -> i128;
+fn total_claimable() -> i128;
 fn close_early(hedge_id: u64) -> i128;                   // owner only, before maturity: close at market price
 fn record_fixing(hedge_id: u64) -> i128;                 // permissionless after maturity: lock the maturity rate without settling
 fn settle_fallback(hedge_id: u64) -> i128;               // permissionless, only once no maturity rate exists or can come: zero P&L, margin returned

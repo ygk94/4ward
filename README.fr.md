@@ -285,7 +285,11 @@ fn set_spread(spread_bps: u32);                          // admin
 // Couvertures / paiement
 fn open_hedge(owner: Address, supplier: Address, currency: Symbol, side: Side,
               notional: i128, duration_secs: u64, cap_bps: u32) -> u64;
-fn settle(hedge_id: u64) -> i128;                        // permissionless après l'échéance
+fn settle(hedge_id: u64) -> i128;                        // permissionless après l'échéance : crédite marge ± P&L au solde réclamable du propriétaire
+fn claim(owner: Address) -> i128;                        // propriétaire : reçoit tout son solde réclamable
+fn claim_for(owner: Address) -> i128;                    // sans signature (robot) : verse au propriétaire son solde réclamable
+fn claimable(owner: Address) -> i128;
+fn total_claimable() -> i128;
 fn close_early(hedge_id: u64) -> i128;                   // propriétaire seul, avant l'échéance : clôture au prix du marché
 fn record_fixing(hedge_id: u64) -> i128;                 // sans signature, après l'échéance : fige le cours d'échéance sans régler
 fn settle_fallback(hedge_id: u64) -> i128;               // sans signature, seulement si aucun cours n'existe ni ne peut arriver : P&L nul, marge rendue

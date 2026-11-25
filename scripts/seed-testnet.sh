@@ -143,10 +143,10 @@ if [ $WAIT -eq 1 ]; then
   say "Règlements par le keeper (30 j = 100 s, puis 60-90 j = 300 s)"
   sleep_until() { local t=$(( $(date +%s) + $1 )); while [ $(date +%s) -lt $t ]; do sleep 5; done; }
   sleep_until 110
-  ./scripts/keeper.sh --once 2>&1 | grep -E "réglée|refus|rien" | sed 's/^/   /'
+  ./scripts/keeper.sh --once 2>&1 | grep -E "réglée|secours|versé|attente|refus|rien" | sed 's/^/   /'
   refresh_prices   # le fixing des couvertures à 60-90 j doit trouver un prix récent à l'échéance
   sleep_until 200
-  ./scripts/keeper.sh --once 2>&1 | grep -E "réglée|refus|rien" | sed 's/^/   /'
+  ./scripts/keeper.sh --once 2>&1 | grep -E "réglée|secours|versé|attente|refus|rien" | sed 's/^/   /'
 
   say "Retraits LP"
   sh_chen=$(read_pool lp_shares --lp $(stellar keys address seed-lp-chen))
@@ -163,6 +163,7 @@ USDC_SAC=$(stellar contract id asset --asset "$USDC" --network $NET)
 POOL_ADDR=$(stellar contract alias show $POOL --network $NET 2>/dev/null || echo $POOL)
 BAL=$(stellar contract invoke --id $USDC_SAC --source-account $ADMIN --network $NET --send=no -- balance --id $POOL_ADDR 2>/dev/null | tail -1 | tr -d '"')
 TOTAL=$(read_pool total_assets)
+CLAIMABLE=$(read_pool total_claimable)
 MARGINS=0; OPEN=0; id=0
 while :; do
   h=$(read_json get_hedge --hedge_id $id)
@@ -174,7 +175,8 @@ done
 echo "   solde USDC du pool : $BAL"
 echo "   capital des LPs    : $TOTAL"
 echo "   marges ouvertes    : $MARGINS ($OPEN couverture(s) ouverte(s) sur $id)"
-[ "$BAL" = "$((TOTAL + MARGINS))" ] && ok "invariant : solde = capital + marges ouvertes" || ko "invariant rompu : $BAL ≠ $((TOTAL + MARGINS))"
+echo "   soldes réclamables : $CLAIMABLE"
+[ "$BAL" = "$((TOTAL + MARGINS + CLAIMABLE))" ] && ok "invariant : solde = capital + marges ouvertes + soldes réclamables" || ko "invariant rompu : $BAL ≠ $((TOTAL + MARGINS + CLAIMABLE))"
 echo "   tranches : $(read_pool tranche_values) · capacité : $(read_pool capacity)"
 
 say "Bilan : $OK ok (dont $EXPECTED refus attendus), $KO problème(s)"

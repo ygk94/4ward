@@ -61,7 +61,17 @@ Attendre l'échéance réelle (`get_hedge` → champ `maturity`, en secondes Uni
 stellar contract invoke --id fx-pool --source-account fx-supplier --network testnet -- \
   settle --hedge_id 0
 ```
-Retour : l'USDC versé à Lucía (marge ± P&L, entre 0 et 2 × marge). Effets : transfert USDC pool → Lucía, événement `hedge_settled` (spot de fixing, P&L, versement).
+Retour : le montant dû à Lucía (marge ± P&L, entre 0 et 2 × marge). Effets : ce montant est **crédité à son solde réclamable** (rien ne lui est envoyé), événement `hedge_settled` (spot de fixing, P&L, versement). Ainsi le règlement ne dépend jamais du compte de la PME : une ligne USDC supprimée ne bloque pas le règlement, seulement son propre versement.
+
+### Recevoir le versement : `claim` / `claim_for`
+
+```sh
+stellar contract invoke --id fx-pool --source-account fx-lucia --network testnet -- \
+  claim --owner fx-lucia                 # signé par la PME : lui verse tout son solde
+stellar contract invoke --id fx-pool --source-account fx-admin --network testnet -- \
+  claim_for --owner fx-lucia             # sans signature (robot) : l'argent va toujours à la PME
+```
+Retour : l'USDC versé (0 s'il n'y a rien, sans erreur). Événement `claimed` (propriétaire, montant). Possible en pause. Lectures : `claimable --owner …` (solde d'une PME) et `total_claimable` (somme de tous les soldes). La clôture anticipée (`close_early`, signée par la PME) verse toujours directement.
 Le cours utilisé est celui **en vigueur à l'échéance** s'il a au plus 15 minutes, sinon le premier publié dans l'heure qui suit, quel que soit le moment de l'appel. Tant qu'aucun cours n'est lisible : #312, la couverture reste ouverte. Régler (ou figer le cours) dans les 24 h : Reflector oublie ses cours ensuite.
 
 ### Figer le cours sans régler : `record_fixing`
@@ -101,7 +111,7 @@ Au lieu d'appeler `settle` à la main, `scripts/keeper.sh` surveille les couvert
 ./scripts/keeper.sh --dry-run       # affiche ce qu'il réglerait, sans rien envoyer
 POOL=fx-pool SOURCE=fx-admin ./scripts/keeper.sh --interval 5
 ```
-Il parcourt les couvertures depuis l'id 0, compare leur échéance à l'heure du dernier ledger et affiche la raison d'un refus (#202 réseau en retard d'un ledger, #302, #312). Le lancer avant l'échéance règle aussi la limite d'historique de Reflector (~12 h) : le règlement part dans les secondes qui suivent l'échéance.
+Il parcourt les couvertures depuis l'id 0, compare leur échéance à l'heure du dernier ledger, règle chaque couverture échue puis pousse le versement à la PME (`claim_for`), et affiche la raison d'un refus (#202 réseau en retard d'un ledger, #312 pas encore de cours). Une heure après l'échéance, si aucun cours n'existe (#312), il passe par la voie de secours (`settle_fallback`). Le lancer avant l'échéance règle aussi la limite d'historique de Reflector (~12 h) : le règlement part dans les secondes qui suivent l'échéance.
 Testé sur testnet : couverture de 45 s réelles réglée par le keeper en boucle 10 s après l'échéance, sans intervention ([tx](https://stellar.expert/explorer/testnet/tx/656d79533ce6d192d21f3a5824722fc4ebc66a2bd202dcadcfb8f9993e490773)).
 
 ## 5. Réaligner l'offre DEX sur le nouveau prix (fx-admin)

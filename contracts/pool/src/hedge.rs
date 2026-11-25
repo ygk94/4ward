@@ -6,7 +6,10 @@
 //!        vault::open_position(&hedge) (réserve la marge, exposition par devise), stockage (+ extend_ttl), événement.
 //! settle : après l'échéance, spot = pricing::settlement_fixing(maturity) (cours en vigueur à l'échéance) ; P&L = pnl(side, notional, locked, spot, marge)
 //!        (écart notional × (spot − locked), signe selon Side, borné à ±marge) ; vault::close_position(&hedge) puis book_gain / book_loss ;
-//!        transfert au propriétaire de marge ± P&L ; settled = true ; événement.
+//!        marge ± P&L **crédités** au solde réclamable du propriétaire (rien ne lui est envoyé) ; settled = true ; événement.
+//! claim / claim_for : versent au propriétaire tout son solde réclamable (claim : signé par lui ; claim_for : sans
+//!        signature, pour le robot). Le règlement ne dépend ainsi jamais du compte de la PME : une ligne USDC supprimée
+//!        ou un compte bloqué n'empêche pas de régler, et ne retarde que son propre versement.
 //! close_early : avant l'échéance, le propriétaire seul. Clôture au prix du marché : taux de sortie = forward du jour
 //!        pour la durée restante, dans le sens inverse (spread contre l'utilisateur, comme à l'ouverture : c'est le
 //!        frais de sortie) ; même P&L borné, même versement que settle. Le perdant paie, le pool libère sa réserve.
@@ -59,6 +62,19 @@ pub enum HedgeError {
 enum HedgeKey {
     /// Facteur d'accélération du temps (mode démo), 1 par défaut.
     TimeFactor,
+    /// Solde réclamable d'un propriétaire en USDC (7 décimales) : versements de règlement pas encore réclamés.
+    Claimable(Address),
+    /// Σ des soldes réclamables : USDC du contrat qui n'appartient ni aux LPs ni aux marges ouvertes.
+    TotalClaimable,
+}
+
+/// Solde réclamable versé à son propriétaire par `claim` ou `claim_for`.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Claimed {
+    #[topic]
+    pub owner: Address,
+    pub amount: i128,
 }
 
 /// Réglage du mode démo, publié pour que tout le monde voie que les échéances sont accélérées.
@@ -204,7 +220,7 @@ pub(crate) fn settle(env: &Env, hedge_id: u64) -> i128 {
     // cours en vigueur à l'échéance réelle, pas au moment de l'appel : personne ne choisit son moment
     // cours figé, sinon lu puis figé ; aucun cours encore : 312, la couverture reste ouverte
     let spot = pricing::settlement_fixing(env, hedge_id, &hedge.currency, hedge.maturity);
-    let (pnl, payout) = close(env, &key, &mut hedge, spot);
+    let (pnl, payout) = close(env, &key, &mut hedge, spot, Payout::Credit);
     HedgeSettled { hedge_id, owner: hedge.owner, spot, pnl, payout }.publish(env);
     payout
 }
@@ -237,7 +253,7 @@ pub(crate) fn settle_fallback(env: &Env, hedge_id: u64) -> i128 {
     }
     // au taux bloqué, le P&L est nul par construction
     let rate = hedge.locked_rate;
-    let (_, payout) = close(env, &key, &mut hedge, rate);
+    let (_, payout) = close(env, &key, &mut hedge, rate, Payout::Credit);
     HedgeFallbackSettled { hedge_id, owner: hedge.owner, payout }.publish(env);
     payout
 }
@@ -262,7 +278,8 @@ pub(crate) fn close_early(env: &Env, hedge_id: u64) -> i128 {
         Side::SellCurrency => Side::BuyCurrency,
     };
     let close_rate = pricing::forward_rate(env, &hedge.currency, exit_side, remaining);
-    let (pnl, payout) = close(env, &key, &mut hedge, close_rate);
+    // signée par le propriétaire : il ne peut bloquer que sa propre transaction, on lui verse directement
+    let (pnl, payout) = close(env, &key, &mut hedge, close_rate, Payout::Transfer);
     HedgeClosedEarly { hedge_id, owner: hedge.owner, close_rate, pnl, payout }.publish(env);
     payout
 }
@@ -280,9 +297,17 @@ fn load_open(env: &Env, key: &DataKey) -> Hedge {
     hedge
 }
 
+/// Où va le versement d'une couverture close.
+enum Payout {
+    /// Crédité au solde réclamable (règlements sans signature : ne dépend pas du compte du propriétaire).
+    Credit,
+    /// Envoyé au propriétaire (clôture qu'il a lui-même signée).
+    Transfer,
+}
+
 /// Ferme la couverture au taux `rate` : P&L borné, libération de la réserve, gain ou perte du pool, versement
-/// de marge ± P&L au propriétaire, `settled = true`. Retourne (P&L, versement).
-fn close(env: &Env, key: &DataKey, hedge: &mut Hedge, rate: i128) -> (i128, i128) {
+/// de marge ± P&L au propriétaire (crédité ou envoyé selon `payout_to`), `settled = true`. Retourne (P&L, versement).
+fn close(env: &Env, key: &DataKey, hedge: &mut Hedge, rate: i128, payout_to: Payout) -> (i128, i128) {
     let pnl = pnl(env, hedge.side, hedge.notional, hedge.locked_rate, rate, hedge.margin);
 
     vault::close_position(env, hedge);
@@ -295,13 +320,72 @@ fn close(env: &Env, key: &DataKey, hedge: &mut Hedge, rate: i128) -> (i128, i128
     // marge rendue ± P&L, entre 0 et 2 × marge
     let payout = hedge.margin + pnl;
     if payout > 0 {
-        let usdc: Address = env.storage().instance().get(&DataKey::Usdc).unwrap();
-        token::TokenClient::new(env, &usdc).transfer(&env.current_contract_address(), &hedge.owner, &payout);
+        match payout_to {
+            Payout::Credit => credit(env, &hedge.owner, payout),
+            Payout::Transfer => transfer_out(env, &hedge.owner, payout),
+        }
     }
 
     hedge.settled = true;
     env.storage().persistent().set(key, hedge);
     (pnl, payout)
+}
+
+// ---- solde réclamable (B4) ----
+
+fn transfer_out(env: &Env, to: &Address, amount: i128) {
+    let usdc: Address = env.storage().instance().get(&DataKey::Usdc).unwrap();
+    token::TokenClient::new(env, &usdc).transfer(&env.current_contract_address(), to, &amount);
+}
+
+fn checked_add(env: &Env, a: i128, b: i128) -> i128 {
+    a.checked_add(b).unwrap_or_else(|| panic_with_error!(env, HedgeError::Overflow))
+}
+
+/// Ajoute `amount` au solde réclamable de `owner` et au total.
+fn credit(env: &Env, owner: &Address, amount: i128) {
+    let key = HedgeKey::Claimable(owner.clone());
+    let p = env.storage().persistent();
+    let balance = checked_add(env, p.get(&key).unwrap_or(0), amount);
+    p.set(&key, &balance);
+    p.extend_ttl(&key, HEDGE_TTL_THRESHOLD, HEDGE_TTL_EXTEND_TO);
+    let total = checked_add(env, total_claimable(env), amount);
+    env.storage().instance().set(&HedgeKey::TotalClaimable, &total);
+}
+
+/// Solde réclamable de `owner` (0 s'il n'a rien).
+pub(crate) fn claimable(env: &Env, owner: &Address) -> i128 {
+    env.storage().persistent().get(&HedgeKey::Claimable(owner.clone())).unwrap_or(0)
+}
+
+/// Σ des soldes réclamables.
+pub(crate) fn total_claimable(env: &Env) -> i128 {
+    env.storage().instance().get(&HedgeKey::TotalClaimable).unwrap_or(0)
+}
+
+/// Verse à `owner` tout son solde réclamable et le remet à zéro. Rien à verser : 0, sans transfert.
+/// Si le transfert échoue (ligne USDC supprimée, compte bloqué), toute la transaction est annulée et le solde reste dû.
+fn pay_out(env: &Env, owner: &Address) -> i128 {
+    let amount = claimable(env, owner);
+    if amount <= 0 {
+        return 0;
+    }
+    env.storage().persistent().remove(&HedgeKey::Claimable(owner.clone()));
+    env.storage().instance().set(&HedgeKey::TotalClaimable, &(total_claimable(env) - amount));
+    transfer_out(env, owner, amount);
+    Claimed { owner: owner.clone(), amount }.publish(env);
+    amount
+}
+
+/// Le propriétaire réclame son solde (signé par lui). Retourne l'USDC versé.
+pub(crate) fn claim(env: &Env, owner: &Address) -> i128 {
+    owner.require_auth();
+    pay_out(env, owner)
+}
+
+/// N'importe qui pousse le solde de `owner` vers `owner` (robot), sans signature. Retourne l'USDC versé.
+pub(crate) fn claim_for(env: &Env, owner: &Address) -> i128 {
+    pay_out(env, owner)
 }
 
 /// P&L de l'utilisateur en USDC (7 décimales) : > 0 le pool lui doit, < 0 il doit au pool.

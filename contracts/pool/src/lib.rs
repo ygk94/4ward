@@ -300,7 +300,8 @@ impl Pool {
         hedge::open(&env, &owner, &supplier, &currency, side, notional, duration_secs, cap_bps)
     }
 
-    /// Permissionless après l'échéance. Retourne le montant USDC versé au propriétaire.
+    /// Permissionless après l'échéance. Le versement (marge ± P&L) est **crédité** au solde réclamable du
+    /// propriétaire (`claim` / `claim_for` pour le recevoir). Retourne ce montant en USDC.
     pub fn settle(env: Env, hedge_id: u64) -> i128 {
         hedge::settle(&env, hedge_id)
     }
@@ -313,10 +314,30 @@ impl Pool {
     }
 
     /// Sans signature, après l'échéance : voie de secours quand le cours d'échéance est définitivement absent.
-    /// Clôture à P&L nul (marge rendue). Refus 209 si un cours existe ou peut encore arriver.
-    /// Retourne le montant USDC versé au propriétaire.
+    /// Clôture à P&L nul (marge créditée au solde réclamable). Refus 209 si un cours existe ou peut encore arriver.
+    /// Retourne le montant USDC crédité au propriétaire.
     pub fn settle_fallback(env: Env, hedge_id: u64) -> i128 {
         hedge::settle_fallback(&env, hedge_id)
+    }
+
+    /// Signé par `owner` : lui verse tout son solde réclamable. 0 s'il n'a rien. Possible en pause.
+    pub fn claim(env: Env, owner: Address) -> i128 {
+        hedge::claim(&env, &owner)
+    }
+
+    /// Sans signature (robot) : verse à `owner` tout son solde réclamable. 0 s'il n'a rien. Possible en pause.
+    pub fn claim_for(env: Env, owner: Address) -> i128 {
+        hedge::claim_for(&env, &owner)
+    }
+
+    /// Solde réclamable de `owner` en USDC (7 décimales).
+    pub fn claimable(env: Env, owner: Address) -> i128 {
+        hedge::claimable(&env, &owner)
+    }
+
+    /// Σ des soldes réclamables en USDC : avec le capital des LPs et les marges ouvertes, c'est tout l'USDC du contrat.
+    pub fn total_claimable(env: Env) -> i128 {
+        hedge::total_claimable(&env)
     }
 
     /// Propriétaire seul, avant l'échéance : clôture au prix du marché (forward du jour pour la durée restante,

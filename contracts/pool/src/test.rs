@@ -711,7 +711,10 @@ fn setup<'a>() -> Setup<'a> {
     let supplier = Address::generate(&env);
     let lp = Address::generate(&env);
 
-    let usdc_id = env.register_stellar_asset_contract_v2(admin.clone()).address();
+    let usdc_sac = env.register_stellar_asset_contract_v2(admin.clone());
+    // émetteur révocable, comme Circle : permet de simuler un compte qui ne peut plus recevoir d'USDC
+    usdc_sac.issuer().set_flag(soroban_sdk::testutils::IssuerFlags::RevocableFlag);
+    let usdc_id = usdc_sac.address();
     let usdc_admin = StellarAssetClient::new(&env, &usdc_id);
     usdc_admin.mint(&lp, &10_000_000_000_000); // 1 000 000 USDC
     usdc_admin.mint(&lucia, &2_000_000_000_000); // 200 000 USDC
@@ -858,13 +861,34 @@ fn pool_books(s: &Setup) -> (i128, i128) {
     (total, total - s.pool.capacity())
 }
 
-/// Vérifie l'état après `settle` : versement à Lucía, P&L du pool, capital libéré, couverture close.
+/// Vérifie l'état après `settle` ou `settle_fallback` : le versement est **crédité** au solde réclamable de Lucía
+/// (rien ne lui est envoyé), P&L du pool, capital libéré, couverture close ; puis Lucía réclame et reçoit tout.
 fn assert_settled(s: &Setup, id: u64, paid: i128, payout: i128, pool_pnl: i128) {
     assert_eq!(paid, payout);
     let margin = s.pool.get_hedge(&id).unwrap().margin;
-    assert_eq!(s.usdc.balance(&s.lucia), LUCIA_START - margin + payout);
+    assert!(s.pool.get_hedge(&id).unwrap().settled);
     assert_eq!(pool_books(s), (LP_CAPITAL + pool_pnl, 0));
-    // Plus aucune marge en dépôt : tout l'USDC du contrat appartient aux LPs
+    // crédité, pas versé : l'USDC reste dans le contrat, au nom de Lucía
+    assert_eq!(s.pool.claimable(&s.lucia), payout);
+    assert_eq!(s.pool.total_claimable(), payout);
+    assert_eq!(s.usdc.balance(&s.lucia), LUCIA_START - margin);
+    assert_eq!(s.usdc.balance(&s.pool.address), LP_CAPITAL + pool_pnl + payout);
+
+    // Lucía réclame : elle reçoit tout, et tout l'USDC du contrat appartient de nouveau aux LPs
+    assert_eq!(s.pool.claim(&s.lucia), payout);
+    assert_eq!(s.pool.claimable(&s.lucia), 0);
+    assert_eq!(s.pool.total_claimable(), 0);
+    assert_eq!(s.usdc.balance(&s.lucia), LUCIA_START - margin + payout);
+    assert_eq!(s.usdc.balance(&s.pool.address), LP_CAPITAL + pool_pnl);
+}
+
+/// Vérifie l'état après `close_early` : signée par Lucía, la clôture lui verse directement l'argent.
+fn assert_closed_early(s: &Setup, id: u64, paid: i128, payout: i128, pool_pnl: i128) {
+    assert_eq!(paid, payout);
+    let margin = s.pool.get_hedge(&id).unwrap().margin;
+    assert_eq!(s.usdc.balance(&s.lucia), LUCIA_START - margin + payout);
+    assert_eq!(s.pool.claimable(&s.lucia), 0);
+    assert_eq!(pool_books(s), (LP_CAPITAL + pool_pnl, 0));
     assert_eq!(s.usdc.balance(&s.pool.address), LP_CAPITAL + pool_pnl);
     assert!(s.pool.get_hedge(&id).unwrap().settled);
 }
@@ -941,6 +965,7 @@ fn settle_guards() {
     set_spot(&s, SPOT_0);
     s.pool.settle(&id);
     assert_eq!(s.pool.try_settle(&id), Err(Ok(contract_err(HedgeError::AlreadySettled as u32))));
+    s.pool.claim(&s.lucia);
     assert_eq!(s.usdc.balance(&s.lucia), LUCIA_START + hedge::pnl(&s.env, Side::BuyCurrency, NOTIONAL, HEDGE_LOCKED, SPOT_0, HEDGE_MARGIN));
 }
 
@@ -1372,10 +1397,100 @@ fn settle_refused_while_no_rate_and_hedge_stays_open() {
     assert!(!s.pool.get_hedge(&id).unwrap().settled);
 }
 
-// ---- Cours figé et règlement de secours ----
-
 /// Un jour plus une seconde : Reflector (et le mock) ont oublié le cours d'échéance.
 const AFTER_HISTORY: u64 = 86_401;
+
+// ---- Solde réclamable (B4) ----
+
+/// Retire (ou rend) à Lucía le droit de recevoir de l'USDC : même effet qu'une ligne de confiance supprimée.
+fn set_lucia_can_receive(s: &Setup, ok: bool) {
+    StellarAssetClient::new(&s.env, &s.usdc.address).set_authorized(&s.lucia, &ok);
+}
+
+#[test]
+fn claim_requires_owner_signature_and_emits_event() {
+    let s = setup();
+    let id = open_funded(&s, Side::BuyCurrency);
+    at_maturity(&s, 5_940_000_000_000);
+    let payout = s.pool.settle(&id);
+
+    assert_eq!(s.pool.claim(&s.lucia), payout);
+    let auths = s.env.auths();
+    assert_eq!(auths.len(), 1);
+    assert_eq!(auths[0].0, s.lucia);
+    let expected = hedge::Claimed { owner: s.lucia.clone(), amount: payout };
+    let events = s.env.events().all().filter_by_contract(&s.pool.address);
+    assert_eq!(events.events().last(), Some(&expected.to_xdr(&s.env, &s.pool.address)));
+}
+
+#[test]
+fn claim_for_pays_the_owner_without_signature() {
+    let s = setup();
+    let id = open_funded(&s, Side::BuyCurrency);
+    at_maturity(&s, 5_940_000_000_000);
+    let payout = s.pool.settle(&id);
+
+    // le robot pousse le versement : sans signature, et l'argent va toujours au propriétaire
+    assert_eq!(s.pool.set_auths(&[]).claim_for(&s.lucia), payout);
+    assert_eq!(s.usdc.balance(&s.lucia), LUCIA_START - HEDGE_MARGIN + payout);
+    assert_eq!(s.pool.claimable(&s.lucia), 0);
+}
+
+#[test]
+fn claim_with_nothing_due_pays_nothing() {
+    let s = setup();
+    assert_eq!(s.pool.claim(&s.lucia), 0);
+    assert_eq!(s.pool.claim_for(&s.lucia), 0);
+    assert_eq!(s.usdc.balance(&s.lucia), LUCIA_START);
+}
+
+#[test]
+fn claimable_adds_up_across_hedges() {
+    let s = setup();
+    let id = open_funded(&s, Side::BuyCurrency);
+    let id2 = s.pool.open_hedge(&s.lucia, &s.supplier, &Symbol::new(&s.env, "MXN"), &Side::BuyCurrency, &NOTIONAL, &MATURITY_IN, &1000);
+    at_maturity(&s, 5_940_000_000_000);
+    let total = s.pool.settle(&id) + s.pool.settle(&id2);
+    assert_eq!(s.pool.claimable(&s.lucia), total);
+    assert_eq!(s.pool.total_claimable(), total);
+    assert_eq!(s.pool.claim(&s.lucia), total);
+}
+
+/// Scénario de la relecture de Hugo : une PME perdante supprime sa ligne USDC pour faire échouer le règlement,
+/// attend que l'oracle oublie le cours, puis passe par la voie de secours pour récupérer toute sa marge.
+/// Avec le solde réclamable, le règlement ne dépend plus de son compte : il passe, et le secours est fermé.
+#[test]
+fn owner_who_cannot_receive_cannot_block_settlement() {
+    let s = setup();
+    let id = open_funded(&s, Side::BuyCurrency);
+    at_maturity(&s, 5_060_000_000_000); // −8 % : Lucía perd une partie de sa marge
+    set_lucia_can_receive(&s, false);
+
+    let payout = s.pool.settle(&id);
+    assert!(payout > 0 && payout < HEDGE_MARGIN);
+    assert!(s.pool.get_hedge(&id).unwrap().settled);
+    // plus de secours possible : la perte est actée
+    s.env.ledger().set_timestamp(s.env.ledger().timestamp() + AFTER_HISTORY);
+    assert_eq!(s.pool.try_settle_fallback(&id), Err(Ok(contract_err(HedgeError::AlreadySettled as u32))));
+
+    // elle ne peut pas réclamer tant qu'elle ne peut pas recevoir ; son solde l'attend
+    assert!(s.pool.try_claim(&s.lucia).is_err());
+    assert_eq!(s.pool.claimable(&s.lucia), payout);
+    set_lucia_can_receive(&s, true);
+    assert_eq!(s.pool.claim(&s.lucia), payout);
+}
+
+#[test]
+fn claim_works_while_paused() {
+    let s = setup();
+    let id = open_funded(&s, Side::BuyCurrency);
+    at_maturity(&s, 5_940_000_000_000);
+    let payout = s.pool.settle(&id);
+    s.pool.pause(&s.admin);
+    assert_eq!(s.pool.claim(&s.lucia), payout);
+}
+
+// ---- Cours figé et règlement de secours ----
 
 #[test]
 fn record_fixing_locks_rate_for_a_later_settle() {
@@ -1486,6 +1601,7 @@ fn record_fixing_and_fallback_work_while_paused() {
     assert_eq!(s.pool.record_fixing(&id), SPOT_0);
     s.env.ledger().set_timestamp(now + MATURITY_IN + AFTER_HISTORY);
     assert_eq!(s.pool.settle_fallback(&id2), s.pool.get_hedge(&id2).unwrap().margin);
+    assert_eq!(s.pool.claimable(&s.lucia), s.pool.get_hedge(&id2).unwrap().margin);
 }
 
 // ---- Clôture anticipée ----
@@ -1511,7 +1627,7 @@ fn close_early_unchanged_market_costs_the_spreads() {
     let pnl = hedge::pnl(&s.env, Side::BuyCurrency, NOTIONAL, HEDGE_LOCKED, rate, HEDGE_MARGIN);
     assert!(pnl < 0 && pnl > -HEDGE_COST / 90);
     let paid = s.pool.close_early(&id);
-    assert_settled(&s, id, paid, HEDGE_MARGIN + pnl, -pnl);
+    assert_closed_early(&s, id, paid, HEDGE_MARGIN + pnl, -pnl);
 }
 
 #[test]
@@ -1525,7 +1641,7 @@ fn close_early_currency_up_user_gains() {
     let pnl = hedge::pnl(&s.env, Side::BuyCurrency, NOTIONAL, HEDGE_LOCKED, rate, HEDGE_MARGIN);
     assert!(pnl > 0);
     let paid = s.pool.close_early(&id);
-    assert_settled(&s, id, paid, HEDGE_MARGIN + pnl, -pnl);
+    assert_closed_early(&s, id, paid, HEDGE_MARGIN + pnl, -pnl);
 }
 
 #[test]
@@ -1536,7 +1652,7 @@ fn close_early_currency_down_user_pays_capped() {
     set_spot(&s, 4_675_000_000_000); // −15 % : perte bornée à la marge, toute la marge va au pool
 
     let paid = s.pool.close_early(&id);
-    assert_settled(&s, id, paid, 0, HEDGE_MARGIN);
+    assert_closed_early(&s, id, paid, 0, HEDGE_MARGIN);
 }
 
 #[test]
@@ -1551,7 +1667,7 @@ fn close_early_sell_side_buys_back() {
     assert!(pnl > 0);
     let margin = s.pool.get_hedge(&id).unwrap().margin;
     let paid = s.pool.close_early(&id);
-    assert_settled(&s, id, paid, margin + pnl, -pnl);
+    assert_closed_early(&s, id, paid, margin + pnl, -pnl);
 }
 
 #[test]
