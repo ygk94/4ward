@@ -25,7 +25,8 @@ pub enum AdminError {
     InvalidOracleDecimals = 403,
     /// La garde doit être une clé distincte de l'admin.
     GuardianIsAdmin = 404,
-    /// Fonction pas encore branchée (aujourd'hui : liste blanche `Role::Sme`, moitié hedge de B9).
+    /// Fonction pas encore branchée. N'est plus renvoyé depuis que la liste blanche `Role::Sme` est branchée
+    /// (B9, côté couvertures) ; numéro gardé pour ne jamais le réutiliser.
     NotImplemented = 405,
 }
 
@@ -101,11 +102,6 @@ pub(crate) fn require_not_paused(env: &Env) {
     if paused(env) {
         panic_with_error!(env, AdminError::Paused);
     }
-}
-
-/// Branche PME de la liste blanche : à écrire avec la moitié hedge de B9 (Clément).
-pub(crate) fn sme_not_implemented(env: &Env) -> ! {
-    panic_with_error!(env, AdminError::NotImplemented)
 }
 
 /// La garde ne peut pas devenir admin (sinon une seule clé ferait les deux rôles).
@@ -383,18 +379,6 @@ mod tests {
         assert_eq!(c.get_admin(), s.admin);
     }
 
-    // ---- liste blanche PME pas encore branchée ----
-
-    #[test]
-    fn sme_role_returns_not_implemented() {
-        let s = setup();
-        let c = s.client();
-        let who = Address::generate(&s.env);
-        assert_admin_error(c.try_is_allowed(&Role::Sme, &who), AdminError::NotImplemented);
-        assert_admin_error(c.try_set_allowed(&Role::Sme, &who, &true), AdminError::NotImplemented);
-        assert_admin_error(c.try_set_allowlist_enabled(&Role::Sme, &true), AdminError::NotImplemented);
-    }
-
     // ---- garde et pause ----
 
     #[test]
@@ -475,6 +459,7 @@ mod tests {
         let lp = Address::generate(&s.env);
         c.set_allowed(&Role::Lp, &lp, &true);
         let owner = Address::generate(&s.env);
+        c.set_allowed(&Role::Sme, &owner, &true);
         let usdc_admin = StellarAssetClient::new(&s.env, &s.usdc);
         usdc_admin.mint(&lp, &2_000_000_000_000);
         usdc_admin.mint(&owner, &1_000_000_000_000);
@@ -486,13 +471,13 @@ mod tests {
         let shares = c.deposit_lp(&lp, &1_000_000_000_000);
         c.set_senior_deposits_open(&true); // dépôts senior fermés par défaut (B5)
         let senior = c.deposit_senior(&lp, &100_000_000_000);
-        let id = c.open_hedge(&owner, &owner, &mxn, &Side::BuyCurrency, &10_000_000_000_000, &(90 * 86_400), &1000);
+        let id = c.open_hedge(&owner, &owner, &mxn, &Side::BuyCurrency, &10_000_000_000_000, &(90 * 86_400), &1000, &None);
 
         c.pause(&s.admin);
         assert_admin_error(c.try_deposit_lp(&lp, &1_000_000_000), AdminError::Paused);
         assert_admin_error(c.try_deposit_senior(&lp, &1_000_000_000), AdminError::Paused);
         assert_admin_error(
-            c.try_open_hedge(&owner, &owner, &mxn, &Side::BuyCurrency, &10_000_000_000_000, &(90 * 86_400), &1000),
+            c.try_open_hedge(&owner, &owner, &mxn, &Side::BuyCurrency, &10_000_000_000_000, &(90 * 86_400), &1000, &None),
             AdminError::Paused,
         );
 

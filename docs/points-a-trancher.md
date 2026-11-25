@@ -55,13 +55,15 @@
 
 Aucune n'est corrigée dans le contrat avant la soumission ; elles sont résumées dans le README (*Limites connues du contrat*).
 
+**25/11 : a, b, c et e sont des engagements du dossier Instaward** (livrable 1), à livrer pendant le sprint ; le fixing promis y est une moyenne sur ~30 min avec bornes, pas un cours unique. Le dossier est envoyé et ne peut plus être modifié : ces engagements sont obligatoires. f et g sont faits ou en relecture (B6, B7). Voir `docs/roadmap.md`, section *Engagement Instaward*.
+
 **a. Fixing indisponible (302/312) = couverture irréglable.** `settle` lit le cours en vigueur à l'échéance (`pricing::fixing`). S'il n'y a aucun prix de moins de 900 s avant l'échéance (302), ou si l'échéance dépasse l'historique de l'oracle (312 : 64 prix sur le mock, ~12 h sur Reflector), l'erreur est **définitive** : un prix posé après l'échéance ne compte jamais, aucune fonction ne passe `settled` à true ni ne libère `Reserved`. La marge de la PME et le capital réservé restent bloqués. *Correctif :* fonction admin `settle_fallback(id)` qui, après l'échéance + un délai de grâce, fait `close_position` et rend la marge avec un P&L nul. *Pour la vidéo :* 90 j uniquement, `crash.sh` ou `crash.sh --refresh` pendant les 5 min avant l'échéance, keeper actif.
 
 **b. Mode démo (`time_factor` > 1).** Le prix porte sur la durée annoncée et l'échéance est raccourcie, donc le carry n'est pas neutralisé : avec un oracle immobile, on encaisse l'écart forward / spot sans risque en quelques minutes. `time_factor` doit valoir 1 en production (à terme : `set_time_factor` derrière une feature cargo).
 
 **c. Dépôt juste avant un `settle` gagnant.** Le fixing est public dès l'échéance, alors que `settle` est appelé plus tard : un LP peut déposer au prix plein juste avant un règlement gagnant pour le pool, puis retirer juste après. *Correctif :* délai d'entrée, ou blocage de `deposit_lp` tant qu'une couverture échue n'est pas réglée.
 
-**d. Versement poussé dans `settle`.** Si le transfert USDC au propriétaire échoue (trustline supprimée, compte désautorisé par l'émetteur), tout le `settle` échoue et le capital réservé reste bloqué tant que le propriétaire ne corrige pas. *Correctif :* modèle pull (solde réclamable + `claim()`).
+**d. Versement poussé dans `settle`.** Si le transfert USDC au propriétaire échoue (trustline supprimée, compte désautorisé par l'émetteur), tout le `settle` échoue et le capital réservé reste bloqué tant que le propriétaire ne corrige pas. *Correctif :* modèle pull (solde réclamable + `claim()`). **Fait le 25/11 (B4)** : `settle` et `settle_fallback` créditent un solde réclamable, `claim` / `claim_for` le versent.
 
 **e. Tranches : intérêts senior et `Reserved`.** Les intérêts senior (4,5 %/an, temps réel) sont pris sur le junior : la valeur junior peut passer sous `Reserved` (capacité négative) ou sous 20 % sans aucune opération, et `withdraw_senior` ne vérifie pas que le capital restant couvre `Reserved` (un `settle` perdant pour le pool échouerait alors en 103). *Correctif :* dans `withdraw_senior`, refuser si `total_deposits - amount < reserved` (nouveau code 113).
 

@@ -711,7 +711,10 @@ fn setup<'a>() -> Setup<'a> {
     let supplier = Address::generate(&env);
     let lp = Address::generate(&env);
 
-    let usdc_id = env.register_stellar_asset_contract_v2(admin.clone()).address();
+    let usdc_sac = env.register_stellar_asset_contract_v2(admin.clone());
+    // émetteur révocable, comme Circle : permet de simuler un compte qui ne peut plus recevoir d'USDC
+    usdc_sac.issuer().set_flag(soroban_sdk::testutils::IssuerFlags::RevocableFlag);
+    let usdc_id = usdc_sac.address();
     let usdc_admin = StellarAssetClient::new(&env, &usdc_id);
     usdc_admin.mint(&lp, &10_000_000_000_000); // 1 000 000 USDC
     usdc_admin.mint(&lucia, &2_000_000_000_000); // 200 000 USDC
@@ -723,6 +726,7 @@ fn setup<'a>() -> Setup<'a> {
     let pool_id = env.register(Pool, (&admin, &usdc_id, &oracle_id, 50u32));
     let pool = PoolClient::new(&env, &pool_id);
     pool.set_allowed(&Role::Lp, &lp, &true); // liste blanche des LP active par défaut (B9)
+    pool.set_allowed(&Role::Sme, &lucia, &true); // liste blanche des PME active par défaut (B9)
     // taux de test arbitraires (anciens taux 400/700, ≠ snapshot 360/555 : voir `demo_figures`)
     // et MXN ouverte (plafond minimum 5 %)
     pool.set_rate(&Symbol::new(&env, "USD"), &400);
@@ -762,43 +766,57 @@ fn fixture_is_ready() {
 
 #[test]
 fn pnl_currency_up_user_gains() {
+    let env = Env::default();
     // +8 % : 0.0594 → 59 400 USDC au comptant, le pool doit 4 530 USDC
-    assert_eq!(hedge::pnl(Side::BuyCurrency, NOTIONAL, LOCKED, 5_940_000_000_000, MARGIN), 45_300_000_000);
+    assert_eq!(hedge::pnl(&env, Side::BuyCurrency, NOTIONAL, LOCKED, 5_940_000_000_000, MARGIN), 45_300_000_000);
 }
 
 #[test]
 fn pnl_currency_down_user_loses() {
+    let env = Env::default();
     // −8 % : 0.0506 → 50 600 USDC au comptant, Lucía doit 4 270 USDC sur sa marge
-    assert_eq!(hedge::pnl(Side::BuyCurrency, NOTIONAL, LOCKED, 5_060_000_000_000, MARGIN), -42_700_000_000);
+    assert_eq!(hedge::pnl(&env, Side::BuyCurrency, NOTIONAL, LOCKED, 5_060_000_000_000, MARGIN), -42_700_000_000);
 }
 
 #[test]
 fn pnl_is_capped_at_margin() {
+    let env = Env::default();
     // +15 % : écart de 8 380 USDC, borné à la marge de 5 487 USDC
-    assert_eq!(hedge::pnl(Side::BuyCurrency, NOTIONAL, LOCKED, 6_325_000_000_000, MARGIN), MARGIN);
+    assert_eq!(hedge::pnl(&env, Side::BuyCurrency, NOTIONAL, LOCKED, 6_325_000_000_000, MARGIN), MARGIN);
     // −15 % : borné à −marge
-    assert_eq!(hedge::pnl(Side::BuyCurrency, NOTIONAL, LOCKED, 4_675_000_000_000, MARGIN), -MARGIN);
+    assert_eq!(hedge::pnl(&env, Side::BuyCurrency, NOTIONAL, LOCKED, 4_675_000_000_000, MARGIN), -MARGIN);
 }
 
 #[test]
 fn pnl_sell_side_is_reversed() {
+    let env = Env::default();
     // L'exportateur gagne quand la devise baisse
-    assert_eq!(hedge::pnl(Side::SellCurrency, NOTIONAL, LOCKED, 5_060_000_000_000, MARGIN), 42_700_000_000);
-    assert_eq!(hedge::pnl(Side::SellCurrency, NOTIONAL, LOCKED, 5_940_000_000_000, MARGIN), -45_300_000_000);
+    assert_eq!(hedge::pnl(&env, Side::SellCurrency, NOTIONAL, LOCKED, 5_060_000_000_000, MARGIN), 42_700_000_000);
+    assert_eq!(hedge::pnl(&env, Side::SellCurrency, NOTIONAL, LOCKED, 5_940_000_000_000, MARGIN), -45_300_000_000);
 }
 
 #[test]
 fn pnl_rounds_in_favour_of_pool() {
+    let env = Env::default();
     // 1 unité de devise (1e-7), écart de 1e-14 USD : P&L réel = 1e-21 USDC
     // le pool ne paie rien quand il doit une fraction...
-    assert_eq!(hedge::pnl(Side::BuyCurrency, 1, LOCKED, LOCKED + 1, MARGIN), 0);
+    assert_eq!(hedge::pnl(&env, Side::BuyCurrency, 1, LOCKED, LOCKED + 1, MARGIN), 0);
     // ...et encaisse l'unité entière quand c'est l'utilisateur qui doit une fraction
-    assert_eq!(hedge::pnl(Side::BuyCurrency, 1, LOCKED, LOCKED - 1, MARGIN), -1);
+    assert_eq!(hedge::pnl(&env, Side::BuyCurrency, 1, LOCKED, LOCKED - 1, MARGIN), -1);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #207)")]
+fn pnl_overflow_returns_code_instead_of_trapping() {
+    // écart démesuré : notional × écart dépasse i128, refus avec un code (207) et non un piège de la VM
+    let env = Env::default();
+    hedge::pnl(&env, Side::BuyCurrency, i128::MAX / 2, LOCKED, i128::MAX / 4, MARGIN);
 }
 
 #[test]
 fn pnl_unchanged_spot_is_zero() {
-    assert_eq!(hedge::pnl(Side::BuyCurrency, NOTIONAL, LOCKED, LOCKED, MARGIN), 0);
+    let env = Env::default();
+    assert_eq!(hedge::pnl(&env, Side::BuyCurrency, NOTIONAL, LOCKED, LOCKED, MARGIN), 0);
 }
 
 /// Taux bloqué réel de la couverture de démo (vrai Pricing, paramètres du setup testnet :
@@ -824,7 +842,7 @@ fn fund_pool(s: &Setup) {
 /// Pool financé puis couverture de la démo ouverte par Lucía dans le sens `side`. Retourne son id.
 fn open_funded(s: &Setup, side: Side) -> u64 {
     fund_pool(s);
-    s.pool.open_hedge(&s.lucia, &s.supplier, &Symbol::new(&s.env, "MXN"), &side, &NOTIONAL, &MATURITY_IN, &1000)
+    s.pool.open_hedge(&s.lucia, &s.supplier, &Symbol::new(&s.env, "MXN"), &side, &NOTIONAL, &MATURITY_IN, &1000, &None)
 }
 
 /// Code d'erreur de contrat tel que le reçoit le client (`try_*` → `Err(Ok(..))`).
@@ -844,13 +862,34 @@ fn pool_books(s: &Setup) -> (i128, i128) {
     (total, total - s.pool.capacity())
 }
 
-/// Vérifie l'état après `settle` : versement à Lucía, P&L du pool, capital libéré, couverture close.
+/// Vérifie l'état après `settle` ou `settle_fallback` : le versement est **crédité** au solde réclamable de Lucía
+/// (rien ne lui est envoyé), P&L du pool, capital libéré, couverture close ; puis Lucía réclame et reçoit tout.
 fn assert_settled(s: &Setup, id: u64, paid: i128, payout: i128, pool_pnl: i128) {
     assert_eq!(paid, payout);
     let margin = s.pool.get_hedge(&id).unwrap().margin;
-    assert_eq!(s.usdc.balance(&s.lucia), LUCIA_START - margin + payout);
+    assert!(s.pool.get_hedge(&id).unwrap().settled);
     assert_eq!(pool_books(s), (LP_CAPITAL + pool_pnl, 0));
-    // Plus aucune marge en dépôt : tout l'USDC du contrat appartient aux LPs
+    // crédité, pas versé : l'USDC reste dans le contrat, au nom de Lucía
+    assert_eq!(s.pool.claimable(&s.lucia), payout);
+    assert_eq!(s.pool.total_claimable(), payout);
+    assert_eq!(s.usdc.balance(&s.lucia), LUCIA_START - margin);
+    assert_eq!(s.usdc.balance(&s.pool.address), LP_CAPITAL + pool_pnl + payout);
+
+    // Lucía réclame : elle reçoit tout, et tout l'USDC du contrat appartient de nouveau aux LPs
+    assert_eq!(s.pool.claim(&s.lucia), payout);
+    assert_eq!(s.pool.claimable(&s.lucia), 0);
+    assert_eq!(s.pool.total_claimable(), 0);
+    assert_eq!(s.usdc.balance(&s.lucia), LUCIA_START - margin + payout);
+    assert_eq!(s.usdc.balance(&s.pool.address), LP_CAPITAL + pool_pnl);
+}
+
+/// Vérifie l'état après `close_early` : signée par Lucía, la clôture lui verse directement l'argent.
+fn assert_closed_early(s: &Setup, id: u64, paid: i128, payout: i128, pool_pnl: i128) {
+    assert_eq!(paid, payout);
+    let margin = s.pool.get_hedge(&id).unwrap().margin;
+    assert_eq!(s.usdc.balance(&s.lucia), LUCIA_START - margin + payout);
+    assert_eq!(s.pool.claimable(&s.lucia), 0);
+    assert_eq!(pool_books(s), (LP_CAPITAL + pool_pnl, 0));
     assert_eq!(s.usdc.balance(&s.pool.address), LP_CAPITAL + pool_pnl);
     assert!(s.pool.get_hedge(&id).unwrap().settled);
 }
@@ -927,7 +966,8 @@ fn settle_guards() {
     set_spot(&s, SPOT_0);
     s.pool.settle(&id);
     assert_eq!(s.pool.try_settle(&id), Err(Ok(contract_err(HedgeError::AlreadySettled as u32))));
-    assert_eq!(s.usdc.balance(&s.lucia), LUCIA_START + hedge::pnl(Side::BuyCurrency, NOTIONAL, HEDGE_LOCKED, SPOT_0, HEDGE_MARGIN));
+    s.pool.claim(&s.lucia);
+    assert_eq!(s.usdc.balance(&s.lucia), LUCIA_START + hedge::pnl(&s.env, Side::BuyCurrency, NOTIONAL, HEDGE_LOCKED, SPOT_0, HEDGE_MARGIN));
 }
 
 /// Lucía ouvre la couverture de la démo : 1 000 000 MXN, plafond 10 %, échéance `MATURITY_IN`.
@@ -940,6 +980,7 @@ fn open_demo(s: &Setup) -> u64 {
         &NOTIONAL,
         &MATURITY_IN,
         &1000,
+        &None,
     )
 }
 
@@ -992,7 +1033,7 @@ fn open_margin_follows_cap() {
     let s = setup();
     fund_pool(&s);
     // plafond 20 % : marge 11 055 USDC
-    let id = s.pool.open_hedge(&s.lucia, &s.supplier, &Symbol::new(&s.env, "MXN"), &Side::BuyCurrency, &NOTIONAL, &MATURITY_IN, &2000);
+    let id = s.pool.open_hedge(&s.lucia, &s.supplier, &Symbol::new(&s.env, "MXN"), &Side::BuyCurrency, &NOTIONAL, &MATURITY_IN, &2000, &None);
     assert_eq!(s.pool.get_hedge(&id).unwrap().margin, 2 * HEDGE_MARGIN);
     assert_eq!(s.usdc.balance(&s.lucia), LUCIA_START - 2 * HEDGE_MARGIN);
 }
@@ -1005,20 +1046,20 @@ fn open_refusals() {
 
     // pool vide : capacité insuffisante (erreur du Vault)
     assert_eq!(
-        s.pool.try_open_hedge(&s.lucia, &s.supplier, &mxn, &buy, &NOTIONAL, &MATURITY_IN, &1000),
+        s.pool.try_open_hedge(&s.lucia, &s.supplier, &mxn, &buy, &NOTIONAL, &MATURITY_IN, &1000, &None),
         Err(Ok(contract_err(VaultError::InsufficientCapacity as u32)))
     );
 
     fund_pool(&s);
     // plafond sous le minimum de la devise (erreur de Pricing, code à venir)
-    assert!(s.pool.try_open_hedge(&s.lucia, &s.supplier, &mxn, &buy, &NOTIONAL, &MATURITY_IN, &400).is_err());
+    assert!(s.pool.try_open_hedge(&s.lucia, &s.supplier, &mxn, &buy, &NOTIONAL, &MATURITY_IN, &400, &None).is_err());
     // notionnel nul ou négatif
     let invalid_notional = Err(Ok(contract_err(HedgeError::InvalidNotional as u32)));
-    assert_eq!(s.pool.try_open_hedge(&s.lucia, &s.supplier, &mxn, &buy, &0, &MATURITY_IN, &1000), invalid_notional);
-    assert_eq!(s.pool.try_open_hedge(&s.lucia, &s.supplier, &mxn, &buy, &-NOTIONAL, &MATURITY_IN, &1000), invalid_notional);
+    assert_eq!(s.pool.try_open_hedge(&s.lucia, &s.supplier, &mxn, &buy, &0, &MATURITY_IN, &1000, &None), invalid_notional);
+    assert_eq!(s.pool.try_open_hedge(&s.lucia, &s.supplier, &mxn, &buy, &-NOTIONAL, &MATURITY_IN, &1000, &None), invalid_notional);
     // durée nulle
     assert_eq!(
-        s.pool.try_open_hedge(&s.lucia, &s.supplier, &mxn, &buy, &NOTIONAL, &0, &1000),
+        s.pool.try_open_hedge(&s.lucia, &s.supplier, &mxn, &buy, &NOTIONAL, &0, &1000, &None),
         Err(Ok(contract_err(HedgeError::InvalidDuration as u32)))
     );
 
@@ -1112,14 +1153,16 @@ fn open_refused_over_currency_limit() {
     // limite MXN de l'admin : 5 % du capital = 5 000 USDC de marges, sous la marge de 5 527,50
     s.pool.set_currency_limit(&mxn, &500);
     assert_eq!(
-        s.pool.try_open_hedge(&s.lucia, &s.supplier, &mxn, &Side::BuyCurrency, &NOTIONAL, &MATURITY_IN, &1000),
+        s.pool.try_open_hedge(&s.lucia, &s.supplier, &mxn, &Side::BuyCurrency, &NOTIONAL, &MATURITY_IN, &1000, &None),
         Err(Ok(contract_err(VaultError::CurrencyLimitExceeded as u32)))
     );
 }
 
 /// 90 jours, en secondes : l'échéance racontée dans la démo.
+#[cfg(feature = "demo")]
 const DAYS_90: u64 = 7_776_000;
 /// Facteur de démo : 90 jours annoncés → 300 s réelles.
+#[cfg(feature = "demo")]
 const DEMO_FACTOR: u32 = 25_920;
 
 #[test]
@@ -1128,6 +1171,21 @@ fn time_factor_defaults_to_one() {
     assert_eq!(s.pool.time_factor(), 1);
 }
 
+/// Version de production (sans la feature `demo`) : le mode démo n'existe pas. `set_time_factor` est refusé
+/// (208) et les échéances restent réelles, quoi qu'il y ait dans le stockage.
+#[cfg(not(feature = "demo"))]
+#[test]
+fn production_build_refuses_demo_mode() {
+    let s = setup();
+    fund_pool(&s);
+    assert_eq!(s.pool.try_set_time_factor(&25_920), Err(Ok(contract_err(HedgeError::DemoDisabled as u32))));
+    assert_eq!(s.pool.time_factor(), 1);
+    let now = s.env.ledger().timestamp();
+    let id = s.pool.open_hedge(&s.lucia, &s.supplier, &Symbol::new(&s.env, "MXN"), &Side::BuyCurrency, &NOTIONAL, &MATURITY_IN, &1000, &None);
+    assert_eq!(s.pool.get_hedge(&id).unwrap().maturity, now + MATURITY_IN);
+}
+
+#[cfg(feature = "demo")]
 #[test]
 fn accelerated_hedge_prices_on_announced_duration() {
     let s = setup();
@@ -1135,7 +1193,7 @@ fn accelerated_hedge_prices_on_announced_duration() {
     s.pool.set_time_factor(&DEMO_FACTOR);
     let now = s.env.ledger().timestamp();
 
-    let id = s.pool.open_hedge(&s.lucia, &s.supplier, &Symbol::new(&s.env, "MXN"), &Side::BuyCurrency, &NOTIONAL, &DAYS_90, &1000);
+    let id = s.pool.open_hedge(&s.lucia, &s.supplier, &Symbol::new(&s.env, "MXN"), &Side::BuyCurrency, &NOTIONAL, &DAYS_90, &1000, &None);
 
     // prix et marge à 90 jours (54 873,05 et 5 487,31 USDC), échéance réelle 300 s plus tard
     let h = s.pool.get_hedge(&id).unwrap();
@@ -1144,13 +1202,14 @@ fn accelerated_hedge_prices_on_announced_duration() {
     assert_eq!(h.maturity, now + 300);
 }
 
+#[cfg(feature = "demo")]
 #[test]
 fn accelerated_hedge_settles_after_real_maturity() {
     let s = setup();
     fund_pool(&s);
     s.pool.set_time_factor(&DEMO_FACTOR);
     let now = s.env.ledger().timestamp();
-    let id = s.pool.open_hedge(&s.lucia, &s.supplier, &Symbol::new(&s.env, "MXN"), &Side::BuyCurrency, &NOTIONAL, &DAYS_90, &1000);
+    let id = s.pool.open_hedge(&s.lucia, &s.supplier, &Symbol::new(&s.env, "MXN"), &Side::BuyCurrency, &NOTIONAL, &DAYS_90, &1000, &None);
 
     s.env.ledger().set_timestamp(now + 299);
     assert_eq!(s.pool.try_settle(&id), Err(Ok(contract_err(HedgeError::NotMatured as u32))));
@@ -1164,6 +1223,7 @@ fn accelerated_hedge_settles_after_real_maturity() {
 /// Chiffres exacts de la vidéo et du README : taux de `scripts/rates.snapshot` (USD 360, MXN 555),
 /// spot 0,055, 1 000 000 MXN à 90 jours, plafond 10 %, mode démo, crash +12 % avant l'échéance.
 /// Mêmes valeurs que `sim/contract.py` (auto-test) et `docs/points-a-trancher.md`.
+#[cfg(feature = "demo")]
 #[test]
 fn demo_figures() {
     let s = setup();
@@ -1180,7 +1240,7 @@ fn demo_figures() {
     assert_eq!(q.usdc_cost, 550_128_136_866);
     assert_eq!(q.margin, 55_012_813_687);
 
-    let id = s.pool.open_hedge(&s.lucia, &s.supplier, &mxn, &Side::BuyCurrency, &NOTIONAL, &DAYS_90, &1000);
+    let id = s.pool.open_hedge(&s.lucia, &s.supplier, &mxn, &Side::BuyCurrency, &NOTIONAL, &DAYS_90, &1000, &None);
     let h = s.pool.get_hedge(&id).unwrap();
     assert_eq!(h.locked_rate, q.forward_rate);
     assert_eq!(h.margin, q.margin);
@@ -1191,6 +1251,7 @@ fn demo_figures() {
     assert_eq!(s.pool.settle(&id), 110_025_627_374);
 }
 
+#[cfg(feature = "demo")]
 #[test]
 fn set_time_factor_is_admin_only_and_public() {
     let s = setup();
@@ -1210,6 +1271,7 @@ fn set_time_factor_is_admin_only_and_public() {
     assert_eq!(s.pool.try_set_time_factor(&0), Err(Ok(contract_err(HedgeError::InvalidTimeFactor as u32))));
 }
 
+#[cfg(feature = "demo")]
 #[test]
 fn accelerated_maturity_is_at_least_one_second() {
     let s = setup();
@@ -1227,7 +1289,7 @@ fn open_refused_without_owner_signature() {
     fund_pool(&s);
     let mxn = Symbol::new(&s.env, "MXN");
 
-    let open_args = (&s.lucia, &s.supplier, &mxn, Side::BuyCurrency, NOTIONAL, MATURITY_IN, 1000u32);
+    let open_args = (&s.lucia, &s.supplier, &mxn, Side::BuyCurrency, NOTIONAL, MATURITY_IN, 1000u32, Option::<i128>::None);
     // signature attendue : `open_hedge`, et dedans le transfert de la marge Lucía → pool
     let transfer = MockAuthInvoke {
         contract: &s.usdc.address,
@@ -1247,14 +1309,14 @@ fn open_refused_without_owner_signature() {
     let by_supplier = s
         .pool
         .mock_auths(&[signed_by(&s.supplier)])
-        .try_open_hedge(&s.lucia, &s.supplier, &mxn, &Side::BuyCurrency, &NOTIONAL, &MATURITY_IN, &1000);
+        .try_open_hedge(&s.lucia, &s.supplier, &mxn, &Side::BuyCurrency, &NOTIONAL, &MATURITY_IN, &1000, &None);
     assert!(by_supplier.is_err());
 
     // personne ne signe : refusé
     let unsigned = s
         .pool
         .set_auths(&[])
-        .try_open_hedge(&s.lucia, &s.supplier, &mxn, &Side::BuyCurrency, &NOTIONAL, &MATURITY_IN, &1000);
+        .try_open_hedge(&s.lucia, &s.supplier, &mxn, &Side::BuyCurrency, &NOTIONAL, &MATURITY_IN, &1000, &None);
     assert!(unsigned.is_err());
 
     // rien n'a bougé
@@ -1265,7 +1327,7 @@ fn open_refused_without_owner_signature() {
     let id = s
         .pool
         .mock_auths(&[signed_by(&s.lucia)])
-        .open_hedge(&s.lucia, &s.supplier, &mxn, &Side::BuyCurrency, &NOTIONAL, &MATURITY_IN, &1000);
+        .open_hedge(&s.lucia, &s.supplier, &mxn, &Side::BuyCurrency, &NOTIONAL, &MATURITY_IN, &1000, &None);
     assert_eq!(s.pool.get_hedge(&id).unwrap().owner, s.lucia);
     assert_eq!(s.usdc.balance(&s.lucia), LUCIA_START - HEDGE_MARGIN);
 }
@@ -1278,7 +1340,7 @@ fn settle_needs_no_signature() {
 
     // règlement sans aucune signature : n'importe qui peut le déclencher
     let paid = s.pool.set_auths(&[]).settle(&id);
-    assert_eq!(paid, HEDGE_MARGIN + hedge::pnl(Side::BuyCurrency, NOTIONAL, HEDGE_LOCKED, SPOT_0, HEDGE_MARGIN));
+    assert_eq!(paid, HEDGE_MARGIN + hedge::pnl(&s.env, Side::BuyCurrency, NOTIONAL, HEDGE_LOCKED, SPOT_0, HEDGE_MARGIN));
     assert!(s.pool.get_hedge(&id).unwrap().settled);
 }
 
@@ -1309,7 +1371,7 @@ fn settle_stale_at_maturity_uses_first_price_after() {
     fund_pool(&s);
     let now = s.env.ledger().timestamp();
     // échéance à 2 000 s, aucun prix posé entre l'ouverture et l'échéance
-    let id = s.pool.open_hedge(&s.lucia, &s.supplier, &Symbol::new(&s.env, "MXN"), &Side::BuyCurrency, &NOTIONAL, &2_000, &1000);
+    let id = s.pool.open_hedge(&s.lucia, &s.supplier, &Symbol::new(&s.env, "MXN"), &Side::BuyCurrency, &NOTIONAL, &2_000, &1000, &None);
 
     // crash +12 % publié 10 s après l'échéance : pas encore lisible (recherche par pas de 300 s)
     price_at(&s, now + 2_010, 6_160_000_000_000);
@@ -1337,6 +1399,896 @@ fn settle_refused_while_no_rate_and_hedge_stays_open() {
     assert!(!s.pool.get_hedge(&id).unwrap().settled);
 }
 
+/// Un jour plus une seconde : Reflector (et le mock) ont oublié le cours d'échéance.
+const AFTER_HISTORY: u64 = 86_401;
+
+// ---- Régler et payer le fournisseur en une transaction (dossier Instaward, livrable 2) ----
+
+mod mock_soroswap {
+    //! Routeur de test, même interface que le routeur Soroswap (`soroswap/core`, contracts/router) pour les deux
+    //! fonctions utilisées : `router_get_amounts_in` et `swap_tokens_for_exact_tokens`. Comme Soroswap, `to` signe
+    //! et paie l'entrée, et reçoit la sortie. Prix fixe en USDC par unité de devise (14 décimales), arrondi en faveur
+    //! du routeur ; il détient lui-même la liquidité en devise.
+    use soroban_sdk::{contract, contracterror, contractimpl, contracttype, panic_with_error, token, vec, Address, Env, Vec};
+
+    #[contracterror]
+    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+    #[repr(u32)]
+    pub enum RouterError {
+        DeadlineExpired = 1,
+        ExcessiveInputAmount = 2,
+    }
+
+    #[contracttype]
+    enum Key {
+        Price,
+    }
+
+    #[contract]
+    pub struct MockRouter;
+
+    fn amount_in(env: &Env, amount_out: i128) -> i128 {
+        let price: i128 = env.storage().instance().get(&Key::Price).unwrap();
+        // arrondi vers le haut, comme un AMM
+        (amount_out * price + 99_999_999_999_999) / 100_000_000_000_000
+    }
+
+    #[contractimpl]
+    impl MockRouter {
+        pub fn set_price(env: Env, price: i128) {
+            env.storage().instance().set(&Key::Price, &price);
+        }
+
+        pub fn router_get_amounts_in(env: Env, amount_out: i128, _path: Vec<Address>) -> Vec<i128> {
+            vec![&env, amount_in(&env, amount_out), amount_out]
+        }
+
+        pub fn swap_tokens_for_exact_tokens(
+            env: Env,
+            amount_out: i128,
+            amount_in_max: i128,
+            path: Vec<Address>,
+            to: Address,
+            deadline: u64,
+        ) -> Vec<i128> {
+            to.require_auth();
+            if env.ledger().timestamp() >= deadline {
+                panic_with_error!(&env, RouterError::DeadlineExpired);
+            }
+            let needed = amount_in(&env, amount_out);
+            if needed > amount_in_max {
+                panic_with_error!(&env, RouterError::ExcessiveInputAmount);
+            }
+            let me = env.current_contract_address();
+            token::Client::new(&env, &path.get(0).unwrap()).transfer(&to, &me, &needed);
+            token::Client::new(&env, &path.get(1).unwrap()).transfer(&me, &to, &amount_out);
+            vec![&env, needed, amount_out]
+        }
+    }
+}
+
+/// Prix du routeur de test : 0,0560 USDC par peso (le peso a monté de ~1,8 % depuis le spot de départ).
+const SWAP_PRICE: i128 = 5_600_000_000_000;
+/// USDC à payer pour exactement 1 000 000 MXN à ce prix : 56 000 USDC.
+const SWAP_COST: i128 = 560_000_000_000;
+
+/// Date limite signée par la PME pour l'échange : 5 minutes après l'heure du ledger.
+fn pay_deadline(s: &Setup) -> u64 {
+    s.env.ledger().timestamp() + 300
+}
+
+/// Peso de test (SAC) + routeur de test financé en pesos, route MXN posée par l'admin. Retourne (peso, routeur).
+fn payment_route<'b>(s: &'b Setup) -> (TokenClient<'b>, Address) {
+    let mxn_token = s.env.register_stellar_asset_contract_v2(s.admin.clone()).address();
+    let router = s.env.register(mock_soroswap::MockRouter, ());
+    mock_soroswap::MockRouterClient::new(&s.env, &router).set_price(&SWAP_PRICE);
+    StellarAssetClient::new(&s.env, &mxn_token).mint(&router, &(10 * NOTIONAL));
+    s.pool.set_payment_route(&Symbol::new(&s.env, "MXN"), &mxn_token, &router);
+    (TokenClient::new(&s.env, &mxn_token), router)
+}
+
+#[test]
+fn settle_and_pay_pays_the_supplier_exactly_in_one_transaction() {
+    let s = setup();
+    let id = open_funded(&s, Side::BuyCurrency);
+    let (mxn_token, _) = payment_route(&s);
+    at_maturity(&s, SWAP_PRICE);
+
+    let spent = s.pool.settle_and_pay(&id, &SWAP_COST, &pay_deadline(&s));
+    // événement public (lu avant tout autre appel)
+    let events = s.env.events().all().filter_by_contract(&s.pool.address);
+    assert_eq!(
+        events.events().last(),
+        Some(
+            &hedge::SupplierPaid {
+                hedge_id: id,
+                owner: s.lucia.clone(),
+                supplier: s.supplier.clone(),
+                amount: NOTIONAL,
+                usdc_spent: SWAP_COST,
+            }
+            .to_xdr(&s.env, &s.pool.address)
+        )
+    );
+
+    // le fournisseur reçoit exactement le montant de la facture, en pesos
+    assert_eq!(mxn_token.balance(&s.supplier), NOTIONAL);
+    assert_eq!(spent, SWAP_COST);
+    // la couverture est réglée, son versement a servi au paiement : rien ne reste à réclamer
+    let h = s.pool.get_hedge(&id).unwrap();
+    assert!(h.settled);
+    assert_eq!(s.pool.claimable(&s.lucia), 0);
+    assert_eq!(s.pool.total_claimable(), 0);
+    // coût réel pour Lucía : sa marge + l'USDC de l'échange − le versement de la couverture
+    let payout = h.margin + hedge::pnl(&s.env, Side::BuyCurrency, NOTIONAL, h.locked_rate, SWAP_PRICE, h.margin);
+    assert_eq!(s.usdc.balance(&s.lucia), LUCIA_START - h.margin + payout - SWAP_COST);
+    // tout l'USDC du contrat appartient de nouveau aux LPs
+    assert_eq!(s.usdc.balance(&s.pool.address), s.pool.total_assets());
+}
+
+/// Ce que la PME paie au total est bien le prix bloqué, à l'écart près entre le fixing et le prix de l'échange.
+#[test]
+fn settle_and_pay_total_cost_is_the_locked_price() {
+    let s = setup();
+    let id = open_funded(&s, Side::BuyCurrency);
+    let (mxn_token, _) = payment_route(&s);
+    at_maturity(&s, SWAP_PRICE); // fixing = prix de l'échange : pas d'écart
+    s.pool.settle_and_pay(&id, &SWAP_COST, &pay_deadline(&s));
+    assert_eq!(mxn_token.balance(&s.supplier), NOTIONAL);
+    // coût total pour Lucía (USDC sorti de son wallet) ≈ prix bloqué, à une unité d'arrondi près
+    let total_cost = LUCIA_START - s.usdc.balance(&s.lucia);
+    assert!((total_cost - HEDGE_COST).abs() <= 1, "coût {total_cost} vs prix bloqué {HEDGE_COST}");
+}
+
+#[test]
+fn settle_and_pay_fails_rather_than_overpay() {
+    let s = setup();
+    let id = open_funded(&s, Side::BuyCurrency);
+    let (mxn_token, _) = payment_route(&s);
+    at_maturity(&s, SWAP_PRICE);
+
+    // maximum signé sous le prix de l'échange : refus, rien ne bouge, la couverture reste réglable
+    assert_eq!(s.pool.try_settle_and_pay(&id, &(SWAP_COST - 1), &pay_deadline(&s)), Err(Ok(contract_err(HedgeError::SwapTooExpensive as u32))));
+    assert_eq!(mxn_token.balance(&s.supplier), 0);
+    assert!(!s.pool.get_hedge(&id).unwrap().settled);
+    assert_eq!(s.usdc.balance(&s.lucia), LUCIA_START - HEDGE_MARGIN);
+    s.pool.settle(&id);
+}
+
+#[test]
+fn settle_and_pay_after_the_keeper_settled() {
+    let s = setup();
+    let id = open_funded(&s, Side::BuyCurrency);
+    let (mxn_token, _) = payment_route(&s);
+    at_maturity(&s, SWAP_PRICE);
+    // le robot règle d'abord : le versement est crédité, la PME paie ensuite son fournisseur avec
+    s.pool.settle(&id);
+    assert!(s.pool.claimable(&s.lucia) > 0);
+    s.pool.settle_and_pay(&id, &SWAP_COST, &pay_deadline(&s));
+    assert_eq!(mxn_token.balance(&s.supplier), NOTIONAL);
+    assert_eq!(s.pool.claimable(&s.lucia), 0);
+    // une seule fois par couverture
+    assert_eq!(s.pool.try_settle_and_pay(&id, &SWAP_COST, &pay_deadline(&s)), Err(Ok(contract_err(HedgeError::SupplierAlreadyPaid as u32))));
+}
+
+#[test]
+fn settle_and_pay_guards() {
+    let s = setup();
+    let id = open_funded(&s, Side::BuyCurrency);
+    let mxn = Symbol::new(&s.env, "MXN");
+
+    // pas de route de paiement pour la devise
+    at_maturity(&s, SWAP_PRICE);
+    assert_eq!(s.pool.try_settle_and_pay(&id, &SWAP_COST, &pay_deadline(&s)), Err(Ok(contract_err(HedgeError::NoPaymentRoute as u32))));
+    let (_, router) = payment_route(&s);
+    assert_eq!(s.pool.payment_route(&mxn), Some(hedge::PaymentRoute { token: s.pool.payment_route(&mxn).unwrap().token, router }));
+
+    // couverture inconnue
+    assert_eq!(s.pool.try_settle_and_pay(&99, &SWAP_COST, &pay_deadline(&s)), Err(Ok(contract_err(HedgeError::UnknownHedge as u32))));
+
+    // exportateur : il reçoit la devise, il n'a pas de fournisseur à payer
+    set_spot(&s, SPOT_0);
+    let sell = s.pool.open_hedge(&s.lucia, &s.supplier, &mxn, &Side::SellCurrency, &NOTIONAL, &MATURITY_IN, &1000, &None);
+    at_maturity(&s, SWAP_PRICE);
+    assert_eq!(s.pool.try_settle_and_pay(&sell, &SWAP_COST, &pay_deadline(&s)), Err(Ok(contract_err(HedgeError::NotAPayment as u32))));
+    let _ = id;
+}
+
+#[test]
+fn settle_and_pay_needs_the_owner_signature() {
+    let s = setup();
+    let id = open_funded(&s, Side::BuyCurrency);
+    payment_route(&s);
+    at_maturity(&s, SWAP_PRICE);
+    s.pool.settle_and_pay(&id, &SWAP_COST, &pay_deadline(&s));
+    // seule Lucía signe ; sa signature couvre l'échange et le paiement du fournisseur
+    let auths = s.env.auths();
+    assert_eq!(auths.len(), 1);
+    assert_eq!(auths[0].0, s.lucia);
+}
+
+/// Relecture de Hugo : la PME signe l'appel au routeur avec ses arguments exacts. La date limite doit donc être
+/// un argument qu'elle signe, pas une valeur calculée par le contrat à l'exécution (qui ne correspondrait jamais à
+/// celle de la simulation). On vérifie que le routeur reçoit exactement la date signée.
+#[test]
+fn settle_and_pay_passes_the_signed_deadline_to_the_router() {
+    use soroban_sdk::testutils::AuthorizedFunction;
+    let s = setup();
+    let id = open_funded(&s, Side::BuyCurrency);
+    let (_, router) = payment_route(&s);
+    at_maturity(&s, SWAP_PRICE);
+    let deadline = s.env.ledger().timestamp() + 1_234;
+    s.pool.settle_and_pay(&id, &SWAP_COST, &deadline);
+
+    // l'arbre signé par Lucía contient l'échange, avec exactement sa date limite et son maximum
+    let auths = s.env.auths();
+    let swap = auths[0]
+        .1
+        .sub_invocations
+        .iter()
+        .find_map(|i| match &i.function {
+            AuthorizedFunction::Contract((c, f, args)) if *c == router && *f == Symbol::new(&s.env, "swap_tokens_for_exact_tokens") => Some(args.clone()),
+            _ => None,
+        })
+        .expect("échange signé par Lucía");
+    let signed_max: i128 = soroban_sdk::FromVal::from_val(&s.env, &swap.get(1).unwrap());
+    let signed_deadline: u64 = soroban_sdk::FromVal::from_val(&s.env, &swap.get(4).unwrap());
+    assert_eq!((signed_max, signed_deadline), (SWAP_COST, deadline));
+}
+
+#[test]
+fn settle_and_pay_refused_after_the_deadline() {
+    let s = setup();
+    let id = open_funded(&s, Side::BuyCurrency);
+    let (mxn_token, _) = payment_route(&s);
+    at_maturity(&s, SWAP_PRICE);
+    let now = s.env.ledger().timestamp();
+    assert_eq!(s.pool.try_settle_and_pay(&id, &SWAP_COST, &now), Err(Ok(contract_err(HedgeError::DeadlinePassed as u32))));
+    // rien n'est fait
+    assert_eq!(mxn_token.balance(&s.supplier), 0);
+    assert!(!s.pool.get_hedge(&id).unwrap().settled);
+}
+
+#[test]
+fn payment_route_is_admin_only() {
+    let s = setup();
+    payment_route(&s);
+    let auths = s.env.auths();
+    assert_eq!(auths.last().unwrap().0, s.admin);
+}
+
+// ---- Tests aléatoires du règlement (dossier Instaward, livrable 1) ----
+//
+// Des scénarios tirés au hasard (graine fixe, donc rejouables) enchaînent ouvertures dans les deux sens, mouvements du
+// peso, passage du temps, règlements, clôtures anticipées, voie de secours et réclamations. Après chaque étape on
+// vérifie les propriétés qui doivent tenir quoi qu'il arrive :
+// 1. conservation de l'USDC : solde du contrat = capital des LPs + marges des couvertures ouvertes + soldes réclamables ;
+// 2. jeu à somme nulle : ce que le pool a gagné ou perdu = − Σ P&L des PME sur les couvertures closes ;
+// 3. bornes : chaque versement est entre 0 et 2 × marge, et la réserve du pool = Σ marges ouvertes ;
+// 4. l'argent de la PME : son wallet + son solde réclamable + ses marges ouvertes = départ + Σ P&L.
+
+extern crate std;
+use std::{format, vec::Vec};
+
+/// Générateur pseudo-aléatoire minimal (xorshift64*), sans dépendance : même graine, même scénario.
+struct Rng(u64);
+
+impl Rng {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 >> 12;
+        self.0 ^= self.0 << 25;
+        self.0 ^= self.0 >> 27;
+        self.0.wrapping_mul(0x2545_F491_4F6C_DD1D)
+    }
+    /// Entier dans [lo, hi].
+    fn range(&mut self, lo: i128, hi: i128) -> i128 {
+        lo + (self.next() % ((hi - lo + 1) as u64)) as i128
+    }
+}
+
+/// Couverture ouverte suivie par le test.
+struct Open {
+    id: u64,
+    margin: i128,
+    maturity: u64,
+}
+
+/// État attendu, tenu à côté du contrat.
+#[derive(Default)]
+struct Books {
+    /// Σ P&L des PME sur les couvertures closes (versement − marge).
+    user_pnl: i128,
+    closed: u32,
+    fallbacks: u32,
+}
+
+fn check_invariants(s: &Setup, open: &[Open], books: &Books, step: &str) {
+    let margins: i128 = open.iter().map(|h| h.margin).sum();
+    let total = s.pool.total_assets();
+    let claimable = s.pool.total_claimable();
+    // 1. conservation de l'USDC
+    assert_eq!(s.usdc.balance(&s.pool.address), total + margins + claimable, "conservation ({step})");
+    // 2. somme nulle entre le pool et les PME
+    assert_eq!(total - LP_CAPITAL, -books.user_pnl, "somme nulle ({step})");
+    // 3. réserve = marges ouvertes
+    let e = s.pool.exposure(&Symbol::new(&s.env, "MXN"));
+    assert_eq!(e.buy_margin + e.sell_margin, margins, "réserve ({step})");
+    // 4. l'argent de Lucía
+    assert_eq!(
+        s.usdc.balance(&s.lucia) + s.pool.claimable(&s.lucia) + margins,
+        LUCIA_START + books.user_pnl,
+        "argent de la PME ({step})"
+    );
+}
+
+/// Clôt une couverture échue comme le ferait le robot : `settle` si un cours existe, sinon `settle_fallback` si
+/// l'absence de cours est constatée. `None` si ni l'un ni l'autre n'est encore possible (cours en attente).
+fn close_matured(s: &Setup, id: u64, margin: i128, books: &mut Books) -> Option<i128> {
+    if let Ok(Ok(payout)) = s.pool.try_settle(&id) {
+        return Some(payout);
+    }
+    match s.pool.try_settle_fallback(&id) {
+        Ok(Ok(payout)) => {
+            assert_eq!(payout, margin, "secours : marge rendue telle quelle");
+            books.fallbacks += 1;
+            Some(payout)
+        }
+        // un cours existe ou peut encore arriver : le secours refuse, c'est voulu
+        Err(Ok(e)) if e == contract_err(HedgeError::FixingAvailable as u32) => None,
+        other => panic!("clôture inattendue : {:?}", other),
+    }
+}
+
+/// Ferme `h` par `settle`, `close_early` ou `settle_fallback` et vérifie les bornes du versement.
+fn record_close(open: &mut Vec<Open>, idx: usize, payout: i128, books: &mut Books) {
+    let h = open.swap_remove(idx);
+    assert!((0..=2 * h.margin).contains(&payout), "versement {payout} hors de [0, 2 × {}]", h.margin);
+    books.user_pnl += payout - h.margin;
+    books.closed += 1;
+}
+
+fn run_scenario(seed: u64) -> Books {
+    let s = setup();
+    fund_pool(&s);
+    s.pool.set_rate(&Symbol::new(&s.env, "USD"), &400);
+    let mxn = Symbol::new(&s.env, "MXN");
+    let mut rng = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
+    let mut open: Vec<Open> = Vec::new();
+    let mut books = Books::default();
+    let mut spot = SPOT_0;
+    let mut now = s.env.ledger().timestamp();
+
+    for step in 0..40 {
+        // le temps passe (au plus 5 min, sous l'âge maximal du prix) et le peso bouge de ±3 % au plus
+        now += rng.range(1, 300) as u64;
+        spot = (spot * rng.range(9_700, 10_300) / 10_000).clamp(SPOT_0 / 2, SPOT_0 * 2);
+        price_at(&s, now, spot);
+
+        match rng.range(0, 9) {
+            // ouvrir, dans un sens ou l'autre (un refus de capacité ou de limite est normal)
+            0..=3 => {
+                let side = if rng.range(0, 1) == 0 { Side::BuyCurrency } else { Side::SellCurrency };
+                let notional = rng.range(1, 2_000_000) * 10_000_000;
+                let duration = rng.range(60, 1_200) as u64;
+                let cap = rng.range(500, 2_000) as u32;
+                if let Ok(Ok(id)) = s.pool.try_open_hedge(&s.lucia, &s.supplier, &mxn, &side, &notional, &duration, &cap, &None) {
+                    let h = s.pool.get_hedge(&id).unwrap();
+                    open.push(Open { id, margin: h.margin, maturity: h.maturity });
+                }
+            }
+            // régler tout ce qui est échu
+            4..=5 => {
+                let mut i = 0;
+                while i < open.len() {
+                    if open[i].maturity <= now {
+                        if let Some(payout) = close_matured(&s, open[i].id, open[i].margin, &mut books) {
+                            record_close(&mut open, i, payout, &mut books);
+                            continue;
+                        }
+                    }
+                    i += 1;
+                }
+            }
+            // clôture anticipée d'une couverture pas encore échue
+            6 => {
+                if let Some(i) = open.iter().position(|h| h.maturity > now) {
+                    let payout = s.pool.close_early(&open[i].id);
+                    record_close(&mut open, i, payout, &mut books);
+                }
+            }
+            // la PME réclame (ou le robot pousse) son solde
+            7 => {
+                if rng.range(0, 1) == 0 { s.pool.claim(&s.lucia) } else { s.pool.claim_for(&s.lucia) };
+                assert_eq!(s.pool.claimable(&s.lucia), 0);
+            }
+            // personne ne règle pendant plus d'un jour : l'oracle oublie, voie de secours à P&L nul
+            8 => {
+                if let Some(i) = open.iter().position(|h| h.maturity <= now) {
+                    // au-delà de l'heure de grâce plus 24 h : plus aucun cours de la fenêtre n'est lisible
+                    now = now.max(open[i].maturity + 3_600) + 86_401;
+                    s.env.ledger().set_timestamp(now);
+                    let (id, margin) = (open[i].id, open[i].margin);
+                    let fallbacks = books.fallbacks;
+                    let payout = close_matured(&s, id, margin, &mut books).expect("plus aucun cours : secours possible");
+                    assert_eq!(books.fallbacks, fallbacks + 1, "c'est bien la voie de secours qui a servi");
+                    record_close(&mut open, i, payout, &mut books);
+                    // prix frais pour la suite
+                    price_at(&s, now, spot);
+                }
+            }
+            _ => {}
+        }
+        check_invariants(&s, &open, &books, &format!("graine {seed}, étape {step}"));
+    }
+
+    // fin : tout ce qui reste est réglé (ou clos en secours), tout est réclamé, le pool retrouve sa capacité
+    // le robot repasse jusqu'à ce que tout soit clos : règlement si un cours existe, secours sinon
+    for _ in 0..5 {
+        now += 1_200;
+        price_at(&s, now, spot);
+        now += 300; // pas de lecture de 300 s du pricing : le cours devient lisible
+        s.env.ledger().set_timestamp(now);
+        let mut i = 0;
+        while i < open.len() {
+            if let Some(payout) = close_matured(&s, open[i].id, open[i].margin, &mut books) {
+                record_close(&mut open, i, payout, &mut books);
+            } else {
+                i += 1;
+            }
+        }
+        if open.is_empty() {
+            break;
+        }
+        now += 86_400 + 3_600; // ce qui reste en attente finit en secours
+        s.env.ledger().set_timestamp(now);
+    }
+    assert!(open.is_empty(), "graine {seed} : couvertures jamais closes");
+    s.pool.claim(&s.lucia);
+    check_invariants(&s, &open, &books, &format!("graine {seed}, fin"));
+    assert_eq!(s.pool.total_claimable(), 0);
+    assert_eq!(s.usdc.balance(&s.pool.address), s.pool.total_assets());
+    books
+}
+
+/// 40 scénarios par défaut (~20 s) ; `POOL_SCENARIOS=1000 cargo test -p pool random_scenarios` pour une passe longue.
+#[test]
+fn random_scenarios_keep_settlement_invariants() {
+    let n: u64 = std::env::var("POOL_SCENARIOS").ok().and_then(|v| v.parse().ok()).unwrap_or(40);
+    let (mut closed, mut fallbacks) = (0u64, 0u64);
+    for seed in 1..=n {
+        let b = run_scenario(seed);
+        closed += b.closed as u64;
+        fallbacks += b.fallbacks as u64;
+    }
+    // les scénarios exercent vraiment chaque voie de sortie
+    assert!(closed > 7 * n, "{closed} couvertures closes seulement");
+    assert!(fallbacks > n / 4, "{fallbacks} passages par la voie de secours seulement");
+}
+
+#[test]
+fn pnl_is_bounded_and_rounds_for_the_pool() {
+    let env = Env::default();
+    let mut rng = Rng(0xDEAD_BEEF);
+    for _ in 0..20_000 {
+        let side = if rng.range(0, 1) == 0 { Side::BuyCurrency } else { Side::SellCurrency };
+        let notional = rng.range(1, 100_000_000) * 10_000_000;
+        let locked = rng.range(1_000_000_000, 100_000_000_000_000);
+        let spot = rng.range(1_000_000_000, 100_000_000_000_000);
+        let margin = rng.range(1, 1_000_000_000_000);
+        let pnl = hedge::pnl(&env, side, notional, locked, spot, margin);
+        // bornée à ±marge
+        assert!((-margin..=margin).contains(&pnl));
+        // jamais plus que le P&L exact : l'arrondi va au pool
+        let diff = match side {
+            Side::BuyCurrency => spot - locked,
+            Side::SellCurrency => locked - spot,
+        };
+        let exact_scaled = notional * diff; // P&L exact × 10^14
+        assert!(pnl * 100_000_000_000_000 <= exact_scaled.max(-margin * 100_000_000_000_000));
+        // même sens que le marché (sauf arrondi d'une unité contre la PME)
+        if diff > 0 {
+            assert!(pnl >= 0);
+        }
+        if diff < 0 {
+            assert!(pnl < 0);
+        }
+    }
+}
+
+// ---- Pilote côté couvertures (B9) ----
+
+/// Une PME hors liste blanche, avec de quoi payer une marge.
+fn outsider(s: &Setup) -> Address {
+    let who = Address::generate(&s.env);
+    StellarAssetClient::new(&s.env, &s.usdc.address).mint(&who, &LUCIA_START);
+    who
+}
+
+fn open_as(s: &Setup, who: &Address) -> Result<u64, soroban_sdk::Error> {
+    match s.pool.try_open_hedge(who, &s.supplier, &Symbol::new(&s.env, "MXN"), &Side::BuyCurrency, &NOTIONAL, &MATURITY_IN, &1000, &None) {
+        Ok(Ok(id)) => Ok(id),
+        Err(Ok(e)) => Err(e),
+        other => panic!("résultat inattendu : {:?}", other),
+    }
+}
+
+#[test]
+fn sme_allowlist_is_on_by_default() {
+    let s = setup();
+    fund_pool(&s);
+    let bob = outsider(&s);
+    assert!(s.pool.pilot_limits().sme_allowlist_on);
+    assert!(!s.pool.is_allowed(&Role::Sme, &bob));
+    assert_eq!(open_as(&s, &bob), Err(contract_err(HedgeError::SmeNotAllowed as u32)));
+
+    // l'admin l'ajoute : il peut ouvrir
+    s.pool.set_allowed(&Role::Sme, &bob, &true);
+    assert_eq!(s.env.auths()[0].0, s.admin);
+    let events = s.env.events().all().filter_by_contract(&s.pool.address);
+    assert_eq!(
+        events.events().last(),
+        Some(&hedge::SmeAllowedSet { sme: bob.clone(), allowed: true }.to_xdr(&s.env, &s.pool.address))
+    );
+    assert!(s.pool.is_allowed(&Role::Sme, &bob));
+    assert!(open_as(&s, &bob).is_ok());
+}
+
+#[test]
+fn sme_allowlist_can_be_turned_off() {
+    let s = setup();
+    fund_pool(&s);
+    let bob = outsider(&s);
+    s.pool.set_allowlist_enabled(&Role::Sme, &false);
+    assert!(!s.pool.pilot_limits().sme_allowlist_on);
+    assert!(s.pool.is_allowed(&Role::Sme, &bob));
+    assert!(open_as(&s, &bob).is_ok());
+    // l'interrupteur des PME ne touche pas à celui des LP
+    assert!(s.pool.pilot_limits().lp_allowlist_on);
+}
+
+/// Une PME retirée de la liste ne peut plus ouvrir, mais ses couvertures ouvertes se règlent normalement.
+#[test]
+fn removed_sme_keeps_its_open_hedges() {
+    let s = setup();
+    let id = open_funded(&s, Side::BuyCurrency);
+    s.pool.set_allowed(&Role::Sme, &s.lucia, &false);
+    assert_eq!(open_as(&s, &s.lucia), Err(contract_err(HedgeError::SmeNotAllowed as u32)));
+    at_maturity(&s, 5_940_000_000_000);
+    let paid = s.pool.settle(&id);
+    assert_settled(&s, id, paid, 96_525_028_394, -41_250_031_549);
+}
+
+#[test]
+fn hedge_limits_cap_size_duration_and_open_count() {
+    let s = setup();
+    fund_pool(&s);
+    let mxn = Symbol::new(&s.env, "MXN");
+    let open = |notional: i128, duration: u64| {
+        s.pool.try_open_hedge(&s.lucia, &s.supplier, &mxn, &Side::BuyCurrency, &notional, &duration, &1000, &None)
+    };
+
+    // montant : 55 274,99 USDC maximum par couverture, juste sous la facture de démo
+    s.pool.set_hedge_limits(&Some(HEDGE_COST - 1), &None, &None);
+    assert_eq!(open(NOTIONAL, MATURITY_IN), Err(Ok(contract_err(HedgeError::HedgeTooLarge as u32))));
+    s.pool.set_hedge_limits(&Some(HEDGE_COST), &None, &None);
+    let first = open(NOTIONAL, MATURITY_IN).unwrap().unwrap();
+
+    // durée : 60 s maximum
+    s.pool.set_hedge_limits(&None, &Some(MATURITY_IN), &None);
+    assert_eq!(open(NOTIONAL, MATURITY_IN + 1), Err(Ok(contract_err(HedgeError::HedgeTooLong as u32))));
+
+    // nombre : une seule couverture ouverte par PME ; une fois réglée, la place se libère
+    s.pool.set_hedge_limits(&None, &None, &Some(1));
+    assert_eq!(open(NOTIONAL, MATURITY_IN), Err(Ok(contract_err(HedgeError::TooManyOpenHedges as u32))));
+    at_maturity(&s, SPOT_0);
+    s.pool.settle(&first);
+    set_spot(&s, SPOT_0);
+    assert!(open(NOTIONAL, MATURITY_IN).is_ok());
+
+    let limits = s.pool.pilot_limits();
+    assert_eq!((limits.max_hedge_notional, limits.max_duration_secs, limits.max_open_per_sme), (None, None, Some(1)));
+}
+
+#[test]
+fn open_count_is_released_by_every_way_out() {
+    let s = setup();
+    fund_pool(&s);
+    let now = s.env.ledger().timestamp();
+    s.pool.set_hedge_limits(&None, &None, &Some(1));
+    // clôture anticipée
+    let id = open_as(&s, &s.lucia).unwrap();
+    s.env.ledger().set_timestamp(now + 10);
+    set_spot(&s, SPOT_0);
+    s.pool.close_early(&id);
+    // voie de secours
+    let id = open_as(&s, &s.lucia).unwrap();
+    s.env.ledger().set_timestamp(now + 10 + MATURITY_IN + AFTER_HISTORY);
+    s.pool.settle_fallback(&id);
+    set_spot(&s, SPOT_0);
+    assert!(open_as(&s, &s.lucia).is_ok());
+}
+
+#[test]
+fn hedge_limits_are_admin_only_public_and_checked() {
+    let s = setup();
+    s.pool.set_hedge_limits(&Some(HEDGE_COST), &Some(120 * 86_400), &Some(3));
+    assert_eq!(s.env.auths()[0].0, s.admin);
+    let events = s.env.events().all().filter_by_contract(&s.pool.address);
+    assert_eq!(
+        events.events().last(),
+        Some(
+            &hedge::HedgeLimitsSet { max_hedge_notional: Some(HEDGE_COST), max_duration_secs: Some(120 * 86_400), max_open_per_sme: Some(3) }
+                .to_xdr(&s.env, &s.pool.address)
+        )
+    );
+    let invalid = Err(Ok(contract_err(HedgeError::InvalidLimit as u32)));
+    assert_eq!(s.pool.try_set_hedge_limits(&Some(0), &None, &None), invalid);
+    assert_eq!(s.pool.try_set_hedge_limits(&None, &Some(0), &None), invalid);
+    assert_eq!(s.pool.try_set_hedge_limits(&None, &None, &Some(0)), invalid);
+}
+
+// ---- Taux limite à l'ouverture (B8) ----
+
+#[test]
+fn open_refused_when_rate_is_worse_than_the_limit() {
+    let s = setup();
+    fund_pool(&s);
+    let mxn = Symbol::new(&s.env, "MXN");
+
+    // importateur : refusé si le taux bloqué dépasse son maximum, accepté pile au maximum
+    let worse = s.pool.try_open_hedge(&s.lucia, &s.supplier, &mxn, &Side::BuyCurrency, &NOTIONAL, &MATURITY_IN, &1000, &Some(HEDGE_LOCKED - 1));
+    assert_eq!(worse, Err(Ok(contract_err(HedgeError::RateWorseThanLimit as u32))));
+    // rien n'a bougé : pas de marge prise, pas de couverture
+    assert_eq!(s.usdc.balance(&s.lucia), LUCIA_START);
+    let id = s.pool.open_hedge(&s.lucia, &s.supplier, &mxn, &Side::BuyCurrency, &NOTIONAL, &MATURITY_IN, &1000, &Some(HEDGE_LOCKED));
+    assert_eq!(s.pool.get_hedge(&id).unwrap().locked_rate, HEDGE_LOCKED);
+
+    // exportateur : refusé si le taux bloqué passe sous son minimum, accepté pile au minimum
+    let sell_rate = s.pool.quote(&mxn, &Side::SellCurrency, &NOTIONAL, &MATURITY_IN, &1000).forward_rate;
+    let worse = s.pool.try_open_hedge(&s.lucia, &s.supplier, &mxn, &Side::SellCurrency, &NOTIONAL, &MATURITY_IN, &1000, &Some(sell_rate + 1));
+    assert_eq!(worse, Err(Ok(contract_err(HedgeError::RateWorseThanLimit as u32))));
+    let id = s.pool.open_hedge(&s.lucia, &s.supplier, &mxn, &Side::SellCurrency, &NOTIONAL, &MATURITY_IN, &1000, &Some(sell_rate));
+    assert_eq!(s.pool.get_hedge(&id).unwrap().locked_rate, sell_rate);
+}
+
+/// Le cours bouge entre le devis affiché et la signature : le taux limite protège la PME.
+#[test]
+fn rate_limit_protects_against_a_move_after_the_quote() {
+    let s = setup();
+    fund_pool(&s);
+    let mxn = Symbol::new(&s.env, "MXN");
+    let quoted = s.pool.quote(&mxn, &Side::BuyCurrency, &NOTIONAL, &MATURITY_IN, &1000).forward_rate;
+    set_spot(&s, 5_610_000_000_000); // +2 % avant que la transaction passe
+    assert_eq!(
+        s.pool.try_open_hedge(&s.lucia, &s.supplier, &mxn, &Side::BuyCurrency, &NOTIONAL, &MATURITY_IN, &1000, &Some(quoted)),
+        Err(Ok(contract_err(HedgeError::RateWorseThanLimit as u32)))
+    );
+}
+
+// ---- Solde réclamable (B4) ----
+
+/// Retire (ou rend) à Lucía le droit de recevoir de l'USDC : même effet qu'une ligne de confiance supprimée.
+fn set_lucia_can_receive(s: &Setup, ok: bool) {
+    StellarAssetClient::new(&s.env, &s.usdc.address).set_authorized(&s.lucia, &ok);
+}
+
+#[test]
+fn claim_requires_owner_signature_and_emits_event() {
+    let s = setup();
+    let id = open_funded(&s, Side::BuyCurrency);
+    at_maturity(&s, 5_940_000_000_000);
+    let payout = s.pool.settle(&id);
+
+    assert_eq!(s.pool.claim(&s.lucia), payout);
+    let auths = s.env.auths();
+    assert_eq!(auths.len(), 1);
+    assert_eq!(auths[0].0, s.lucia);
+    let expected = hedge::Claimed { owner: s.lucia.clone(), amount: payout };
+    let events = s.env.events().all().filter_by_contract(&s.pool.address);
+    assert_eq!(events.events().last(), Some(&expected.to_xdr(&s.env, &s.pool.address)));
+}
+
+#[test]
+fn claim_for_pays_the_owner_without_signature() {
+    let s = setup();
+    let id = open_funded(&s, Side::BuyCurrency);
+    at_maturity(&s, 5_940_000_000_000);
+    let payout = s.pool.settle(&id);
+
+    // le robot pousse le versement : sans signature, et l'argent va toujours au propriétaire
+    assert_eq!(s.pool.set_auths(&[]).claim_for(&s.lucia), payout);
+    assert_eq!(s.usdc.balance(&s.lucia), LUCIA_START - HEDGE_MARGIN + payout);
+    assert_eq!(s.pool.claimable(&s.lucia), 0);
+}
+
+#[test]
+fn claim_with_nothing_due_pays_nothing() {
+    let s = setup();
+    assert_eq!(s.pool.claim(&s.lucia), 0);
+    assert_eq!(s.pool.claim_for(&s.lucia), 0);
+    assert_eq!(s.usdc.balance(&s.lucia), LUCIA_START);
+}
+
+#[test]
+fn claimable_adds_up_across_hedges() {
+    let s = setup();
+    let id = open_funded(&s, Side::BuyCurrency);
+    let id2 = s.pool.open_hedge(&s.lucia, &s.supplier, &Symbol::new(&s.env, "MXN"), &Side::BuyCurrency, &NOTIONAL, &MATURITY_IN, &1000, &None);
+    at_maturity(&s, 5_940_000_000_000);
+    let total = s.pool.settle(&id) + s.pool.settle(&id2);
+    assert_eq!(s.pool.claimable(&s.lucia), total);
+    assert_eq!(s.pool.total_claimable(), total);
+    assert_eq!(s.pool.claim(&s.lucia), total);
+}
+
+/// Scénario de la relecture de Hugo : une PME perdante supprime sa ligne USDC pour faire échouer le règlement,
+/// attend que l'oracle oublie le cours, puis passe par la voie de secours pour récupérer toute sa marge.
+/// Avec le solde réclamable, le règlement ne dépend plus de son compte : il passe, et le secours est fermé.
+#[test]
+fn owner_who_cannot_receive_cannot_block_settlement() {
+    let s = setup();
+    let id = open_funded(&s, Side::BuyCurrency);
+    at_maturity(&s, 5_060_000_000_000); // −8 % : Lucía perd une partie de sa marge
+    set_lucia_can_receive(&s, false);
+
+    let payout = s.pool.settle(&id);
+    assert!(payout > 0 && payout < HEDGE_MARGIN);
+    assert!(s.pool.get_hedge(&id).unwrap().settled);
+    // plus de secours possible : la perte est actée
+    s.env.ledger().set_timestamp(s.env.ledger().timestamp() + AFTER_HISTORY);
+    assert_eq!(s.pool.try_settle_fallback(&id), Err(Ok(contract_err(HedgeError::AlreadySettled as u32))));
+
+    // elle ne peut pas réclamer tant qu'elle ne peut pas recevoir ; son solde l'attend
+    assert!(s.pool.try_claim(&s.lucia).is_err());
+    assert_eq!(s.pool.claimable(&s.lucia), payout);
+    set_lucia_can_receive(&s, true);
+    assert_eq!(s.pool.claim(&s.lucia), payout);
+}
+
+#[test]
+fn claim_works_while_paused() {
+    let s = setup();
+    let id = open_funded(&s, Side::BuyCurrency);
+    at_maturity(&s, 5_940_000_000_000);
+    let payout = s.pool.settle(&id);
+    s.pool.pause(&s.admin);
+    assert_eq!(s.pool.claim(&s.lucia), payout);
+}
+
+// ---- Cours figé et règlement de secours ----
+
+#[test]
+fn record_fixing_locks_rate_for_a_later_settle() {
+    let s = setup();
+    let now = s.env.ledger().timestamp();
+    let id = open_funded(&s, Side::BuyCurrency);
+
+    // crash +12 % juste avant l'échéance ; le robot fige le cours une minute après, sans signature
+    price_at(&s, now + MATURITY_IN - 10, 6_160_000_000_000);
+    s.env.ledger().set_timestamp(now + MATURITY_IN + 60);
+    assert_eq!(s.pool.set_auths(&[]).record_fixing(&id), 6_160_000_000_000);
+    // appel répétable : même cours, rien ne change
+    assert_eq!(s.pool.record_fixing(&id), 6_160_000_000_000);
+    assert!(!s.pool.get_hedge(&id).unwrap().settled);
+
+    // règlement plus de 24 h après : l'oracle a oublié, le cours figé sert
+    s.env.ledger().set_timestamp(now + MATURITY_IN + AFTER_HISTORY);
+    let paid = s.pool.settle(&id);
+    assert_settled(&s, id, paid, 2 * HEDGE_MARGIN, -HEDGE_MARGIN);
+}
+
+#[test]
+fn record_fixing_guards() {
+    let s = setup();
+    let now = s.env.ledger().timestamp();
+    let id = open_funded(&s, Side::BuyCurrency);
+
+    assert_eq!(s.pool.try_record_fixing(&99), Err(Ok(contract_err(HedgeError::UnknownHedge as u32))));
+    assert_eq!(s.pool.try_record_fixing(&id), Err(Ok(contract_err(HedgeError::NotMatured as u32))));
+
+    // échéance passée mais pas encore de cours utilisable
+    s.env.ledger().set_timestamp(now + MATURITY_IN + AFTER_HISTORY);
+    assert_eq!(s.pool.try_record_fixing(&id), Err(Ok(contract_err(PricingError::NoFixing as u32))));
+
+    // couverture réglée : plus rien à figer (cours frais pour pouvoir ouvrir)
+    set_spot(&s, SPOT_0);
+    let id2 = s.pool.open_hedge(&s.lucia, &s.supplier, &Symbol::new(&s.env, "MXN"), &Side::BuyCurrency, &NOTIONAL, &MATURITY_IN, &1000, &None);
+    at_maturity(&s, SPOT_0);
+    s.pool.settle(&id2);
+    assert_eq!(s.pool.try_record_fixing(&id2), Err(Ok(contract_err(HedgeError::AlreadySettled as u32))));
+}
+
+#[test]
+fn settle_fallback_closes_without_gain_or_loss() {
+    let s = setup();
+    let now = s.env.ledger().timestamp();
+    let id = open_funded(&s, Side::BuyCurrency);
+
+    // personne n'a figé ni réglé pendant 24 h : plus aucun cours, l'admin clôt en secours
+    s.env.ledger().set_timestamp(now + MATURITY_IN + AFTER_HISTORY);
+    let paid = s.pool.settle_fallback(&id);
+    // événement public (lu avant tout autre appel : les tests ne gardent que ceux du dernier appel)
+    let expected = hedge::HedgeFallbackSettled { hedge_id: id, owner: s.lucia.clone(), payout: HEDGE_MARGIN };
+    let events = s.env.events().all().filter_by_contract(&s.pool.address);
+    assert_eq!(events.events().last(), Some(&expected.to_xdr(&s.env, &s.pool.address)));
+
+    // marge rendue telle quelle, P&L nul, capital libéré, exposition à zéro
+    assert_settled(&s, id, paid, HEDGE_MARGIN, 0);
+    assert_eq!(s.pool.exposure(&Symbol::new(&s.env, "MXN")).buy_margin, 0);
+
+    // une seule fois
+    assert_eq!(s.pool.try_settle_fallback(&id), Err(Ok(contract_err(HedgeError::AlreadySettled as u32))));
+    assert_eq!(s.pool.try_settle(&id), Err(Ok(contract_err(HedgeError::AlreadySettled as u32))));
+}
+
+/// Relecture de Hugo : ouverte à tous, la voie de secours serait une option gratuite pour le perdant (il attend
+/// que personne ne fige le cours pendant 24 h). Elle est réservée à l'admin.
+#[test]
+fn settle_fallback_is_admin_only() {
+    let s = setup();
+    let now = s.env.ledger().timestamp();
+    let id = open_funded(&s, Side::BuyCurrency);
+    s.env.ledger().set_timestamp(now + MATURITY_IN + AFTER_HISTORY);
+
+    // sans signature (ou signée par la PME) : refusé, la couverture reste ouverte
+    assert!(s.pool.set_auths(&[]).try_settle_fallback(&id).is_err());
+    assert!(!s.pool.get_hedge(&id).unwrap().settled);
+
+    // signée par l'admin : acceptée
+    s.pool.mock_all_auths().settle_fallback(&id);
+    let auths = s.env.auths();
+    assert_eq!(auths.len(), 1);
+    assert_eq!(auths[0].0, s.admin);
+}
+
+#[test]
+fn settle_fallback_refused_while_a_rate_exists_or_may_come() {
+    let s = setup();
+    let now = s.env.ledger().timestamp();
+    let id = open_funded(&s, Side::BuyCurrency);
+
+    assert_eq!(s.pool.try_settle_fallback(&99), Err(Ok(contract_err(HedgeError::UnknownHedge as u32))));
+    assert_eq!(s.pool.try_settle_fallback(&id), Err(Ok(contract_err(HedgeError::NotMatured as u32))));
+
+    // cours disponible à l'échéance : il faut régler normalement
+    at_maturity(&s, 6_160_000_000_000);
+    assert_eq!(s.pool.try_settle_fallback(&id), Err(Ok(contract_err(HedgeError::FixingAvailable as u32))));
+
+    // cours figé puis oublié par l'oracle : le cours figé compte toujours, pas de secours
+    s.pool.record_fixing(&id);
+    s.env.ledger().set_timestamp(now + MATURITY_IN + AFTER_HISTORY);
+    assert_eq!(s.pool.try_settle_fallback(&id), Err(Ok(contract_err(HedgeError::FixingAvailable as u32))));
+    assert!(!s.pool.get_hedge(&id).unwrap().settled);
+}
+
+#[test]
+fn settle_fallback_refused_during_grace_window() {
+    let s = setup();
+    fund_pool(&s);
+    let now = s.env.ledger().timestamp();
+    // échéance à 2 000 s, aucun cours posé depuis l'ouverture : un cours peut encore arriver pendant une heure
+    let id = s.pool.open_hedge(&s.lucia, &s.supplier, &Symbol::new(&s.env, "MXN"), &Side::BuyCurrency, &NOTIONAL, &2_000, &1000, &None);
+    s.env.ledger().set_timestamp(now + 2_000 + 1_800);
+    assert_eq!(s.pool.try_settle_fallback(&id), Err(Ok(contract_err(HedgeError::FixingAvailable as u32))));
+    assert!(!s.pool.get_hedge(&id).unwrap().settled);
+}
+
+#[test]
+fn record_fixing_and_fallback_work_while_paused() {
+    let s = setup();
+    let now = s.env.ledger().timestamp();
+    let id = open_funded(&s, Side::BuyCurrency);
+    let id2 = s.pool.open_hedge(&s.lucia, &s.supplier, &Symbol::new(&s.env, "MXN"), &Side::BuyCurrency, &NOTIONAL, &MATURITY_IN, &1000, &None);
+    s.pool.pause(&s.admin);
+
+    // on ne bloque jamais l'argent des gens : figer et clore en secours restent possibles en pause
+    at_maturity(&s, SPOT_0);
+    assert_eq!(s.pool.record_fixing(&id), SPOT_0);
+    s.env.ledger().set_timestamp(now + MATURITY_IN + AFTER_HISTORY);
+    assert_eq!(s.pool.settle_fallback(&id2), s.pool.get_hedge(&id2).unwrap().margin);
+    assert_eq!(s.pool.claimable(&s.lucia), s.pool.get_hedge(&id2).unwrap().margin);
+}
+
 // ---- Clôture anticipée ----
 
 /// Taux de sortie attendu : forward du jour pour `remaining` secondes, sens inverse de `side`.
@@ -1357,10 +2309,10 @@ fn close_early_unchanged_market_costs_the_spreads() {
 
     // cours inchangé : Lucía perd l'aller-retour des spreads (≈ 1 %), rien de plus
     let rate = exit_rate(&s, Side::BuyCurrency, MATURITY_IN / 2);
-    let pnl = hedge::pnl(Side::BuyCurrency, NOTIONAL, HEDGE_LOCKED, rate, HEDGE_MARGIN);
+    let pnl = hedge::pnl(&s.env, Side::BuyCurrency, NOTIONAL, HEDGE_LOCKED, rate, HEDGE_MARGIN);
     assert!(pnl < 0 && pnl > -HEDGE_COST / 90);
     let paid = s.pool.close_early(&id);
-    assert_settled(&s, id, paid, HEDGE_MARGIN + pnl, -pnl);
+    assert_closed_early(&s, id, paid, HEDGE_MARGIN + pnl, -pnl);
 }
 
 #[test]
@@ -1371,10 +2323,10 @@ fn close_early_currency_up_user_gains() {
     set_spot(&s, 5_940_000_000_000); // +8 % : le pool perd, la PME sort avec son gain moins le spread
 
     let rate = exit_rate(&s, Side::BuyCurrency, MATURITY_IN - 10);
-    let pnl = hedge::pnl(Side::BuyCurrency, NOTIONAL, HEDGE_LOCKED, rate, HEDGE_MARGIN);
+    let pnl = hedge::pnl(&s.env, Side::BuyCurrency, NOTIONAL, HEDGE_LOCKED, rate, HEDGE_MARGIN);
     assert!(pnl > 0);
     let paid = s.pool.close_early(&id);
-    assert_settled(&s, id, paid, HEDGE_MARGIN + pnl, -pnl);
+    assert_closed_early(&s, id, paid, HEDGE_MARGIN + pnl, -pnl);
 }
 
 #[test]
@@ -1385,7 +2337,7 @@ fn close_early_currency_down_user_pays_capped() {
     set_spot(&s, 4_675_000_000_000); // −15 % : perte bornée à la marge, toute la marge va au pool
 
     let paid = s.pool.close_early(&id);
-    assert_settled(&s, id, paid, 0, HEDGE_MARGIN);
+    assert_closed_early(&s, id, paid, 0, HEDGE_MARGIN);
 }
 
 #[test]
@@ -1396,11 +2348,11 @@ fn close_early_sell_side_buys_back() {
     set_spot(&s, 5_060_000_000_000); // −8 % : l'exportateur gagne
 
     let rate = exit_rate(&s, Side::SellCurrency, MATURITY_IN - 10);
-    let pnl = hedge::pnl(Side::SellCurrency, NOTIONAL, s.pool.get_hedge(&id).unwrap().locked_rate, rate, s.pool.get_hedge(&id).unwrap().margin);
+    let pnl = hedge::pnl(&s.env, Side::SellCurrency, NOTIONAL, s.pool.get_hedge(&id).unwrap().locked_rate, rate, s.pool.get_hedge(&id).unwrap().margin);
     assert!(pnl > 0);
     let margin = s.pool.get_hedge(&id).unwrap().margin;
     let paid = s.pool.close_early(&id);
-    assert_settled(&s, id, paid, margin + pnl, -pnl);
+    assert_closed_early(&s, id, paid, margin + pnl, -pnl);
 }
 
 #[test]
@@ -1423,7 +2375,7 @@ fn close_early_guards() {
 fn close_early_refuses_stale_price() {
     let s = setup();
     fund_pool(&s);
-    let id = s.pool.open_hedge(&s.lucia, &s.supplier, &Symbol::new(&s.env, "MXN"), &Side::BuyCurrency, &NOTIONAL, &86_400, &1000);
+    let id = s.pool.open_hedge(&s.lucia, &s.supplier, &Symbol::new(&s.env, "MXN"), &Side::BuyCurrency, &NOTIONAL, &86_400, &1000, &None);
     // pas de nouveau prix depuis l'ouverture, plus de 900 s plus tard : refusé comme un devis
     s.env.ledger().set_timestamp(s.env.ledger().timestamp() + 901);
     assert_eq!(s.pool.try_close_early(&id), Err(Ok(contract_err(PricingError::StalePrice as u32))));
@@ -1448,7 +2400,7 @@ fn close_early_emits_event() {
     s.env.ledger().set_timestamp(s.env.ledger().timestamp() + 10);
     set_spot(&s, 5_940_000_000_000);
     let rate = exit_rate(&s, Side::BuyCurrency, MATURITY_IN - 10);
-    let pnl = hedge::pnl(Side::BuyCurrency, NOTIONAL, HEDGE_LOCKED, rate, HEDGE_MARGIN);
+    let pnl = hedge::pnl(&s.env, Side::BuyCurrency, NOTIONAL, HEDGE_LOCKED, rate, HEDGE_MARGIN);
     s.pool.close_early(&id);
 
     let expected = hedge::HedgeClosedEarly { hedge_id: id, owner: s.lucia.clone(), close_rate: rate, pnl, payout: HEDGE_MARGIN + pnl };

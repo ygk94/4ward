@@ -2,6 +2,8 @@
 
 Passation rédigée le 11/11/2026, pour reprendre le travail sur une autre machine. À lire en entier avant de commencer.
 
+> **Mise à jour du 25/11 : dossier Instaward.** Le 13/11, on a déposé un dossier Instaward (sprint de 30 jours, chapitre Stellar Türkiye) qui promet un fixing en moyenne sur ~30 min avec bornes, le règlement et le paiement du fournisseur en une seule transaction, et un pilote avec au moins 5 PME. Ces engagements passent avant le reste pendant le sprint : voir la section *Engagement Instaward* de `docs/roadmap.md`.
+
 ## 1. Où on en est
 
 - HackMeridian est fini : **4ward a terminé 3e**. Pitch live le mercredi 28/10.
