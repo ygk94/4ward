@@ -62,21 +62,58 @@ reason() {
     200) echo "couverture inconnue" ;;
     201) echo "déjà réglée (par quelqu'un d'autre entre-temps)" ;;
     202) echo "échéance pas encore atteinte côté réseau, nouvel essai au prochain passage" ;;
+    209) echo "un cours d'échéance existe ou peut encore arriver : régler normalement" ;;
     302) echo "aucun cours publié dans les 15 min avant l'échéance" ;;
-    312) echo "cours à l'échéance introuvable (historique de l'oracle dépassé)" ;;
+    312) echo "pas encore de cours d'échéance (nouvel essai au prochain passage), ou plus aucun : voie de secours" ;;
     *) echo "voir les codes d'erreur dans docs/payment-cli.md" ;;
   esac
 }
 
-settle() {
-  local id=$1 out code
-  if out=$(stellar contract invoke --id "$POOL" --source-account "$SOURCE" --network "$NET" -- settle --hedge_id "$id" 2>&1); then
-    echo "   couverture $id réglée : $(echo "$out" | tail -1 | tr -d '"\r') stroops versés à la PME"
-    echo "$out" | grep -o 'https://stellar.expert[^ ]*' | sed 's/^/   /' || true
+# Une heure après l'échéance sans cours, le contrat peut constater l'absence de cours (voie de secours).
+FIXING_GRACE_SECS=3600
+
+invoke() {
+  stellar contract invoke --id "$POOL" --source-account "$SOURCE" --network "$NET" -- "$@" 2>&1
+}
+
+error_code() {
+  echo "$1" | grep -o 'Error(Contract, #[0-9]*)' | head -1 | grep -o '[0-9]*$' || true
+}
+
+# Verse à la PME son solde réclamable (le règlement le crédite, il ne l'envoie pas). Sans signature.
+# Échec possible si la PME ne peut pas recevoir d'USDC (ligne supprimée) : son solde l'attend, elle le réclamera.
+claim_for() {
+  local owner=$1 out
+  if out=$(invoke claim_for --owner "$owner"); then
+    echo "   versé à la PME : $(echo "$out" | tail -1 | tr -d '"\r') stroops"
   else
-    code=$(echo "$out" | grep -o 'Error(Contract, #[0-9]*)' | head -1 | grep -o '[0-9]*$' || true)
-    echo "   couverture $id non réglée : ${code:+#$code }$(reason "${code:-?}")"
+    echo "   versement à la PME en attente (elle ne peut pas recevoir d'USDC pour l'instant) : $(error_code "$out")"
   fi
+}
+
+# Fige d'abord le cours d'échéance (record_fixing : la couverture reste réglable au bon cours même si le règlement
+# échoue ou passe plus tard, Reflector oubliant ses cours au bout de 24 h), règle la couverture, puis pousse le
+# versement à la PME. Si aucun cours n'existe plus (312 passé l'heure de grâce), passe par la voie de secours :
+# clôture sans gain ni perte, réservée à l'admin (SOURCE doit être l'admin) et refusée en 209 si un cours existe.
+settle() {
+  local id=$1 owner=$2 maturity=$3 now=$4 out code
+  invoke record_fixing --hedge_id "$id" >/dev/null || true
+  if out=$(invoke settle --hedge_id "$id"); then
+    echo "   couverture $id réglée : $(echo "$out" | tail -1 | tr -d '"\r') stroops crédités à la PME"
+    echo "$out" | grep -o 'https://stellar.expert[^ ]*' | sed 's/^/   /' || true
+    claim_for "$owner"
+    return
+  fi
+  code=$(error_code "$out")
+  if [ "$code" = 312 ] && [ "$now" -ge $((maturity + FIXING_GRACE_SECS)) ]; then
+    if out=$(invoke settle_fallback --hedge_id "$id"); then
+      echo "   couverture $id close par la voie de secours (aucun cours, signée par $SOURCE) : $(echo "$out" | tail -1 | tr -d '"\r') stroops crédités"
+      claim_for "$owner"
+      return
+    fi
+    code=$(error_code "$out")
+  fi
+  echo "   couverture $id non réglée : ${code:+#$code }$(reason "${code:-?}")"
 }
 
 # Premier id dont on ne sait pas encore s'il est réglé : les couvertures réglées avant lui ne sont plus relues.
@@ -84,7 +121,7 @@ FIRST=0
 FAILED=0   # 1 si le dernier passage n'a pas pu lire les couvertures
 
 pass() {
-  local now id json settled maturity prefix=1 due=0
+  local now id json settled maturity owner prefix=1 due=0
   FAILED=0
   now=$(ledger_time) || { echo "   heure du ledger illisible, passage sauté"; return; }
   id=$FIRST
@@ -94,14 +131,14 @@ pass() {
       FAILED=1; return
     fi
     if [ -z "$json" ] || [ "$json" = null ]; then break; fi
-    read -r settled maturity < <(echo "$json" | "$PY" -c 'import sys, json; h = json.load(sys.stdin); print(int(h["settled"]), h["maturity"])' | tr -d '\r')
+    read -r settled maturity owner < <(echo "$json" | "$PY" -c 'import sys, json; h = json.load(sys.stdin); print(int(h["settled"]), h["maturity"], h["owner"])' | tr -d '\r')
     if [ "$settled" = 1 ]; then
       [ "$prefix" = 1 ] && FIRST=$((id + 1))
     else
       prefix=0
       if [ "$now" -ge "$maturity" ]; then
         due=$((due + 1))
-        if [ "$DRY" = 1 ]; then echo "   couverture $id à régler (échue depuis $((now - maturity)) s)"; else settle "$id"; fi
+        if [ "$DRY" = 1 ]; then echo "   couverture $id à régler (échue depuis $((now - maturity)) s)"; else settle "$id" "$owner" "$maturity" "$now"; fi
       fi
     fi
     id=$((id + 1))

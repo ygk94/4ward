@@ -381,7 +381,6 @@ fn lock_fixing(env: &Env, hedge_id: u64, price: i128) {
 ///
 /// Déjà figé : renvoie le cours figé, sans rien changer ni paniquer (appel répétable).
 /// Pas encore de cours (`Pending`) ou plus de cours (`Missing`) : panique `NoFixing` (312).
-#[allow(dead_code)] // exposée par Clément dans lib.rs
 pub(crate) fn record_fixing(env: &Env, hedge_id: u64, currency: &Symbol, maturity: u64) -> i128 {
     if let Some(price) = locked_fixing(env, hedge_id) {
         return price;
@@ -416,7 +415,6 @@ pub(crate) fn settlement_fixing(env: &Env, hedge_id: u64, currency: &Symbol, mat
 }
 
 /// Constat d'absence pour le futur `settle_fallback` : aucun cours figé et lecture `Missing`.
-#[allow(dead_code)] // branché par `settle_fallback` (Clément)
 pub(crate) fn fixing_missing(env: &Env, hedge_id: u64, currency: &Symbol, maturity: u64) -> bool {
     locked_fixing(env, hedge_id).is_none() && read_fixing(env, currency, maturity) == FixingRead::Missing
 }

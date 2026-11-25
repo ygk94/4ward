@@ -10,6 +10,10 @@ license-file.workspace = true
 crate-type = ["lib", "cdylib"]
 doctest = false
 
+[features]
+# Mode démo (échéances accélérées par `set_time_factor`) : testnet et vidéo uniquement, jamais en production.
+demo = []
+
 [dependencies]
 soroban-sdk = { workspace = true }
 

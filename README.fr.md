@@ -284,12 +284,25 @@ fn set_min_cap(currency: Symbol, cap_bps: u32);          // admin
 fn set_spread(spread_bps: u32);                          // admin
 // Couvertures / paiement
 fn open_hedge(owner: Address, supplier: Address, currency: Symbol, side: Side,
-              notional: i128, duration_secs: u64, cap_bps: u32) -> u64;
-fn settle(hedge_id: u64) -> i128;                        // permissionless après l'échéance
+              notional: i128, duration_secs: u64, cap_bps: u32,
+              worst_rate: Option<i128>) -> u64;          // refus (#210) si le taux bloqué est moins bon que worst_rate
+fn settle(hedge_id: u64) -> i128;                        // permissionless après l'échéance : crédite marge ± P&L au solde réclamable du propriétaire
+fn settle_and_pay(hedge_id: u64, max_usdc: i128, deadline: u64) -> i128; // PME : règlement + échange USDC→devise sur Soroswap (montant exact) + paiement du fournisseur, une transaction
+fn set_payment_route(currency: Symbol, token: Address, router: Address); // admin
+fn claim(owner: Address) -> i128;                        // propriétaire : reçoit tout son solde réclamable
+fn claim_for(owner: Address) -> i128;                    // sans signature (robot) : verse au propriétaire son solde réclamable
+fn claimable(owner: Address) -> i128;
+fn total_claimable() -> i128;
+fn set_allowed(role: Role, who: Address, allowed: bool);   // admin, listes blanches du pilote (Lp, Sme), actives par défaut
+fn set_hedge_limits(max_hedge_notional: Option<i128>, max_duration_secs: Option<u64>,
+                    max_open_per_sme: Option<u32>);       // admin, limites du pilote par couverture (#211-#215)
+fn pilot_limits() -> PilotLimits;
 fn close_early(hedge_id: u64) -> i128;                   // propriétaire seul, avant l'échéance : clôture au prix du marché
+fn record_fixing(hedge_id: u64) -> i128;                 // sans signature, après l'échéance : fige le cours d'échéance sans régler
+fn settle_fallback(hedge_id: u64) -> i128;               // admin seul, seulement si aucun cours n'existe ni ne peut arriver : P&L nul, marge rendue
 fn get_hedge(hedge_id: u64) -> Option<Hedge>;
 fn time_factor() -> u32;                                 // 1 = temps réel
-fn set_time_factor(factor: u32);                         // admin, démo : 25 920 → 90 j en 5 min réelles
+fn set_time_factor(factor: u32);                         // admin, version démo seulement (sinon #208) : 25 920 → 90 j en 5 min réelles
 ```
 
 ---
@@ -308,7 +321,7 @@ Reflector FX testnet couvre : EUR, GBP, CHF, CAD, **MXN, ARS, BRL**, THB, XAU (b
 
 Le pool est redéployé à chaque `./scripts/setup-testnet.sh`, qui fait aussi le dépôt du LP (1 000 000 USDC via `deposit_lp`). Les IDs à jour sont dans `.env.testnet`.
 
-**Mode démo :** le setup pose `set_time_factor 25920` : le prix est calculé sur la durée annoncée (90 jours), mais l'échéance réelle tombe 5 minutes après l'ouverture. C'est ce qui permet de régler en direct, dans la vidéo, une couverture « à 90 jours ».
+**Mode démo :** le setup pose `set_time_factor 25920` : le prix est calculé sur la durée annoncée (90 jours), mais l'échéance réelle tombe 5 minutes après l'ouverture. C'est ce qui permet de régler en direct, dans la vidéo, une couverture « à 90 jours ». Le mode démo n'existe que dans un pool compilé avec la feature cargo `demo` (`stellar contract build --package pool --features demo`), ce que fait `scripts/setup-testnet.sh` par défaut ; `DEMO_TIME_FACTOR=1 scripts/setup-testnet.sh` déploie la version de production (échéances réelles, `set_time_factor` refusé en #208). Tests : `cargo test` couvre la version de production, `cargo test -p pool --features demo` la version démo. Les tests aléatoires du règlement rejouent 40 scénarios à graine fixe (ouvertures dans les deux sens, mouvements du peso, règlements, clôtures anticipées, secours, réclamations) et vérifient après chaque étape que l'USDC est conservé, que le pool et les PME jouent à somme nulle et que chaque versement reste entre 0 et 2 × marge ; `POOL_SCENARIOS=1000 cargo test -p pool random_scenarios` lance une passe longue.
 
 **Limites du MVP testnet :** paiement du fournisseur depuis l'app en MXN seulement (seule devise avec un actif de test et une offre DEX posée par le setup ; les couvertures BRL, ARS et EUR se règlent normalement) ; oracle de démo (mock-oracle SEP-40, pour le crash) à la place de Reflector, recopié de Reflector par `keepalive.sh --live` hors tournage ; USDC et MXN de test émis par le compte ISSUER, offre DEX MXN/USDC posée par nous ; règle de capacité brute (somme des marges, sans netting) ; taux d'intérêt lus sur l'API Etherfuse et poussés par l'admin (`scripts/sync-rates.sh`), pas lus par le contrat.
 
@@ -384,8 +397,8 @@ TODO.md                # setup et chantiers
 
 Correctifs prévus après le hackathon ; détail dans `docs/points-a-trancher.md`.
 
-- **Fixing : cours unique, pas encore de voie de secours.** `settle` prend le cours en vigueur à l'échéance s'il a au plus 15 minutes, sinon le premier cours publié dans l'heure qui suit ; d'ici là il échoue en 312 et la couverture reste ouverte. Le cours peut être figé sans régler, ce qui compte car Reflector oublie ses cours au bout d'environ 24 h. Manquent encore, prévus pour le sprint Instaward : une moyenne pondérée sur ~30 minutes avec bornes de cohérence à la place du cours unique, et la voie de secours `settle_fallback` (P&L nul une fois l'absence de cours constatée par le contrat), sans laquelle une couverture dont le fixing est perdu reste bloquée.
-- **Mode démo (`time_factor` > 1)** : le prix porte sur la durée annoncée et l'échéance est raccourcie, donc le carry n'est pas neutralisé (arbitrage possible contre le pool). `time_factor` doit valoir 1 en production ; `set_time_factor` passe derrière une feature cargo `demo` pendant le sprint Instaward.
+- **Fixing : cours unique.** `settle` prend le cours en vigueur à l'échéance s'il a au plus 15 minutes, sinon le premier cours publié dans l'heure qui suit ; d'ici là il échoue en 312 et la couverture reste ouverte. `record_fixing` fige le cours sans régler (Reflector oublie ses cours au bout d'environ 24 h), et `settle_fallback` (admin seul, pour ne pas offrir d'option gratuite au perdant) clôt une couverture à P&L nul une fois l'absence de cours constatée par le contrat : les fonds ne peuvent plus rester bloqués. Manque encore, prévu pour le sprint Instaward : une moyenne pondérée sur ~30 minutes avec bornes de cohérence à la place du cours unique.
+- **Mode démo (`time_factor` > 1)** : le prix porte sur la durée annoncée et l'échéance est raccourcie, donc le carry n'est pas neutralisé (arbitrage possible contre le pool). `time_factor` doit valoir 1 en production : `set_time_factor` n'existe plus que dans la version `demo` (#208 sinon) et `time_factor` vaut toujours 1 sans elle.
 - **Dépôt juste avant un `settle` gagnant** : le fixing est connu dès l'échéance, un LP peut entrer au prix plein juste avant le règlement et ressortir juste après. À corriger par un délai d'entrée ou un blocage de `deposit_lp` tant qu'une couverture échue n'est pas réglée.
 - **Tranches** : les intérêts senior courus font baisser la valeur junior, qui peut passer sous le capital réservé (capacité négative) ou sous 20 % sans aucune opération ; `withdraw_senior` ne vérifie pas encore que le capital restant couvre le réservé. Correctif écrit (retraits Safe plafonnés, plancher de parts junior), en relecture avant fusion.
 
