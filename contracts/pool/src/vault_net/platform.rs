@@ -729,7 +729,9 @@ fn budget_each_operation_under_ceiling() {
     ] {
         assert!(cpu <= max_cpu, "{name} : {cpu} instructions > {max_cpu}");
         assert!(mem <= 300_000, "{name} : {mem} octets");
-        assert!(reads <= 12 && writes <= 12, "{name} : {reads} lectures, {writes} écritures");
+        // 16 lectures : open_hedge en fait 13 depuis le plafond par propriétaire (une entrée de
+        // plus) ; la limite du réseau par transaction est bien au-dessus. Sert à voir une dérive.
+        assert!(reads <= 16 && writes <= 12, "{name} : {reads} lectures, {writes} écritures");
     }
 }
 

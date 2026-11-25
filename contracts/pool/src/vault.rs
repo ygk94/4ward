@@ -119,6 +119,8 @@ pub enum VaultError {
     SeniorArrears = 118,
     /// Dépôt senior refusé : les dépôts senior sont fermés (B5, fermés par défaut).
     SeniorDepositsClosed = 119,
+    /// Ouverture refusée : le capital réservé pour ce propriétaire dépasserait son plafond.
+    OwnerReserveCapExceeded = 120,
 }
 
 /// Clés de stockage propres au vault.
@@ -131,7 +133,7 @@ pub enum VaultKey {
     TotalShares,
     /// Exposition d'une devise (persistent).
     Exposure(Symbol),
-    /// Limite d'une devise en bps du capital (persistent), absente = sans limite.
+    /// Limite d'une devise en bps de la valeur junior (persistent), absente = sans limite.
     CurrencyLimit(Symbol),
     /// Parts senior d'un LP (persistent).
     SeniorShares(Address),
@@ -151,6 +153,11 @@ pub enum VaultKey {
     NotionalCap,
     /// Dépôts senior ouverts (instance) ; absent = fermés (B5).
     SeniorDepositsOpen,
+    /// Capital réservé (Σ marges) des couvertures ouvertes d'un propriétaire (persistent) ;
+    /// clé supprimée à 0.
+    OwnerReserved(Address),
+    /// Plafond de `OwnerReserved` par propriétaire (instance) ; absent = sans plafond.
+    OwnerReserveCap,
 }
 
 /// Valeur des deux tranches en USDC (7 décimales). senior + junior = TotalDeposits.
@@ -270,6 +277,13 @@ pub struct AllowlistToggled {
 #[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NotionalCapSet {
+    pub cap: Option<i128>,
+}
+
+/// L'admin a changé le plafond de capital réservé par propriétaire (`None` = sans plafond).
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OwnerReserveCapSet {
     pub cap: Option<i128>,
 }
 
@@ -771,7 +785,7 @@ pub(crate) fn book_loss(env: &Env, amount: i128) {
 
 /// Ouverture d'une couverture : réserve la marge, contrôle la limite de la devise et ajoute
 /// l'exposition. À appeler par hedge::open une fois la `Hedge` construite.
-/// Erreurs : `InvalidAmount`, `InsufficientCapacity`, `CurrencyLimitExceeded`,
+/// Erreurs : `InvalidAmount`, `InsufficientCapacity`, `OwnerReserveCapExceeded`, `CurrencyLimitExceeded`,
 /// `NotionalCapExceeded`, `Overflow`.
 pub(crate) fn open_position(env: &Env, hedge: &Hedge) {
     if hedge.notional <= 0 {
@@ -779,11 +793,23 @@ pub(crate) fn open_position(env: &Env, hedge: &Hedge) {
     }
     reserve(env, hedge.margin);
 
+    // Plafond par propriétaire : sans lui, une même adresse ouvre achat + vente du même montant
+    // (sans risque de change pour elle) et bloque la capacité de tout le pool.
+    let owner_after = add(env, owner_reserved(env, &hedge.owner), hedge.margin);
+    if let Some(cap) = owner_reserve_cap(env) {
+        if owner_after > cap {
+            panic_with_error!(env, VaultError::OwnerReserveCapExceeded);
+        }
+    }
+    set_owner_reserved(env, &hedge.owner, owner_after);
+
     let mut e = exposure(env, &hedge.currency);
     let margins_after = add(env, add(env, e.buy_margin, e.sell_margin), hedge.margin);
     if let Some(limit_bps) = currency_limit(env, &hedge.currency) {
-        // Plafond arrondi vers le bas : en faveur du pool.
-        if margins_after > mul_div(env, total_deposits(env), limit_bps as i128, BPS) {
+        // Mesurée sur la valeur junior, seule à porter les couvertures (le Safe n'en porte
+        // aucune) : sur TotalDeposits, 80 % de Safe laissaient une devise prendre presque tout le
+        // junior. Plafond arrondi vers le bas : en faveur du pool.
+        if margins_after > mul_div(env, junior_value(env), limit_bps as i128, BPS) {
             panic_with_error!(env, VaultError::CurrencyLimitExceeded);
         }
     }
@@ -833,6 +859,8 @@ pub(crate) fn close_position(env: &Env, hedge: &Hedge) {
     // couvertures encore ouvertes. Sans conséquence en pratique : le testnet sera redéployé (pas mis à
     // jour) en semaine 49, aucune couverture antérieure à B9 n'existera.
     set_total_notional(env, (total_notional(env) - notional_usd).max(0));
+    // Borné à 0 pour la même raison : une couverture ouverte avant ce plafond n'a pas été comptée.
+    set_owner_reserved(env, &hedge.owner, (owner_reserved(env, &hedge.owner) - hedge.margin).max(0));
 
     release(env, hedge.margin);
     PositionReleased { currency: hedge.currency.clone(), side: hedge.side, margin: hedge.margin }.publish(env);
@@ -860,7 +888,7 @@ pub(crate) fn currency_limit(env: &Env, currency: &Symbol) -> Option<u32> {
     read_persistent(env, &VaultKey::CurrencyLimit(currency.clone()))
 }
 
-/// Admin : limite de la devise en bps du capital. 0 bloque les nouvelles couvertures,
+/// Admin : limite de la devise en bps de la valeur junior (le Safe ne porte aucune couverture). 0 bloque les nouvelles couvertures,
 /// 10 000 ou plus revient à ne pas avoir de limite (la capacité du pool borne déjà la réserve).
 pub(crate) fn set_currency_limit(env: &Env, currency: &Symbol, limit_bps: u32) {
     crate::admin(env).require_auth();
@@ -934,6 +962,39 @@ pub(crate) fn set_notional_cap(env: &Env, cap: Option<i128>) {
         None => env.storage().instance().remove(&VaultKey::NotionalCap),
     }
     NotionalCapSet { cap }.publish(env);
+}
+
+/// Capital réservé (Σ marges) des couvertures ouvertes de `owner`, USDC 7 décimales.
+pub(crate) fn owner_reserved(env: &Env, owner: &Address) -> i128 {
+    bump_instance(env);
+    read_persistent(env, &VaultKey::OwnerReserved(owner.clone())).unwrap_or(0)
+}
+
+fn set_owner_reserved(env: &Env, owner: &Address, value: i128) {
+    let key = VaultKey::OwnerReserved(owner.clone());
+    if value == 0 {
+        env.storage().persistent().remove(&key);
+    } else {
+        write_persistent(env, &key, &value);
+    }
+}
+
+pub(crate) fn owner_reserve_cap(env: &Env) -> Option<i128> {
+    bump_instance(env);
+    env.storage().instance().get(&VaultKey::OwnerReserveCap)
+}
+
+/// Admin : plafond du capital réservé par propriétaire, `None` le supprime. `InvalidAmount` si
+/// négatif. Un plafond sous ce qui est déjà réservé bloque seulement les nouvelles ouvertures.
+pub(crate) fn set_owner_reserve_cap(env: &Env, cap: Option<i128>) {
+    crate::admin(env).require_auth();
+    bump_instance(env);
+    match cap {
+        Some(c) if c < 0 => panic_with_error!(env, VaultError::InvalidAmount),
+        Some(c) => env.storage().instance().set(&VaultKey::OwnerReserveCap, &c),
+        None => env.storage().instance().remove(&VaultKey::OwnerReserveCap),
+    }
+    OwnerReserveCapSet { cap }.publish(env);
 }
 
 // ---- netting : calcul exact, NON branché (voir l'en-tête) ----
@@ -2578,6 +2639,149 @@ mod tests {
         s.vault(|env| set_total_notional(env, 0));
         close_pos_flat(&s, &a);
         assert_eq!(s.client().total_notional(), 0);
+    }
+
+    // ---- Plafond de capital réservé par propriétaire (dossier d'audit, couvertures opposées) ----
+
+    /// Couverture de `owner` (les autres champs comme `make_hedge`).
+    fn hedge_of(s: &Setup, owner: &Address, side: Side) -> Hedge {
+        let mut h = make_hedge(s, symbol_short!("MXN"), side, MXN_1M, RATE_055, 1000);
+        h.owner = owner.clone();
+        h
+    }
+
+    #[test]
+    fn owner_reserve_cap_is_none_by_default_and_counts_margins() {
+        let s = setup();
+        s.new_lp(LP_CAPITAL);
+        let c = s.client();
+        assert_eq!(c.owner_reserve_cap(), None);
+        let sme = Address::generate(&s.env);
+        open_pos(&s, &hedge_of(&s, &sme, Side::BuyCurrency));
+        open_pos(&s, &hedge_of(&s, &sme, Side::SellCurrency));
+        assert_eq!(c.owner_reserved(&sme), 2 * MARGIN);
+        assert_eq!(c.owner_reserved(&Address::generate(&s.env)), 0);
+        s.assert_invariant(2 * MARGIN);
+    }
+
+    #[test]
+    fn open_up_to_owner_reserve_cap_is_accepted() {
+        let s = setup();
+        s.new_lp(LP_CAPITAL);
+        s.client().set_owner_reserve_cap(&Some(2 * MARGIN));
+        let sme = Address::generate(&s.env);
+        open_pos(&s, &hedge_of(&s, &sme, Side::BuyCurrency));
+        open_pos(&s, &hedge_of(&s, &sme, Side::SellCurrency));
+        assert_eq!(s.client().owner_reserved(&sme), 2 * MARGIN);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #120)")]
+    fn offsetting_hedges_over_owner_reserve_cap_panic() {
+        // Achat + vente du même montant : aucun risque de change pour la PME, mais la capacité
+        // est bloquée. Le plafond porte sur la somme brute des marges, pas sur le net.
+        let s = setup();
+        s.new_lp(LP_CAPITAL);
+        s.client().set_owner_reserve_cap(&Some(2 * MARGIN - 1));
+        let sme = Address::generate(&s.env);
+        open_pos(&s, &hedge_of(&s, &sme, Side::BuyCurrency));
+        open_pos(&s, &hedge_of(&s, &sme, Side::SellCurrency));
+    }
+
+    #[test]
+    fn owner_reserve_cap_is_per_owner_and_freed_on_close() {
+        let s = setup();
+        s.new_lp(LP_CAPITAL);
+        s.client().set_owner_reserve_cap(&Some(MARGIN));
+        let (a, b) = (Address::generate(&s.env), Address::generate(&s.env));
+        let ha = hedge_of(&s, &a, Side::BuyCurrency);
+        open_pos(&s, &ha);
+        open_pos(&s, &hedge_of(&s, &b, Side::BuyCurrency)); // autre propriétaire : non concerné
+        close_pos_flat(&s, &ha);
+        assert_eq!(s.client().owner_reserved(&a), 0);
+        // La clé est supprimée à 0 (pas d'entrée orpheline).
+        assert!(!s.vault(|env| env.storage().persistent().has(&VaultKey::OwnerReserved(a.clone()))));
+        open_pos(&s, &hedge_of(&s, &a, Side::SellCurrency));
+        assert_eq!(s.client().owner_reserved(&a), MARGIN);
+        s.assert_invariant(2 * MARGIN);
+    }
+
+    #[test]
+    fn owner_cap_below_reserved_still_lets_hedges_close_then_none_lifts_it() {
+        let s = setup();
+        s.new_lp(LP_CAPITAL);
+        let sme = Address::generate(&s.env);
+        let h = hedge_of(&s, &sme, Side::BuyCurrency);
+        open_pos(&s, &h);
+        s.client().set_owner_reserve_cap(&Some(0));
+        close_pos_flat(&s, &h);
+        s.client().set_owner_reserve_cap(&None);
+        assert_eq!(s.client().owner_reserve_cap(), None);
+        open_pos(&s, &h);
+        assert_eq!(s.client().owner_reserved(&sme), MARGIN);
+    }
+
+    #[test]
+    fn close_never_blocked_by_uncounted_owner_reserve() {
+        // Couverture ouverte avant le plafond (upgrade) : sa marge n'a pas été comptée.
+        let s = setup();
+        s.new_lp(LP_CAPITAL);
+        let sme = Address::generate(&s.env);
+        let h = hedge_of(&s, &sme, Side::BuyCurrency);
+        open_pos(&s, &h);
+        s.vault(|env| set_owner_reserved(env, &sme, 0));
+        close_pos_flat(&s, &h);
+        assert_eq!(s.client().owner_reserved(&sme), 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #100)")]
+    fn negative_owner_reserve_cap_panics() {
+        let s = setup();
+        s.client().set_owner_reserve_cap(&Some(-1));
+    }
+
+    #[test]
+    fn set_owner_reserve_cap_requires_admin_and_emits_event() {
+        let s = setup();
+        s.client().set_owner_reserve_cap(&Some(1_000 * USDC));
+        assert_admin_only(&s, "set_owner_reserve_cap");
+        assert_eq!(
+            s.env.events().all().filter_by_contract(&s.pool),
+            [OwnerReserveCapSet { cap: Some(1_000 * USDC) }.to_xdr(&s.env, &s.pool)]
+        );
+        assert_eq!(s.client().owner_reserve_cap(), Some(1_000 * USDC));
+    }
+
+    // ---- Limite par devise mesurée sur la valeur junior ----
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #108)")]
+    fn currency_limit_is_measured_on_junior_value_not_total_deposits() {
+        // 100 000 junior + 400 000 Safe. Limite 10 % : 10 000 du junior, pas 50 000 du total.
+        // Deux marges de 5 500 = 11 000 : refusé (accepté avant le correctif).
+        let s = setup();
+        s.new_lp(LP_CAPITAL);
+        s.new_senior(4 * LP_CAPITAL);
+        s.client().set_currency_limit(&symbol_short!("MXN"), &1000);
+        let a = make_hedge(&s, symbol_short!("MXN"), Side::BuyCurrency, MXN_1M, RATE_055, 1000);
+        let b = make_hedge(&s, symbol_short!("MXN"), Side::BuyCurrency, MXN_1M, RATE_055, 1000);
+        open_pos(&s, &a);
+        open_pos(&s, &b);
+    }
+
+    #[test]
+    fn currency_limit_on_junior_value_accepts_up_to_the_limit() {
+        let s = setup();
+        s.new_lp(LP_CAPITAL);
+        s.new_senior(4 * LP_CAPITAL);
+        // 11 % de 100 000 de junior = 11 000 : deux marges de 5 500 passent pile.
+        s.client().set_currency_limit(&symbol_short!("MXN"), &1100);
+        let a = make_hedge(&s, symbol_short!("MXN"), Side::BuyCurrency, MXN_1M, RATE_055, 1000);
+        let b = make_hedge(&s, symbol_short!("MXN"), Side::SellCurrency, MXN_1M, RATE_055, 1000);
+        open_pos(&s, &a);
+        open_pos(&s, &b);
+        s.assert_invariant(11_000 * USDC);
     }
 
     #[test]

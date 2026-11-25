@@ -270,6 +270,22 @@ impl Pool {
         vault::set_notional_cap(&env, cap)
     }
 
+    /// Admin : plafond du capital réservé (Σ marges des couvertures ouvertes) par propriétaire,
+    /// USDC 7 décimales, `None` = sans plafond. Contrôlé à l'ouverture seulement (erreur 120).
+    pub fn set_owner_reserve_cap(env: Env, cap: Option<i128>) {
+        vault::set_owner_reserve_cap(&env, cap)
+    }
+
+    /// Plafond du capital réservé par propriétaire ; `None` = sans plafond.
+    pub fn owner_reserve_cap(env: Env) -> Option<i128> {
+        vault::owner_reserve_cap(&env)
+    }
+
+    /// Capital réservé (Σ marges) des couvertures ouvertes de `owner`, USDC 7 décimales.
+    pub fn owner_reserved(env: Env, owner: Address) -> i128 {
+        vault::owner_reserved(&env, &owner)
+    }
+
     /// Σ notionnels des couvertures ouvertes, USDC 7 décimales au taux bloqué.
     pub fn total_notional(env: Env) -> i128 {
         vault::total_notional(&env)
