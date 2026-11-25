@@ -122,7 +122,7 @@ capital réservé = Σ marges des couvertures ouvertes   ≤   capital de la tra
 
 Le contrat **refuse toute couverture** qui ferait dépasser cette limite. Les marges des PME sont déposées dans le contrat mais n'appartiennent pas aux LPs. Les tests vérifient à chaque opération que `solde USDC du contrat = capital des LPs + marges des couvertures ouvertes`.
 
-**Exposition et limite par devise.** Le pool suit, pour chaque devise, le volume des acheteurs et celui des vendeurs (en USDC au taux bloqué), ainsi que leurs marges. L'admin peut plafonner une devise, par exemple « les marges en ARS ne dépassent pas 10 % du capital ». Une limite à 0 suspend les nouvelles couvertures sur cette devise.
+**Exposition et limite par devise.** Le pool suit, pour chaque devise, le volume des acheteurs et celui des vendeurs (en USDC au taux bloqué), ainsi que leurs marges. L'admin peut plafonner une devise, par exemple « les marges en ARS ne dépassent pas 10 % du capital junior » (mesurée sur la valeur junior : seul le junior porte les couvertures). Une limite à 0 suspend les nouvelles couvertures sur cette devise.
 
 **Robustesse.** Les entrées de stockage sont prolongées automatiquement (120 jours). Les dépôts, retraits, ouvertures, clôtures et changements de limite émettent des événements lisibles sur l'explorateur. Tous les calculs sont protégés contre les débordements et arrondis en faveur du pool.
 
@@ -271,12 +271,18 @@ fn exit_price() -> i128;                                 // prix de sortie, USDC
 fn total_assets() -> i128;                               // capital des LPs
 fn deposit_senior(lp: Address, amount: i128) -> i128;    // tranche senior : USDC déposés → parts senior
 fn withdraw_senior(lp: Address, shares: i128) -> i128;   // parts senior brûlées → USDC versés
-fn senior_balance(lp: Address) -> i128;                  // valeur des parts senior du LP
+fn senior_balance(lp: Address) -> i128;                  // valeur retirable des parts senior du LP
+fn senior_arrears() -> i128;                             // intérêts senior promis mais pas encore payables
+fn senior_deposits_open() -> bool;                       // dépôts senior fermés par défaut
+fn set_senior_deposits_open(open: bool);                 // admin
 fn tranche_values() -> TrancheValues;                    // senior, junior, prix de la part senior
 fn capacity() -> i128;                                   // capital non réservé
 fn exposure(currency: Symbol) -> Exposure;               // acheteurs / vendeurs / net, marges
 fn currency_limit(currency: Symbol) -> Option<u32>;
-fn set_currency_limit(currency: Symbol, limit_bps: u32); // admin
+fn set_currency_limit(currency: Symbol, limit_bps: u32); // admin, bps de la valeur junior
+fn owner_reserved(owner: Address) -> i128;               // marges réservées par les couvertures ouvertes d'un propriétaire
+fn owner_reserve_cap() -> Option<i128>;
+fn set_owner_reserve_cap(cap: Option<i128>);             // admin, plafond par propriétaire (erreur 120)
 // Pricing
 fn quote(currency: Symbol, side: Side, notional: i128, duration_secs: u64, cap_bps: u32) -> Quote;
 fn set_rate(currency: Symbol, rate_bps: u32);            // admin

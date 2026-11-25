@@ -128,7 +128,7 @@ open seed-pme-tequila MXN BuyCurrency   500000 365 2000
 say "Refus attendus"
 open seed-pme-mate ARS BuyCurrency 1000000 90 1000 307      # plafond sous le minimum ARS (15 %)
 open seed-pme-vins JPY BuyCurrency 1000000 90 1000 306      # devise non activée
-invoke $ADMIN set_currency_limit --currency ARS --limit_bps 100 >/dev/null && ok "limite ARS posée à 1 % du capital"
+invoke $ADMIN set_currency_limit --currency ARS --limit_bps 100 >/dev/null && ok "limite ARS posée à 1 % du capital junior"
 open seed-pme-mate ARS BuyCurrency 100000000 90 1500 108    # marge ≈ 15 000 USDC : dépasse la limite par devise
 invoke $ADMIN set_currency_limit --currency ARS --limit_bps 10000 >/dev/null && ok "limite ARS remise à 100 %"
 

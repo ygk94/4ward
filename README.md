@@ -124,7 +124,7 @@ reserved capital = Σ margins of open hedges   ≤   junior tranche capital (Dyn
 
 The contract **rejects any hedge** that would exceed this limit. SME margins are deposited in the contract but do not belong to the LPs. Tests check on every operation that `contract USDC balance = LP capital + margins of open hedges`.
 
-**Exposure and per-currency limit.** For each currency, the pool tracks buyer volume and seller volume (in USDC at the locked rate), as well as their margins. The admin can cap a currency, e.g. "ARS margins do not exceed 10% of capital". A limit of 0 suspends new hedges in that currency.
+**Exposure and per-currency limit.** For each currency, the pool tracks buyer volume and seller volume (in USDC at the locked rate), as well as their margins. The admin can cap a currency, e.g. "ARS margins do not exceed 10% of junior capital" (measured on the junior value: only the junior backs hedges). A limit of 0 suspends new hedges in that currency.
 
 **Robustness.** Storage entries are extended automatically (120 days). Deposits, withdrawals, openings, closings and limit changes emit events readable on the explorer. All calculations are overflow-protected and rounded in the pool's favor.
 
@@ -273,12 +273,18 @@ fn exit_price() -> i128;                                 // exit price, USDC per
 fn total_assets() -> i128;                               // LP capital
 fn deposit_senior(lp: Address, amount: i128) -> i128;    // senior tranche: USDC deposited → senior shares
 fn withdraw_senior(lp: Address, shares: i128) -> i128;   // senior shares burned → USDC paid out
-fn senior_balance(lp: Address) -> i128;                  // value of the LP's senior shares
+fn senior_balance(lp: Address) -> i128;                  // withdrawable value of the LP's senior shares
+fn senior_arrears() -> i128;                             // senior interest promised but not yet payable
+fn senior_deposits_open() -> bool;                       // senior deposits closed by default
+fn set_senior_deposits_open(open: bool);                 // admin
 fn tranche_values() -> TrancheValues;                    // senior, junior, senior share price
 fn capacity() -> i128;                                   // unreserved capital
 fn exposure(currency: Symbol) -> Exposure;               // buyers / sellers / net, margins
 fn currency_limit(currency: Symbol) -> Option<u32>;
-fn set_currency_limit(currency: Symbol, limit_bps: u32); // admin
+fn set_currency_limit(currency: Symbol, limit_bps: u32); // admin, bps of junior value
+fn owner_reserved(owner: Address) -> i128;               // margins reserved by an owner's open hedges
+fn owner_reserve_cap() -> Option<i128>;
+fn set_owner_reserve_cap(cap: Option<i128>);             // admin, per-owner cap (error 120)
 // Pricing
 fn quote(currency: Symbol, side: Side, notional: i128, duration_secs: u64, cap_bps: u32) -> Quote;
 fn set_rate(currency: Symbol, rate_bps: u32);            // admin

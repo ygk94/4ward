@@ -250,6 +250,12 @@ impl Net {
         if r != sum_margin || e.buy_margin + e.sell_margin != r {
             return Err(format!("I3 R={r}, Σ marges fantôme={sum_margin}, exposition={}", e.buy_margin + e.sell_margin));
         }
+        // I3c capital réservé par propriétaire = R (une seule PME ici) : attrape un futur chemin de
+        // clôture qui ne passerait pas par close_position (VERT)
+        let owner_r = self.env.as_contract(&self.pool, || super::owner_reserved(&self.env, &self.sme));
+        if owner_r != r {
+            return Err(format!("I3c réservé du propriétaire {owner_r} ≠ R {r}"));
+        }
         let buy: i128 = open.iter().filter(|o| o.side == Side::BuyCurrency).map(|o| o.notional_usd).sum();
         if e.buy_notional != buy || e.buy_notional + e.sell_notional != sum_notional || e.net_notional != e.buy_notional - e.sell_notional {
             return Err(format!("I3b exposition {e:?} ≠ fantôme (achat {buy}, total {sum_notional})"));

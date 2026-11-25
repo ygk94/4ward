@@ -860,6 +860,9 @@ pub(crate) fn close_position(env: &Env, hedge: &Hedge) {
     // jour) en semaine 49, aucune couverture antérieure à B9 n'existera.
     set_total_notional(env, (total_notional(env) - notional_usd).max(0));
     // Borné à 0 pour la même raison : une couverture ouverte avant ce plafond n'a pas été comptée.
+    // Limite connue : si le propriétaire a aussi une couverture comptée, clore d'abord l'ancienne
+    // efface une partie de la nouvelle du compteur, qui sous-compte alors (dépassement borné par
+    // la marge de l'ancienne). Sans conséquence : le testnet sera redéployé, pas mis à jour.
     set_owner_reserved(env, &hedge.owner, (owner_reserved(env, &hedge.owner) - hedge.margin).max(0));
 
     release(env, hedge.margin);

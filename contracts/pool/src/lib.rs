@@ -226,12 +226,12 @@ impl Pool {
         vault::exposure(&env, &currency)
     }
 
-    /// Limite de la devise en bps du capital (Σ marges de la devise), `None` = sans limite.
+    /// Limite de la devise en bps de la valeur junior (Σ marges de la devise), `None` = sans limite.
     pub fn currency_limit(env: Env, currency: Symbol) -> Option<u32> {
         vault::currency_limit(&env, &currency)
     }
 
-    /// Admin : Σ marges ouvertes d'une devise ≤ `limit_bps` × capital / 10 000.
+    /// Admin : Σ marges ouvertes d'une devise ≤ `limit_bps` × valeur junior / 10 000.
     /// 0 = plus de nouvelles couvertures sur cette devise.
     pub fn set_currency_limit(env: Env, currency: Symbol, limit_bps: u32) {
         vault::set_currency_limit(&env, &currency, limit_bps)
@@ -271,7 +271,8 @@ impl Pool {
     }
 
     /// Admin : plafond du capital réservé (Σ marges des couvertures ouvertes) par propriétaire,
-    /// USDC 7 décimales, `None` = sans plafond. Contrôlé à l'ouverture seulement (erreur 120).
+    /// USDC 7 décimales, `None` = sans plafond. Contrôlé à l'ouverture seulement (erreur 120) ;
+    /// `InvalidAmount` (100) si négatif. Par adresse : n'a de sens qu'avec la liste blanche PME.
     pub fn set_owner_reserve_cap(env: Env, cap: Option<i128>) {
         vault::set_owner_reserve_cap(&env, cap)
     }
