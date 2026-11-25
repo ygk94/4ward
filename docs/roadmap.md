@@ -54,7 +54,7 @@ Mainnet et vrais fonds, audit externe, réglementaire et KYC, vraie liquidité L
 
 ## Lundi 16/11, à trois (une demi-journée)
 
-1. T2 est réglé (16/11) : cours unique à l'échéance ; clôture sans gain ni perte par n'importe qui, une fois l'absence de cours constatée par le contrat. **[Instaward]** Le cours unique contredit le dossier (TWAP sur ~30 min avec bornes), qui est envoyé et ne peut plus changer : le TWAP remplace le cours unique. La clôture sans gain ni perte après constat d'absence reste valable (c'est le `settle_fallback` promis).
+1. T2 est réglé (16/11) : cours unique à l'échéance ; clôture sans gain ni perte par n'importe qui, une fois l'absence de cours constatée par le contrat. **[Instaward]** Le cours unique contredit le dossier (TWAP sur ~30 min avec bornes), qui est envoyé et ne peut plus changer : le TWAP remplace le cours unique. La clôture sans gain ni perte après constat d'absence reste valable (c'est le `settle_fallback` promis), mais **réservée à l'admin** (décidé le 25/11 par Clément après la relecture de Hugo) : ouverte à tous, ce serait une option gratuite pour le perdant, qui n'aurait qu'à attendre que personne ne fige le cours pendant 24 h. Le robot fige le cours avant chaque règlement.
 2. Confirmer qui écrit `admin.rs` (proposition : Lancelot, le moins chargé côté contrat).
 3. Figer la nouvelle interface de `lib.rs` : `open_hedge` avec `worst_rate`, `record_fixing`, `settle_fallback`, `claim`, `claim_for`, `claimable`, `pending_settlements`, `pilot_limits`, `is_allowed`, `paused`, fonctions admin.
 4. Répartir les numéros d'erreur : Vault 113 à 116, Paiement 207 à 215, Pricing 313, Admin 400 et suivants.
