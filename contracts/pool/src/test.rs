@@ -1532,3 +1532,22 @@ fn total_notional_back_to_zero_after_close_early() {
     s.pool.close_early(&id);
     assert_eq!(s.pool.total_notional(), 0);
 }
+
+/// Faille 1 de la revue : changer un taux (ou le spread) après l'ouverture ne change pas la sortie
+/// anticipée. Celui qui tient la clé des taux ne peut plus ouvrir, changer le taux du peso, puis sortir
+/// avec deux fois sa marge.
+#[test]
+fn close_early_uses_rates_frozen_at_open() {
+    let s = setup();
+    let id = open_funded(&s, Side::BuyCurrency);
+    s.env.ledger().set_timestamp(s.env.ledger().timestamp() + 10);
+    set_spot(&s, SPOT_0);
+    let fair = exit_rate(&s, Side::BuyCurrency, MATURITY_IN - 10);
+    // attaque : taux du peso de 7 % à 100 %, spread à 0
+    s.pool.set_rate(&Symbol::new(&s.env, "MXN"), &10_000);
+    s.pool.set_spread(&0);
+    let pnl = hedge::pnl(Side::BuyCurrency, NOTIONAL, HEDGE_LOCKED, fair, HEDGE_MARGIN);
+    assert!(pnl < 0, "cours inchangé : la sortie coûte les spreads, aucun gain");
+    let paid = s.pool.close_early(&id);
+    assert_settled(&s, id, paid, HEDGE_MARGIN + pnl, -pnl);
+}

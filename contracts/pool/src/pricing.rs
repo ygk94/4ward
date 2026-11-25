@@ -107,6 +107,17 @@ const FIXING_TTL_EXTEND_TO: u32 = 120 * 17_280;
 enum PricingKey {
     /// Cours de règlement figé d'une couverture (persistent, écrit une seule fois).
     Fixing(u64),
+    /// Taux et spread figés à l'ouverture d'une couverture (persistent), pour la sortie anticipée.
+    OpenRates(u64),
+}
+
+/// Taux USD, taux devise et spread (bps) en vigueur à l'ouverture d'une couverture.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OpenRates {
+    pub r_usd: u32,
+    pub r_dev: u32,
+    pub spread: u32,
 }
 
 /// Année de 365 jours (convention ACT/365 simplifiée) : t = durée / SECS_PER_YEAR.
@@ -427,25 +438,64 @@ pub(crate) fn fixing_missing(env: &Env, hedge_id: u64, currency: &Symbol, maturi
 /// (il reçoit un peu moins). Arrondir dans l'autre sens laisserait une fraction d'unité par
 /// couverture à l'utilisateur, exploitable en répétant de petites couvertures.
 pub(crate) fn forward_rate(env: &Env, currency: &Symbol, side: Side, duration_secs: u64) -> i128 {
+    let r = current_rates(env, currency);
+    forward_with(env, currency, side, duration_secs, &r)
+}
+
+/// Taux et spread en vigueur maintenant.
+fn current_rates(env: &Env, currency: &Symbol) -> OpenRates {
+    OpenRates {
+        r_usd: rate(env, &Symbol::new(env, "USD")) as u32,
+        r_dev: rate(env, currency) as u32,
+        spread: env.storage().instance().get(&DataKey::SpreadBps).unwrap(),
+    }
+}
+
+/// Forward au spot du jour avec les taux et le spread donnés (voir `forward_rate`).
+fn forward_with(env: &Env, currency: &Symbol, side: Side, duration_secs: u64, r: &OpenRates) -> i128 {
     if duration_secs > SECS_PER_YEAR {
         panic_with_error!(env, PricingError::DurationTooLong);
     }
     let s = spot(env, currency);
-    let r_usd = rate(env, &Symbol::new(env, "USD"));
-    let r_dev = rate(env, currency);
-    let spread: u32 = env.storage().instance().get(&DataKey::SpreadBps).unwrap();
-
     let year = crate::BPS * SECS_PER_YEAR as i128;
     let duration = duration_secs as i128;
-    let num = year + r_usd * duration;
-    let den = year + r_dev * duration;
+    let num = year + r.r_usd as i128 * duration;
+    let den = year + r.r_dev as i128 * duration;
     let f = mul_div_floor(env, s, num, den);
 
-    let spread = spread as i128;
+    let spread = r.spread as i128;
     match side {
         Side::BuyCurrency => mul_div_ceil(env, f, crate::BPS + spread, crate::BPS),
         Side::SellCurrency => mul_div_floor(env, f, crate::BPS - spread, crate::BPS),
     }
+}
+
+/// Fige les taux et le spread en vigueur pour la couverture `hedge_id` (appelé à l'ouverture).
+/// Faille 1 de la revue : la sortie anticipée calculée aux taux du moment permettait à celui qui tient
+/// la clé des taux d'ouvrir, de changer un taux, puis de sortir avec deux fois sa marge.
+pub(crate) fn lock_open_rates(env: &Env, hedge_id: u64, currency: &Symbol, ttl_threshold: u32, ttl_extend_to: u32) {
+    let key = PricingKey::OpenRates(hedge_id);
+    let s = env.storage().persistent();
+    s.set(&key, &current_rates(env, currency));
+    s.extend_ttl(&key, ttl_threshold, ttl_extend_to);
+}
+
+/// Taux figés à l'ouverture d'une couverture, s'ils existent.
+pub(crate) fn open_rates(env: &Env, hedge_id: u64) -> Option<OpenRates> {
+    env.storage().persistent().get(&PricingKey::OpenRates(hedge_id))
+}
+
+/// Taux de sortie anticipée : forward au spot du jour, mais avec les taux et le spread **figés à
+/// l'ouverture** (un changement de taux après l'ouverture ne change pas la sortie). Couverture
+/// ouverte avant ce changement (pas de taux figés) : taux du moment, comme avant.
+pub(crate) fn exit_rate(env: &Env, hedge_id: u64, currency: &Symbol, side: Side, remaining_secs: u64) -> i128 {
+    let r = open_rates(env, hedge_id).unwrap_or_else(|| current_rates(env, currency));
+    forward_with(env, currency, side, remaining_secs, &r)
+}
+
+/// Efface les taux figés d'une couverture close.
+pub(crate) fn clear_open_rates(env: &Env, hedge_id: u64) {
+    env.storage().persistent().remove(&PricingKey::OpenRates(hedge_id));
 }
 
 /// Taux annuel en bps. Panique si absent : un taux manquant = prix faux = arbitrage, jamais de défaut.

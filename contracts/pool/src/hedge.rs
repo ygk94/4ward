@@ -152,6 +152,8 @@ pub(crate) fn open(
     let key = DataKey::Hedge(id);
     env.storage().persistent().set(&key, &hedge);
     env.storage().persistent().extend_ttl(&key, HEDGE_TTL_THRESHOLD, HEDGE_TTL_EXTEND_TO);
+    // taux et spread de l'ouverture, pour la sortie anticipée (faille 1 de la revue)
+    pricing::lock_open_rates(env, id, currency, HEDGE_TTL_THRESHOLD, HEDGE_TTL_EXTEND_TO);
 
     HedgeOpened {
         hedge_id: id,
@@ -203,7 +205,8 @@ pub(crate) fn close_early(env: &Env, hedge_id: u64) -> i128 {
         Side::BuyCurrency => Side::SellCurrency,
         Side::SellCurrency => Side::BuyCurrency,
     };
-    let close_rate = pricing::forward_rate(env, &hedge.currency, exit_side, remaining);
+    // taux et spread figés à l'ouverture : changer un taux ensuite ne change pas la sortie (faille 1)
+    let close_rate = pricing::exit_rate(env, hedge_id, &hedge.currency, exit_side, remaining);
     let (pnl, payout) = close(env, &key, &mut hedge, close_rate);
     HedgeClosedEarly { hedge_id, owner: hedge.owner, close_rate, pnl, payout }.publish(env);
     payout
@@ -243,6 +246,9 @@ fn close(env: &Env, key: &DataKey, hedge: &mut Hedge, rate: i128) -> (i128, i128
 
     hedge.settled = true;
     env.storage().persistent().set(key, hedge);
+    if let DataKey::Hedge(id) = key {
+        pricing::clear_open_rates(env, *id);
+    }
     (pnl, payout)
 }
 
