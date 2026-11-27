@@ -106,6 +106,8 @@ dep() { invoke $1 $2 --lp $1 --amount $(($3 * U)) && ok "$1 : $2 $3 USDC → $OU
 dep seed-lp-anna  deposit_lp 200000
 dep seed-lp-bruno deposit_lp 150000
 dep seed-lp-chen  deposit_lp 50000
+# Dépôts senior fermés par défaut depuis B5 : l'admin les ouvre pour le peuplement.
+invoke $ADMIN set_senior_deposits_open --open true && ok "dépôts senior ouverts" || ko "ouverture des dépôts senior : $OUT"
 dep seed-lp-diane deposit_senior 100000
 dep seed-lp-emre  deposit_senior 50000
 # Le ratio dynamique minimum (20 %) laisse jusqu'à 4 × le dynamique en prudent : impossible à casser avec ces soldes
@@ -130,7 +132,7 @@ open seed-pme-tequila MXN BuyCurrency   500000 365 2000
 say "Refus attendus"
 open seed-pme-mate ARS BuyCurrency 1000000 90 1000 307      # plafond sous le minimum ARS (15 %)
 open seed-pme-vins JPY BuyCurrency 1000000 90 1000 306      # devise non activée
-invoke $ADMIN set_currency_limit --currency ARS --limit_bps 100 >/dev/null && ok "limite ARS posée à 1 % du capital"
+invoke $ADMIN set_currency_limit --currency ARS --limit_bps 100 >/dev/null && ok "limite ARS posée à 1 % du capital junior"
 open seed-pme-mate ARS BuyCurrency 100000000 90 1500 108    # marge ≈ 15 000 USDC : dépasse la limite par devise
 invoke $ADMIN set_currency_limit --currency ARS --limit_bps 10000 >/dev/null && ok "limite ARS remise à 100 %"
 

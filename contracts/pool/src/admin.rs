@@ -469,6 +469,7 @@ mod tests {
         c.set_min_cap(&mxn, &500);
 
         let shares = c.deposit_lp(&lp, &1_000_000_000_000);
+        c.set_senior_deposits_open(&true); // dépôts senior fermés par défaut (B5)
         let senior = c.deposit_senior(&lp, &100_000_000_000);
         let id = c.open_hedge(&owner, &owner, &mxn, &Side::BuyCurrency, &10_000_000_000_000, &(90 * 86_400), &1000, &None);
 

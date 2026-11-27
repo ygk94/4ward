@@ -1756,6 +1756,8 @@ struct Books {
     user_pnl: i128,
     closed: u32,
     fallbacks: u32,
+    /// ouvertures refusées par le plafond par propriétaire (120)
+    owner_cap_refusals: u32,
 }
 
 fn check_invariants(s: &Setup, open: &[Open], books: &Books, step: &str) {
@@ -1766,9 +1768,14 @@ fn check_invariants(s: &Setup, open: &[Open], books: &Books, step: &str) {
     assert_eq!(s.usdc.balance(&s.pool.address), total + margins + claimable, "conservation ({step})");
     // 2. somme nulle entre le pool et les PME
     assert_eq!(total - LP_CAPITAL, -books.user_pnl, "somme nulle ({step})");
-    // 3. réserve = marges ouvertes
+    // 3. réserve = marges ouvertes = Σ capital réservé par propriétaire (une seule PME ici)
     let e = s.pool.exposure(&Symbol::new(&s.env, "MXN"));
     assert_eq!(e.buy_margin + e.sell_margin, margins, "réserve ({step})");
+    assert_eq!(total - s.pool.capacity(), margins, "Reserved ({step})");
+    assert_eq!(s.pool.owner_reserved(&s.lucia), margins, "Σ owner_reserved = Reserved ({step})");
+    if let Some(cap) = s.pool.owner_reserve_cap() {
+        assert!(margins <= cap, "plafond par propriétaire dépassé ({step})");
+    }
     // 4. l'argent de Lucía
     assert_eq!(
         s.usdc.balance(&s.lucia) + s.pool.claimable(&s.lucia) + margins,
@@ -1813,6 +1820,10 @@ fn run_scenario(seed: u64) -> Books {
     let mut books = Books::default();
     let mut spot = SPOT_0;
     let mut now = s.env.ledger().timestamp();
+    // une graine sur deux : plafond par propriétaire (vault, 120) ; ses refus sont des refus d'ouverture normaux
+    if seed % 2 == 0 {
+        s.pool.set_owner_reserve_cap(&Some(30_000 * 10_000_000));
+    }
 
     for step in 0..40 {
         // le temps passe (au plus 5 min, sous l'âge maximal du prix) et le peso bouge de ±3 % au plus
@@ -1827,9 +1838,15 @@ fn run_scenario(seed: u64) -> Books {
                 let notional = rng.range(1, 2_000_000) * 10_000_000;
                 let duration = rng.range(60, 1_200) as u64;
                 let cap = rng.range(500, 2_000) as u32;
-                if let Ok(Ok(id)) = s.pool.try_open_hedge(&s.lucia, &s.supplier, &mxn, &side, &notional, &duration, &cap, &None) {
-                    let h = s.pool.get_hedge(&id).unwrap();
-                    open.push(Open { id, margin: h.margin, maturity: h.maturity });
+                match s.pool.try_open_hedge(&s.lucia, &s.supplier, &mxn, &side, &notional, &duration, &cap, &None) {
+                    Ok(Ok(id)) => {
+                        let h = s.pool.get_hedge(&id).unwrap();
+                        open.push(Open { id, margin: h.margin, maturity: h.maturity });
+                    }
+                    Err(Ok(e)) if e == contract_err(VaultError::OwnerReserveCapExceeded as u32) => {
+                        books.owner_cap_refusals += 1
+                    }
+                    _ => {}
                 }
             }
             // régler tout ce qui est échu
@@ -1910,12 +1927,15 @@ fn run_scenario(seed: u64) -> Books {
 #[test]
 fn random_scenarios_keep_settlement_invariants() {
     let n: u64 = std::env::var("POOL_SCENARIOS").ok().and_then(|v| v.parse().ok()).unwrap_or(40);
-    let (mut closed, mut fallbacks) = (0u64, 0u64);
+    let (mut closed, mut fallbacks, mut owner_cap_refusals) = (0u64, 0u64, 0u64);
     for seed in 1..=n {
         let b = run_scenario(seed);
         closed += b.closed as u64;
         fallbacks += b.fallbacks as u64;
+        owner_cap_refusals += b.owner_cap_refusals as u64;
     }
+    std::println!("{closed} closes, {fallbacks} secours, {owner_cap_refusals} refus 120");
+    assert!(owner_cap_refusals > 0, "le plafond par propriétaire n'a jamais servi");
     // les scénarios exercent vraiment chaque voie de sortie
     assert!(closed > 7 * n, "{closed} couvertures closes seulement");
     assert!(fallbacks > n / 4, "{fallbacks} passages par la voie de secours seulement");
@@ -2502,4 +2522,82 @@ fn close_early_uses_rates_frozen_at_open() {
     assert!(pnl < 0, "cours inchangé : la sortie coûte les spreads, aucun gain");
     let paid = s.pool.close_early(&id);
     assert_closed_early(&s, id, paid, HEDGE_MARGIN + pnl, -pnl);
+}
+
+// ---- Plafond de capital réservé par propriétaire (vault, 120), de bout en bout ----
+
+/// Plafond posé à 1,5 marge de démo : une couverture passe, la seconde de la même PME est refusée.
+fn with_owner_cap(s: &Setup) -> u64 {
+    fund_pool(s);
+    s.pool.set_owner_reserve_cap(&Some(HEDGE_MARGIN * 3 / 2));
+    let id = open_as(s, &s.lucia).unwrap();
+    assert_eq!(s.pool.owner_reserved(&s.lucia), HEDGE_MARGIN);
+    id
+}
+
+#[test]
+fn owner_cap_refuses_open_hedge_and_reverts_the_margin_transfer() {
+    let s = setup();
+    with_owner_cap(&s);
+    let (lucia_before, pool_before, books_before) =
+        (s.usdc.balance(&s.lucia), s.usdc.balance(&s.pool.address), pool_books(&s));
+    // achat ou vente : le plafond porte sur la somme brute des marges
+    assert_eq!(open_as(&s, &s.lucia), Err(contract_err(VaultError::OwnerReserveCapExceeded as u32)));
+    let sell = s.pool.try_open_hedge(
+        &s.lucia, &s.supplier, &Symbol::new(&s.env, "MXN"), &Side::SellCurrency, &NOTIONAL, &MATURITY_IN, &1000, &None,
+    );
+    assert_eq!(sell, Err(Ok(contract_err(VaultError::OwnerReserveCapExceeded as u32))));
+    // tout est annulé : la marge n'a pas quitté le wallet, rien n'est réservé en plus
+    assert_eq!(s.usdc.balance(&s.lucia), lucia_before);
+    assert_eq!(s.usdc.balance(&s.pool.address), pool_before);
+    assert_eq!(pool_books(&s), books_before);
+    assert_eq!(s.pool.owner_reserved(&s.lucia), HEDGE_MARGIN);
+    // le plafond est par propriétaire : une autre PME autorisée ouvre normalement
+    let other = outsider(&s);
+    s.pool.set_allowed(&Role::Sme, &other, &true);
+    open_as(&s, &other).unwrap();
+    assert_eq!(s.pool.owner_reserved(&other), HEDGE_MARGIN);
+    assert_eq!(pool_books(&s).1, 2 * HEDGE_MARGIN);
+}
+
+#[test]
+fn owner_reserved_back_to_zero_after_settle() {
+    let s = setup();
+    let id = with_owner_cap(&s);
+    at_maturity(&s, SPOT_0);
+    s.pool.settle(&id);
+    assert_eq!(s.pool.owner_reserved(&s.lucia), 0);
+    // la place est rendue : Lucía peut rouvrir sous le même plafond
+    open_as(&s, &s.lucia).unwrap();
+}
+
+#[test]
+fn owner_reserved_back_to_zero_after_close_early() {
+    let s = setup();
+    let id = with_owner_cap(&s);
+    s.pool.close_early(&id);
+    assert_eq!(s.pool.owner_reserved(&s.lucia), 0);
+    open_as(&s, &s.lucia).unwrap();
+}
+
+#[test]
+fn owner_reserved_back_to_zero_after_admin_settle_fallback() {
+    let s = setup();
+    let now = s.env.ledger().timestamp();
+    let id = with_owner_cap(&s);
+    s.env.ledger().set_timestamp(now + MATURITY_IN + AFTER_HISTORY);
+    s.pool.settle_fallback(&id);
+    assert_eq!(s.pool.owner_reserved(&s.lucia), 0);
+    set_spot(&s, SPOT_0);
+    open_as(&s, &s.lucia).unwrap();
+}
+
+#[test]
+fn owner_reserved_back_to_zero_after_settle_and_pay() {
+    let s = setup();
+    let id = with_owner_cap(&s);
+    payment_route(&s);
+    at_maturity(&s, SWAP_PRICE);
+    s.pool.settle_and_pay(&id, &SWAP_COST, &pay_deadline(&s));
+    assert_eq!(s.pool.owner_reserved(&s.lucia), 0);
 }

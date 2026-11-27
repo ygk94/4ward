@@ -204,8 +204,26 @@ impl Pool {
     }
 
     /// Valeur des deux tranches (senior + junior = total_assets) et prix d'une part senior.
+    /// `senior` est la créance senior (ce qui est dû) ; ce qui peut sortir aujourd'hui est
+    /// `senior` − `senior_arrears()`.
     pub fn tranche_values(env: Env) -> vault::TrancheValues {
         vault::tranche_values(&env)
+    }
+
+    /// Intérêts senior en retard de service (USDC, 7 décimales) : la part de la créance senior que
+    /// le junior ne peut pas payer sans entamer le capital réservé. 0 en temps normal.
+    pub fn senior_arrears(env: Env) -> i128 {
+        vault::senior_arrears(&env)
+    }
+
+    /// Dépôts senior ouverts ? Fermés par défaut.
+    pub fn senior_deposits_open(env: Env) -> bool {
+        vault::senior_deposits_open(&env)
+    }
+
+    /// Admin : ouvre ou ferme les dépôts senior. Les retraits senior restent toujours possibles.
+    pub fn set_senior_deposits_open(env: Env, open: bool) {
+        vault::set_senior_deposits_open(&env, open)
     }
 
     /// Exposition du pool sur une devise (couvertures ouvertes) : volumes acheteur / vendeur
@@ -214,12 +232,12 @@ impl Pool {
         vault::exposure(&env, &currency)
     }
 
-    /// Limite de la devise en bps du capital (Σ marges de la devise), `None` = sans limite.
+    /// Limite de la devise en bps de la valeur junior (Σ marges de la devise), `None` = sans limite.
     pub fn currency_limit(env: Env, currency: Symbol) -> Option<u32> {
         vault::currency_limit(&env, &currency)
     }
 
-    /// Admin : Σ marges ouvertes d'une devise ≤ `limit_bps` × capital / 10 000.
+    /// Admin : Σ marges ouvertes d'une devise ≤ `limit_bps` × valeur junior / 10 000.
     /// 0 = plus de nouvelles couvertures sur cette devise.
     pub fn set_currency_limit(env: Env, currency: Symbol, limit_bps: u32) {
         vault::set_currency_limit(&env, &currency, limit_bps)
@@ -256,6 +274,23 @@ impl Pool {
     /// Contrôlé à l'ouverture seulement : un règlement n'est jamais bloqué.
     pub fn set_notional_cap(env: Env, cap: Option<i128>) {
         vault::set_notional_cap(&env, cap)
+    }
+
+    /// Admin : plafond du capital réservé (Σ marges des couvertures ouvertes) par propriétaire,
+    /// USDC 7 décimales, `None` = sans plafond. Contrôlé à l'ouverture seulement (erreur 120) ;
+    /// `InvalidAmount` (100) si négatif. Par adresse : n'a de sens qu'avec la liste blanche PME.
+    pub fn set_owner_reserve_cap(env: Env, cap: Option<i128>) {
+        vault::set_owner_reserve_cap(&env, cap)
+    }
+
+    /// Plafond du capital réservé par propriétaire ; `None` = sans plafond.
+    pub fn owner_reserve_cap(env: Env) -> Option<i128> {
+        vault::owner_reserve_cap(&env)
+    }
+
+    /// Capital réservé (Σ marges) des couvertures ouvertes de `owner`, USDC 7 décimales.
+    pub fn owner_reserved(env: Env, owner: Address) -> i128 {
+        vault::owner_reserved(&env, &owner)
     }
 
     /// Σ notionnels des couvertures ouvertes, USDC 7 décimales au taux bloqué.

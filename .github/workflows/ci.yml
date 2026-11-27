@@ -8,7 +8,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
       - run: cargo test
+      - name: Tests du mode démo (feature demo)
+        run: cargo test -p pool --features demo
+      - name: Installer stellar-cli 28.1.0
+        run: |
+          mkdir -p "$HOME/bin"
+          curl -sSfL https://github.com/stellar/stellar-cli/releases/download/v28.1.0/stellar-cli-28.1.0-x86_64-unknown-linux-gnu.tar.gz | tar xz -C "$HOME/bin" stellar
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+          "$HOME/bin/stellar" --version
+      - name: Build des contrats (production, puis démo)
+        run: |
+          stellar contract build
+          sha256sum target/wasm32v1-none/release/pool.wasm
+          stellar contract build --package pool --features demo
   front:
     runs-on: ubuntu-latest
     defaults:

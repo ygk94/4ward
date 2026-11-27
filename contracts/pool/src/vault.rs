@@ -12,7 +12,12 @@
 //!   n'est pas versé, la décote reste aux LPs restants ;
 //! - arrondis toujours vers le bas, en faveur du pool.
 //! Le prix se calcule sur la compta interne, pas sur le solde USDC : un envoi direct d'USDC
-//! au contrat ne change pas le prix de la part (pas d'attaque par inflation).
+//! au contrat ne change pas le prix de la part.
+//! Plancher de parts (B6) : la décote de sortie permettait une inflation du prix de la part (un
+//! LP retire tout sauf une poussière de part pendant que du capital est réservé ; le déposant
+//! suivant reçoit presque rien et perd au règlement). Tant que `Reserved > 0`, un retrait ne peut
+//! pas laisser moins de `MIN_JUNIOR_SHARES` parts junior (`LastShareLocked`), et aucune couverture
+//! ne s'ouvre sur un pool qui en a moins (décision D2, `docs/decisions-contrat.md`).
 //!
 //! Exposition par devise : `open_position` / `close_position` (appelés par hedge.rs) réservent
 //! la marge et tiennent, par devise, les volumes acheteur / vendeur (USDC au taux bloqué) et
@@ -24,8 +29,15 @@
 //! Tranches : `TotalDeposits` = capital senior + capital junior.
 //! - Senior : parts dont le prix progresse au taux fixe `SENIOR_RATE_BPS` (intérêts simples entre
 //!   deux opérations senior, capitalisés à chaque `deposit_senior` / `withdraw_senior` dans
-//!   `SeniorPrice` / `SeniorUpdatedAt`). Valeur senior = parts × prix courant, plafonnée à
-//!   `TotalDeposits`.
+//!   `SeniorPrice` / `SeniorUpdatedAt`). Deux valeurs (B5) :
+//!   - créance senior = parts × prix courant, plafonnée à `TotalDeposits` : ce qui est dû. Elle
+//!     fixe la valeur junior, donc le prix d'entrée junior et le ratio de 20 % ;
+//!   - valeur payable = min(créance, TotalDeposits − Reserved) : ce qui peut sortir sans toucher
+//!     au capital qui garantit les couvertures. Elle sert aux retraits senior et à
+//!     `senior_balance`. L'écart (`senior_arrears`) est un retard de service, versé quand le
+//!     junior se reconstitue ; un dépôt senior est refusé pendant ce retard (`SeniorArrears`).
+//!   Pas de provision d'intérêts dans la capacité (décision D1, `docs/decisions-contrat.md`).
+//!   Dépôts senior fermés par défaut (`SeniorDepositsClosed`), ouverts par l'admin.
 //! - Junior : le reste, `TotalDeposits − valeur senior`. Les parts LP historiques (`deposit_lp`,
 //!   `withdraw`) sont les parts junior : prix plein, prix de sortie et capacité se calculent sur
 //!   la valeur junior. `book_gain` / `book_loss` font bouger `TotalDeposits`, donc le junior
@@ -35,6 +47,8 @@
 //! - Ratio minimum : tant qu'il y a des parts senior, junior ≥ `MIN_JUNIOR_BPS` du capital ;
 //!   un dépôt senior ou un retrait junior qui passerait dessous est refusé (contrôlé à ces
 //!   opérations seulement : les intérêts senior courus peuvent faire baisser le junior ensuite).
+//!   Si le junior passe sous `Reserved`, la capacité reste à 0 (jamais négative) : aucune
+//!   ouverture ni retrait junior jusqu'aux prochains règlements.
 //!
 //! Pilote (B9, côté vault) :
 //! - liste blanche des LP, active par défaut : seuls les LP autorisés par l'admin déposent
@@ -90,11 +104,23 @@ pub enum VaultError {
     JuniorRatioTooLow = 111,
     /// Retrait de plus de parts senior que le LP n'en détient.
     InsufficientSeniorShares = 112,
-    // 113 : réservé (refus de `withdraw_senior` sous Reserved, voir B3).
+    // 113 : réservé au refus des dépôts tant qu'une couverture échue n'est pas réglée (B3).
     /// Dépôt (junior ou senior) d'un LP absent de la liste blanche, liste active.
     LpNotAllowed = 114,
     /// Ouverture refusée : le notionnel total ouvert dépasserait le plafond de l'admin.
     NotionalCapExceeded = 115,
+    /// Retrait junior refusé : avec du capital réservé, il laisserait moins de `MIN_JUNIOR_SHARES`
+    /// parts junior (B6).
+    LastShareLocked = 116,
+    /// Retrait senior refusé : il laisserait le capital sous le capital réservé (B5, garde-fou ;
+    /// inatteignable tant que le montant est calculé sur la valeur payable).
+    SeniorWithdrawBelowReserved = 117,
+    /// Dépôt senior refusé : des intérêts senior sont en retard de service (B5).
+    SeniorArrears = 118,
+    /// Dépôt senior refusé : les dépôts senior sont fermés (B5, fermés par défaut).
+    SeniorDepositsClosed = 119,
+    /// Ouverture refusée : le capital réservé pour ce propriétaire dépasserait son plafond.
+    OwnerReserveCapExceeded = 120,
 }
 
 /// Clés de stockage propres au vault.
@@ -107,7 +133,7 @@ pub enum VaultKey {
     TotalShares,
     /// Exposition d'une devise (persistent).
     Exposure(Symbol),
-    /// Limite d'une devise en bps du capital (persistent), absente = sans limite.
+    /// Limite d'une devise en bps de la valeur junior (persistent), absente = sans limite.
     CurrencyLimit(Symbol),
     /// Parts senior d'un LP (persistent).
     SeniorShares(Address),
@@ -125,6 +151,13 @@ pub enum VaultKey {
     TotalNotional,
     /// Plafond de `TotalNotional` (instance) ; absent = sans plafond.
     NotionalCap,
+    /// Dépôts senior ouverts (instance) ; absent = fermés (B5).
+    SeniorDepositsOpen,
+    /// Capital réservé (Σ marges) des couvertures ouvertes d'un propriétaire (persistent) ;
+    /// clé supprimée à 0.
+    OwnerReserved(Address),
+    /// Plafond de `OwnerReserved` par propriétaire (instance) ; absent = sans plafond.
+    OwnerReserveCap,
 }
 
 /// Valeur des deux tranches en USDC (7 décimales). senior + junior = TotalDeposits.
@@ -247,6 +280,20 @@ pub struct NotionalCapSet {
     pub cap: Option<i128>,
 }
 
+/// L'admin a changé le plafond de capital réservé par propriétaire (`None` = sans plafond).
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OwnerReserveCapSet {
+    pub cap: Option<i128>,
+}
+
+/// L'admin a ouvert ou fermé les dépôts senior (B5).
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SeniorDepositsOpenSet {
+    pub open: bool,
+}
+
 /// 1 part = 1 USDC au premier dépôt : prix exprimé en 7 décimales.
 const PRICE_ONE: i128 = 10_000_000;
 
@@ -258,6 +305,8 @@ const TTL_EXTEND_TO: u32 = 120 * DAY_IN_LEDGERS;
 
 /// Taux fixe du senior, en bps par an (intérêts simples entre deux opérations senior).
 pub(crate) const SENIOR_RATE_BPS: i128 = 450;
+/// Plancher de parts junior tant que du capital est réservé (B6) : 1 USDC de parts.
+pub(crate) const MIN_JUNIOR_SHARES: i128 = 10_000_000;
 /// Part minimale du junior dans le capital tant qu'il y a des parts senior (2 000 = 20 %).
 pub(crate) const MIN_JUNIOR_BPS: i128 = 2_000;
 /// Prix senior en 18 décimales : à 7 décimales, l'intérêt de quelques secondes s'arrondirait à 0.
@@ -334,11 +383,9 @@ fn set_lp_shares(env: &Env, lp: &Address, value: i128) {
     }
 }
 
-/// Capital libre, jamais négatif. La capacité peut devenir négative quand les intérêts senior
-/// courus font passer le junior sous Reserved (aucun retrait junior alors), ou par un mauvais
-/// usage (`book_loss` sans `release`) ; on ne verse ni n'affiche alors rien.
+/// Capital libre (junior − Reserved), jamais négatif : base du prix de sortie junior.
 fn free_capital(env: &Env) -> i128 {
-    capacity(env).max(0)
+    capacity(env)
 }
 
 // ---- tranches ----
@@ -385,15 +432,23 @@ fn accrue_senior(env: &Env) -> i128 {
     price
 }
 
-/// Valeur senior = parts × prix courant, plafonnée au capital (le junior ne descend pas sous 0).
-fn senior_value(env: &Env) -> i128 {
+/// Créance senior = parts × prix courant, plafonnée au capital : ce qui est dû au senior. Fixe la
+/// valeur junior (prix d'entrée junior, ratio de 20 %). Ne pas l'utiliser pour payer un retrait
+/// senior : voir `senior_payable`.
+fn senior_claim(env: &Env) -> i128 {
     let promised = mul_div(env, senior_total_shares(env), senior_price_now(env), SENIOR_PRICE_ONE);
     promised.min(total_deposits(env).max(0))
 }
 
-/// Valeur junior = capital − valeur senior, ≥ 0.
+/// Valeur senior payable = min(créance, capital − Reserved) : ce qui peut sortir sans entamer le
+/// capital qui garantit les couvertures ouvertes (B5).
+fn senior_payable(env: &Env) -> i128 {
+    senior_claim(env).min((total_deposits(env) - reserved(env)).max(0))
+}
+
+/// Valeur junior = capital − créance senior, ≥ 0.
 fn junior_value(env: &Env) -> i128 {
-    (total_deposits(env) - senior_value(env)).max(0)
+    (total_deposits(env) - senior_claim(env)).max(0)
 }
 
 /// Refuse un état où le junior serait sous `MIN_JUNIOR_BPS` du capital.
@@ -411,10 +466,8 @@ fn check_junior_ratio(env: &Env, junior: i128, total: i128) {
 
 /// Dépose `amount` USDC contre des parts junior au prix plein (valeur junior / parts junior),
 /// arrondi vers le bas. Retourne les parts du LP après le dépôt.
-/// Limite connue : si toutes les parts junior ont été brûlées avec du capital restant
-/// (Reserved laissé par le dernier LP sorti), le déposant suivant reçoit des parts à 1:1 et
-/// hérite de ce capital (et des pertes des couvertures encore ouvertes). À terme : refuser
-/// dans `withdraw` de brûler la dernière part tant que `reserved > 0`.
+/// Le plancher de parts de `withdraw` (B6) empêche qu'il ne reste du capital réservé sans parts
+/// junior, ou adossé à une poussière de parts.
 /// Erreurs : `LpNotAllowed`, `InvalidAmount`, `PoolDepleted`, `DepositTooSmall`, `Overflow`.
 pub(crate) fn deposit(env: &Env, lp: &Address, amount: i128) -> i128 {
     lp.require_auth();
@@ -454,8 +507,11 @@ pub(crate) fn deposit(env: &Env, lp: &Address, amount: i128) -> i128 {
 /// ((valeur junior − Reserved) / parts junior), arrondi vers le bas.
 /// Le capital réservé n'est pas versé : le montant ne dépasse jamais `capacity()`.
 /// Retourne l'USDC versé.
-/// Erreurs : `InvalidAmount`, `InsufficientShares`, `WithdrawTooSmall`, `JuniorRatioTooLow`,
-/// `Overflow`.
+/// Plancher (B6) : tant que du capital est réservé, le retrait ne peut pas laisser moins de
+/// `MIN_JUNIOR_SHARES` parts junior au total, toutes adresses confondues. Contrôlé avant le
+/// montant, pour que `WithdrawTooSmall` ne masque pas `LastShareLocked`.
+/// Erreurs : `InvalidAmount`, `InsufficientShares`, `LastShareLocked`, `WithdrawTooSmall`,
+/// `JuniorRatioTooLow`, `Overflow`.
 pub(crate) fn withdraw(env: &Env, lp: &Address, shares: i128) -> i128 {
     lp.require_auth();
     bump_instance(env);
@@ -468,6 +524,9 @@ pub(crate) fn withdraw(env: &Env, lp: &Address, shares: i128) -> i128 {
     }
     // shares ≤ owned ≤ TotalShares, donc TotalShares > 0.
     let shares_total = total_shares(env);
+    if reserved(env) > 0 && shares_total - shares < MIN_JUNIOR_SHARES {
+        panic_with_error!(env, VaultError::LastShareLocked);
+    }
     let amount = mul_div(env, shares, free_capital(env), shares_total);
     if amount <= 0 {
         panic_with_error!(env, VaultError::WithdrawTooSmall);
@@ -533,25 +592,35 @@ fn usdc(env: &Env) -> token::Client<'_> {
     token::Client::new(env, &address)
 }
 
-/// Valeur junior − Reserved : seul le junior porte les couvertures. Sans senior,
-/// TotalDeposits − Reserved. Peut devenir négatif quand les intérêts senior courus font passer
-/// le junior sous Reserved (aucun retrait junior alors), voir `free_capital`.
+/// max(valeur junior − Reserved, 0) : seul le junior porte les couvertures. Sans senior,
+/// TotalDeposits − Reserved. Reste à 0 (jamais négatif) quand les intérêts senior courus ou un
+/// mauvais usage (`book_loss` sans `release`) font passer le junior sous Reserved.
 pub(crate) fn capacity(env: &Env) -> i128 {
     bump_instance(env);
-    junior_value(env) - reserved(env)
+    (junior_value(env) - reserved(env)).max(0)
 }
 
 /// Dépose `amount` USDC contre des parts senior au prix courant (capitalisé à cet instant),
 /// arrondi vers le bas. Retourne les parts senior du LP après le dépôt.
-/// Erreurs : `LpNotAllowed`, `InvalidAmount`, `DepositTooSmall`, `JuniorRatioTooLow`, `Overflow`.
+/// Refusé quand les dépôts senior sont fermés (par défaut) ou quand des intérêts sont en retard
+/// de service : le déposant achèterait au prix couru une part dont la valeur payable est moindre,
+/// au profit des seniors en place.
+/// Erreurs : `LpNotAllowed`, `SeniorDepositsClosed`, `InvalidAmount`, `SeniorArrears`,
+/// `DepositTooSmall`, `JuniorRatioTooLow`, `Overflow`.
 pub(crate) fn deposit_senior(env: &Env, lp: &Address, amount: i128) -> i128 {
     lp.require_auth();
     bump_instance(env);
     require_lp_allowed(env, lp);
+    if !senior_deposits_open(env) {
+        panic_with_error!(env, VaultError::SeniorDepositsClosed);
+    }
     if amount <= 0 {
         panic_with_error!(env, VaultError::InvalidAmount);
     }
     let price = accrue_senior(env);
+    if senior_arrears(env) > 0 {
+        panic_with_error!(env, VaultError::SeniorArrears);
+    }
     let minted = mul_div(env, amount, SENIOR_PRICE_ONE, price);
     if minted == 0 {
         panic_with_error!(env, VaultError::DepositTooSmall);
@@ -571,14 +640,14 @@ pub(crate) fn deposit_senior(env: &Env, lp: &Address, amount: i128) -> i128 {
     shares
 }
 
-/// Brûle `shares` parts senior du LP et lui verse leur valeur (valeur senior × parts / parts
-/// senior totales), arrondi vers le bas. Le retrait senior ne touche pas la valeur junior,
-/// donc ni la capacité ni le ratio ne bougent, SAUF si le junior est déjà passé sous Reserved
-/// (intérêts senior courus) : le retrait peut alors laisser TotalDeposits < Reserved, et un
-/// `settle` perdant pour le pool échouerait en `LossExceedsCapital` tant qu'un LP ne redépose
-/// pas. Limite connue, à corriger après le hackathon (refus si TotalDeposits − amount < Reserved,
-/// nouveau code 113). Retourne l'USDC versé.
-/// Erreurs : `InvalidAmount`, `InsufficientSeniorShares`, `WithdrawTooSmall`, `Overflow`.
+/// Brûle `shares` parts senior du LP et lui verse leur part de la valeur PAYABLE (valeur payable
+/// × parts / parts senior totales), arrondi vers le bas. Quand les intérêts senior dépassent ce
+/// que le junior peut payer au-delà du capital réservé, le retrait est limité : TotalDeposits
+/// reste ≥ Reserved et un règlement perdant pour le pool passe toujours (B5). Le senior qui sort
+/// pendant ce retard abandonne sa part des intérêts non servis au junior (D1).
+/// Retourne l'USDC versé.
+/// Erreurs : `InvalidAmount`, `InsufficientSeniorShares`, `SeniorWithdrawBelowReserved`,
+/// `WithdrawTooSmall`, `Overflow`.
 pub(crate) fn withdraw_senior(env: &Env, lp: &Address, shares: i128) -> i128 {
     lp.require_auth();
     bump_instance(env);
@@ -592,7 +661,11 @@ pub(crate) fn withdraw_senior(env: &Env, lp: &Address, shares: i128) -> i128 {
     accrue_senior(env);
     // shares ≤ owned ≤ SeniorTotalShares, donc SeniorTotalShares > 0.
     let senior_total = senior_total_shares(env);
-    let amount = mul_div(env, shares, senior_value(env), senior_total);
+    let amount = mul_div(env, shares, senior_payable(env), senior_total);
+    // Garde-fou : ne doit jamais se déclencher (montant ≤ valeur payable ≤ capital − Reserved).
+    if total_deposits(env) - amount < reserved(env) {
+        panic_with_error!(env, VaultError::SeniorWithdrawBelowReserved);
+    }
     if amount <= 0 {
         panic_with_error!(env, VaultError::WithdrawTooSmall);
     }
@@ -607,20 +680,40 @@ pub(crate) fn withdraw_senior(env: &Env, lp: &Address, shares: i128) -> i128 {
     amount
 }
 
-/// Valeur en USDC des parts senior du LP au prix courant.
+/// Valeur en USDC des parts senior du LP, ce qu'il recevrait en retirant tout (valeur payable).
 pub(crate) fn senior_balance(env: &Env, lp: &Address) -> i128 {
     bump_instance(env);
     let senior_total = senior_total_shares(env);
     if senior_total == 0 {
         return 0;
     }
-    mul_div(env, senior_shares(env, lp), senior_value(env), senior_total)
+    mul_div(env, senior_shares(env, lp), senior_payable(env), senior_total)
+}
+
+/// Intérêts senior en retard de service : créance − valeur payable, ≥ 0 (B5).
+pub(crate) fn senior_arrears(env: &Env) -> i128 {
+    bump_instance(env);
+    senior_claim(env) - senior_payable(env)
+}
+
+/// Dépôts senior ouverts ? Faux tant que l'admin ne les a pas ouverts (B5).
+pub(crate) fn senior_deposits_open(env: &Env) -> bool {
+    bump_instance(env);
+    env.storage().instance().get(&VaultKey::SeniorDepositsOpen).unwrap_or(false)
+}
+
+/// Admin : ouvre ou ferme les dépôts senior. Les retraits senior restent toujours possibles.
+pub(crate) fn set_senior_deposits_open(env: &Env, open: bool) {
+    crate::admin(env).require_auth();
+    bump_instance(env);
+    env.storage().instance().set(&VaultKey::SeniorDepositsOpen, &open);
+    SeniorDepositsOpenSet { open }.publish(env);
 }
 
 /// Valeur des deux tranches et prix courant d'une part senior (7 décimales).
 pub(crate) fn tranche_values(env: &Env) -> TrancheValues {
     bump_instance(env);
-    let senior = senior_value(env);
+    let senior = senior_claim(env);
     TrancheValues {
         senior,
         junior: (total_deposits(env) - senior).max(0),
@@ -636,7 +729,8 @@ pub(crate) fn reserve(env: &Env, amount: i128) {
     if amount <= 0 {
         panic_with_error!(env, VaultError::InvalidAmount);
     }
-    if amount > capacity(env) {
+    // D2 : pas de couverture sur un pool réduit à moins de `MIN_JUNIOR_SHARES` parts junior.
+    if amount > capacity(env) || total_shares(env) < MIN_JUNIOR_SHARES {
         panic_with_error!(env, VaultError::InsufficientCapacity);
     }
     set_reserved(env, reserved(env) + amount);
@@ -671,7 +765,7 @@ pub(crate) fn book_gain(env: &Env, amount: i128) {
 }
 
 /// Le pool paie une perte (la PME est protégée) : `TotalDeposits -= amount`.
-/// Le transfert vers la PME est fait par hedge.rs avec la restitution de la marge.
+/// hedge.rs crédite ensuite la PME (marge ± P&L) sur son solde réclamable (B4), sans transfert.
 /// `amount == 0` est accepté (P&L nul) ; `InvalidAmount` si négatif,
 /// `LossExceedsCapital` si le capital des LPs deviendrait négatif.
 pub(crate) fn book_loss(env: &Env, amount: i128) {
@@ -691,7 +785,7 @@ pub(crate) fn book_loss(env: &Env, amount: i128) {
 
 /// Ouverture d'une couverture : réserve la marge, contrôle la limite de la devise et ajoute
 /// l'exposition. À appeler par hedge::open une fois la `Hedge` construite.
-/// Erreurs : `InvalidAmount`, `InsufficientCapacity`, `CurrencyLimitExceeded`,
+/// Erreurs : `InvalidAmount`, `InsufficientCapacity`, `OwnerReserveCapExceeded`, `CurrencyLimitExceeded`,
 /// `NotionalCapExceeded`, `Overflow`.
 pub(crate) fn open_position(env: &Env, hedge: &Hedge) {
     if hedge.notional <= 0 {
@@ -699,11 +793,23 @@ pub(crate) fn open_position(env: &Env, hedge: &Hedge) {
     }
     reserve(env, hedge.margin);
 
+    // Plafond par propriétaire : sans lui, une même adresse ouvre achat + vente du même montant
+    // (sans risque de change pour elle) et bloque la capacité de tout le pool.
+    let owner_after = add(env, owner_reserved(env, &hedge.owner), hedge.margin);
+    if let Some(cap) = owner_reserve_cap(env) {
+        if owner_after > cap {
+            panic_with_error!(env, VaultError::OwnerReserveCapExceeded);
+        }
+    }
+    set_owner_reserved(env, &hedge.owner, owner_after);
+
     let mut e = exposure(env, &hedge.currency);
     let margins_after = add(env, add(env, e.buy_margin, e.sell_margin), hedge.margin);
     if let Some(limit_bps) = currency_limit(env, &hedge.currency) {
-        // Plafond arrondi vers le bas : en faveur du pool.
-        if margins_after > mul_div(env, total_deposits(env), limit_bps as i128, BPS) {
+        // Mesurée sur la valeur junior, seule à porter les couvertures (le Safe n'en porte
+        // aucune) : sur TotalDeposits, 80 % de Safe laissaient une devise prendre presque tout le
+        // junior. Plafond arrondi vers le bas : en faveur du pool.
+        if margins_after > mul_div(env, junior_value(env), limit_bps as i128, BPS) {
             panic_with_error!(env, VaultError::CurrencyLimitExceeded);
         }
     }
@@ -753,6 +859,11 @@ pub(crate) fn close_position(env: &Env, hedge: &Hedge) {
     // couvertures encore ouvertes. Sans conséquence en pratique : le testnet sera redéployé (pas mis à
     // jour) en semaine 49, aucune couverture antérieure à B9 n'existera.
     set_total_notional(env, (total_notional(env) - notional_usd).max(0));
+    // Borné à 0 pour la même raison : une couverture ouverte avant ce plafond n'a pas été comptée.
+    // Limite connue : si le propriétaire a aussi une couverture comptée, clore d'abord l'ancienne
+    // efface une partie de la nouvelle du compteur, qui sous-compte alors (dépassement borné par
+    // la marge de l'ancienne). Sans conséquence : le testnet sera redéployé, pas mis à jour.
+    set_owner_reserved(env, &hedge.owner, (owner_reserved(env, &hedge.owner) - hedge.margin).max(0));
 
     release(env, hedge.margin);
     PositionReleased { currency: hedge.currency.clone(), side: hedge.side, margin: hedge.margin }.publish(env);
@@ -780,7 +891,7 @@ pub(crate) fn currency_limit(env: &Env, currency: &Symbol) -> Option<u32> {
     read_persistent(env, &VaultKey::CurrencyLimit(currency.clone()))
 }
 
-/// Admin : limite de la devise en bps du capital. 0 bloque les nouvelles couvertures,
+/// Admin : limite de la devise en bps de la valeur junior (le Safe ne porte aucune couverture). 0 bloque les nouvelles couvertures,
 /// 10 000 ou plus revient à ne pas avoir de limite (la capacité du pool borne déjà la réserve).
 pub(crate) fn set_currency_limit(env: &Env, currency: &Symbol, limit_bps: u32) {
     crate::admin(env).require_auth();
@@ -856,6 +967,39 @@ pub(crate) fn set_notional_cap(env: &Env, cap: Option<i128>) {
     NotionalCapSet { cap }.publish(env);
 }
 
+/// Capital réservé (Σ marges) des couvertures ouvertes de `owner`, USDC 7 décimales.
+pub(crate) fn owner_reserved(env: &Env, owner: &Address) -> i128 {
+    bump_instance(env);
+    read_persistent(env, &VaultKey::OwnerReserved(owner.clone())).unwrap_or(0)
+}
+
+fn set_owner_reserved(env: &Env, owner: &Address, value: i128) {
+    let key = VaultKey::OwnerReserved(owner.clone());
+    if value == 0 {
+        env.storage().persistent().remove(&key);
+    } else {
+        write_persistent(env, &key, &value);
+    }
+}
+
+pub(crate) fn owner_reserve_cap(env: &Env) -> Option<i128> {
+    bump_instance(env);
+    env.storage().instance().get(&VaultKey::OwnerReserveCap)
+}
+
+/// Admin : plafond du capital réservé par propriétaire, `None` le supprime. `InvalidAmount` si
+/// négatif. Un plafond sous ce qui est déjà réservé bloque seulement les nouvelles ouvertures.
+pub(crate) fn set_owner_reserve_cap(env: &Env, cap: Option<i128>) {
+    crate::admin(env).require_auth();
+    bump_instance(env);
+    match cap {
+        Some(c) if c < 0 => panic_with_error!(env, VaultError::InvalidAmount),
+        Some(c) => env.storage().instance().set(&VaultKey::OwnerReserveCap, &c),
+        None => env.storage().instance().remove(&VaultKey::OwnerReserveCap),
+    }
+    OwnerReserveCapSet { cap }.publish(env);
+}
+
 // ---- netting : calcul exact, NON branché (voir l'en-tête) ----
 
 /// Une jambe d'un panier (même devise, même échéance, même fixing).
@@ -917,6 +1061,23 @@ pub(crate) fn basket_max_loss(legs: &[Leg]) -> i128 {
     worst.max(0) + legs.len() as i128
 }
 
+// Filet de tests du vault (phase 1), un fichier par angle : voir `vault_net/README.md`.
+#[cfg(test)]
+#[path = "vault_net/attack.rs"]
+mod net_attack;
+#[cfg(test)]
+#[path = "vault_net/world.rs"]
+mod net_world;
+#[cfg(test)]
+#[path = "vault_net/platform.rs"]
+mod net_platform;
+#[cfg(test)]
+#[path = "vault_net/mutants.rs"]
+mod net_mutants;
+#[cfg(test)]
+#[path = "vault_net/props.rs"]
+mod net_props;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -942,6 +1103,7 @@ mod tests {
         let usdc = env.register_stellar_asset_contract_v2(admin.clone()).address();
         let oracle = env.register(mock_oracle::MockOracle, (&admin,));
         let pool = env.register(Pool, (&admin, &usdc, &oracle, &50u32));
+        PoolClient::new(&env, &pool).set_senior_deposits_open(&true); // fermés par défaut (B5)
         Setup { env, admin, pool, usdc }
     }
 
@@ -1320,13 +1482,15 @@ mod tests {
         assert_eq!(c.exit_price(), 5_000_000);
         assert_eq!(c.lp_balance(&lp), 500 * USDC);
 
-        // Tout retirer : seulement le capital libre, jamais plus que capacity().
+        // Tout retirer est refusé (plancher de parts, B6) : il resterait du capital réservé sans part.
+        assert_eq!(c.try_withdraw(&lp, &(1_000 * USDC)).err(), Some(Ok(VaultError::LastShareLocked.into())));
+        // Retirer jusqu'au plancher : seulement le capital libre, jamais plus que capacity().
         let capacity_before = c.capacity();
-        let paid = c.withdraw(&lp, &(1_000 * USDC));
-        assert_eq!(paid, 500 * USDC);
+        let paid = c.withdraw(&lp, &(1_000 * USDC - MIN_JUNIOR_SHARES));
+        assert_eq!(paid, 499_5 * USDC / 10);
         assert!(paid <= capacity_before);
-        assert_eq!(c.capacity(), 0);
-        assert_eq!(c.total_assets(), 500 * USDC);
+        assert_eq!(c.lp_shares(&lp), MIN_JUNIOR_SHARES);
+        assert_eq!(c.total_assets(), 500_5 * USDC / 10);
         s.assert_invariant(500 * USDC);
     }
 
@@ -1346,17 +1510,20 @@ mod tests {
         assert!(paid_a <= capacity_before);
         s.assert_invariant(50 * USDC);
 
-        // B sort ensuite : 50 × (75 − 50) / 50 = 25, la même chose.
+        // B ne peut pas tout retirer tant que la couverture est ouverte (plancher de parts, B6) ;
+        // il sort jusqu'au plancher : 49 × (75 − 50) / 50 = 24,5, au même prix de sortie que A.
+        assert_eq!(c.try_withdraw(&b, &(50 * USDC)).err(), Some(Ok(VaultError::LastShareLocked.into())));
         let capacity_before = c.capacity();
-        let paid_b = c.withdraw(&b, &(50 * USDC));
-        assert_eq!(paid_b, 25 * USDC);
+        let paid_b = c.withdraw(&b, &(50 * USDC - MIN_JUNIOR_SHARES));
+        assert_eq!(paid_b, 245 * USDC / 10);
         assert!(paid_b <= capacity_before);
         s.assert_invariant(50 * USDC);
 
-        // Ensemble ils ont retiré exactement le capital libre.
-        assert_eq!(c.capacity(), 0);
+        // Ensemble ils ont retiré le capital libre, sauf la part libre du plancher de B (0,5).
+        assert_eq!(c.capacity(), 5 * USDC / 10);
+        assert_eq!(c.lp_balance(&b), 5 * USDC / 10);
         assert_eq!(s.usdc_balance(&a), 25 * USDC);
-        assert_eq!(s.usdc_balance(&b), 25 * USDC);
+        assert_eq!(s.usdc_balance(&b), 245 * USDC / 10);
     }
 
     #[test]
@@ -1997,12 +2164,14 @@ mod tests {
 
     // ---- Phase 5 : corrections d'audit ----
 
-    /// Mauvais usage (book_loss sans release) : capital sous la réserve, capacité négative.
+    /// Mauvais usage (book_loss sans release) : capital sous la réserve. La capacité reste à 0,
+    /// jamais négative (B5).
     fn negative_capacity(s: &Setup) -> Address {
         let lp = s.new_lp(100 * USDC);
         s.vault(|env| reserve(env, 100 * USDC));
         s.vault(|env| book_loss(env, 50 * USDC));
-        assert!(s.client().capacity() < 0);
+        assert!(s.total_deposits() < s.reserved());
+        assert_eq!(s.client().capacity(), 0);
         lp
     }
 
@@ -2011,6 +2180,7 @@ mod tests {
     fn withdraw_with_negative_capacity_is_refused() {
         let s = setup();
         let lp = negative_capacity(&s);
+        // Pas tout (le plancher de parts répondrait 116) : une part ordinaire, rien de libre.
         s.client().withdraw(&lp, &(10 * USDC));
     }
 
@@ -2056,7 +2226,7 @@ mod tests {
             let t = self.client().tranche_values();
             assert_eq!(t.senior + t.junior, self.total_deposits(), "senior + junior = TotalDeposits");
             assert!(t.senior >= 0 && t.junior >= 0);
-            assert_eq!(self.client().capacity(), t.junior - self.reserved(), "capacité = junior − réservé");
+            assert_eq!(self.client().capacity(), (t.junior - self.reserved()).max(0), "capacité = max(junior − réservé, 0)");
         }
     }
 
@@ -2474,6 +2644,149 @@ mod tests {
         assert_eq!(s.client().total_notional(), 0);
     }
 
+    // ---- Plafond de capital réservé par propriétaire (dossier d'audit, couvertures opposées) ----
+
+    /// Couverture de `owner` (les autres champs comme `make_hedge`).
+    fn hedge_of(s: &Setup, owner: &Address, side: Side) -> Hedge {
+        let mut h = make_hedge(s, symbol_short!("MXN"), side, MXN_1M, RATE_055, 1000);
+        h.owner = owner.clone();
+        h
+    }
+
+    #[test]
+    fn owner_reserve_cap_is_none_by_default_and_counts_margins() {
+        let s = setup();
+        s.new_lp(LP_CAPITAL);
+        let c = s.client();
+        assert_eq!(c.owner_reserve_cap(), None);
+        let sme = Address::generate(&s.env);
+        open_pos(&s, &hedge_of(&s, &sme, Side::BuyCurrency));
+        open_pos(&s, &hedge_of(&s, &sme, Side::SellCurrency));
+        assert_eq!(c.owner_reserved(&sme), 2 * MARGIN);
+        assert_eq!(c.owner_reserved(&Address::generate(&s.env)), 0);
+        s.assert_invariant(2 * MARGIN);
+    }
+
+    #[test]
+    fn open_up_to_owner_reserve_cap_is_accepted() {
+        let s = setup();
+        s.new_lp(LP_CAPITAL);
+        s.client().set_owner_reserve_cap(&Some(2 * MARGIN));
+        let sme = Address::generate(&s.env);
+        open_pos(&s, &hedge_of(&s, &sme, Side::BuyCurrency));
+        open_pos(&s, &hedge_of(&s, &sme, Side::SellCurrency));
+        assert_eq!(s.client().owner_reserved(&sme), 2 * MARGIN);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #120)")]
+    fn offsetting_hedges_over_owner_reserve_cap_panic() {
+        // Achat + vente du même montant : aucun risque de change pour la PME, mais la capacité
+        // est bloquée. Le plafond porte sur la somme brute des marges, pas sur le net.
+        let s = setup();
+        s.new_lp(LP_CAPITAL);
+        s.client().set_owner_reserve_cap(&Some(2 * MARGIN - 1));
+        let sme = Address::generate(&s.env);
+        open_pos(&s, &hedge_of(&s, &sme, Side::BuyCurrency));
+        open_pos(&s, &hedge_of(&s, &sme, Side::SellCurrency));
+    }
+
+    #[test]
+    fn owner_reserve_cap_is_per_owner_and_freed_on_close() {
+        let s = setup();
+        s.new_lp(LP_CAPITAL);
+        s.client().set_owner_reserve_cap(&Some(MARGIN));
+        let (a, b) = (Address::generate(&s.env), Address::generate(&s.env));
+        let ha = hedge_of(&s, &a, Side::BuyCurrency);
+        open_pos(&s, &ha);
+        open_pos(&s, &hedge_of(&s, &b, Side::BuyCurrency)); // autre propriétaire : non concerné
+        close_pos_flat(&s, &ha);
+        assert_eq!(s.client().owner_reserved(&a), 0);
+        // La clé est supprimée à 0 (pas d'entrée orpheline).
+        assert!(!s.vault(|env| env.storage().persistent().has(&VaultKey::OwnerReserved(a.clone()))));
+        open_pos(&s, &hedge_of(&s, &a, Side::SellCurrency));
+        assert_eq!(s.client().owner_reserved(&a), MARGIN);
+        s.assert_invariant(2 * MARGIN);
+    }
+
+    #[test]
+    fn owner_cap_below_reserved_still_lets_hedges_close_then_none_lifts_it() {
+        let s = setup();
+        s.new_lp(LP_CAPITAL);
+        let sme = Address::generate(&s.env);
+        let h = hedge_of(&s, &sme, Side::BuyCurrency);
+        open_pos(&s, &h);
+        s.client().set_owner_reserve_cap(&Some(0));
+        close_pos_flat(&s, &h);
+        s.client().set_owner_reserve_cap(&None);
+        assert_eq!(s.client().owner_reserve_cap(), None);
+        open_pos(&s, &h);
+        assert_eq!(s.client().owner_reserved(&sme), MARGIN);
+    }
+
+    #[test]
+    fn close_never_blocked_by_uncounted_owner_reserve() {
+        // Couverture ouverte avant le plafond (upgrade) : sa marge n'a pas été comptée.
+        let s = setup();
+        s.new_lp(LP_CAPITAL);
+        let sme = Address::generate(&s.env);
+        let h = hedge_of(&s, &sme, Side::BuyCurrency);
+        open_pos(&s, &h);
+        s.vault(|env| set_owner_reserved(env, &sme, 0));
+        close_pos_flat(&s, &h);
+        assert_eq!(s.client().owner_reserved(&sme), 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #100)")]
+    fn negative_owner_reserve_cap_panics() {
+        let s = setup();
+        s.client().set_owner_reserve_cap(&Some(-1));
+    }
+
+    #[test]
+    fn set_owner_reserve_cap_requires_admin_and_emits_event() {
+        let s = setup();
+        s.client().set_owner_reserve_cap(&Some(1_000 * USDC));
+        assert_admin_only(&s, "set_owner_reserve_cap");
+        assert_eq!(
+            s.env.events().all().filter_by_contract(&s.pool),
+            [OwnerReserveCapSet { cap: Some(1_000 * USDC) }.to_xdr(&s.env, &s.pool)]
+        );
+        assert_eq!(s.client().owner_reserve_cap(), Some(1_000 * USDC));
+    }
+
+    // ---- Limite par devise mesurée sur la valeur junior ----
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #108)")]
+    fn currency_limit_is_measured_on_junior_value_not_total_deposits() {
+        // 100 000 junior + 400 000 Safe. Limite 10 % : 10 000 du junior, pas 50 000 du total.
+        // Deux marges de 5 500 = 11 000 : refusé (accepté avant le correctif).
+        let s = setup();
+        s.new_lp(LP_CAPITAL);
+        s.new_senior(4 * LP_CAPITAL);
+        s.client().set_currency_limit(&symbol_short!("MXN"), &1000);
+        let a = make_hedge(&s, symbol_short!("MXN"), Side::BuyCurrency, MXN_1M, RATE_055, 1000);
+        let b = make_hedge(&s, symbol_short!("MXN"), Side::BuyCurrency, MXN_1M, RATE_055, 1000);
+        open_pos(&s, &a);
+        open_pos(&s, &b);
+    }
+
+    #[test]
+    fn currency_limit_on_junior_value_accepts_up_to_the_limit() {
+        let s = setup();
+        s.new_lp(LP_CAPITAL);
+        s.new_senior(4 * LP_CAPITAL);
+        // 11 % de 100 000 de junior = 11 000 : deux marges de 5 500 passent pile.
+        s.client().set_currency_limit(&symbol_short!("MXN"), &1100);
+        let a = make_hedge(&s, symbol_short!("MXN"), Side::BuyCurrency, MXN_1M, RATE_055, 1000);
+        let b = make_hedge(&s, symbol_short!("MXN"), Side::SellCurrency, MXN_1M, RATE_055, 1000);
+        open_pos(&s, &a);
+        open_pos(&s, &b);
+        s.assert_invariant(11_000 * USDC);
+    }
+
     #[test]
     #[should_panic(expected = "Error(Contract, #100)")]
     fn negative_notional_cap_panics() {
@@ -2497,5 +2810,81 @@ mod tests {
             s.env.events().all().filter_by_contract(&s.pool),
             [NotionalCapSet { cap: None }.to_xdr(&s.env, &s.pool)]
         );
+    }
+
+    // ---- B5 / B6 : réglages et lectures ajoutés ----
+
+    #[test]
+    fn senior_deposits_closed_by_default() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let usdc = env.register_stellar_asset_contract_v2(admin.clone()).address();
+        let oracle = env.register(mock_oracle::MockOracle, (&admin,));
+        let c = PoolClient::new(&env, &env.register(Pool, (&admin, &usdc, &oracle, &50u32)));
+        assert!(!c.senior_deposits_open());
+        let lp = Address::generate(&env);
+        c.set_allowed(&Role::Lp, &lp, &true);
+        token::StellarAssetClient::new(&env, &usdc).mint(&lp, &(1_000 * USDC));
+        c.deposit_lp(&lp, &(500 * USDC));
+        assert_eq!(c.try_deposit_senior(&lp, &(100 * USDC)).err(), Some(Ok(VaultError::SeniorDepositsClosed.into())));
+        c.set_senior_deposits_open(&true);
+        assert!(c.senior_deposits_open());
+        c.deposit_senior(&lp, &(100 * USDC));
+        // Refermés : plus de dépôt senior, mais le retrait senior reste possible.
+        c.set_senior_deposits_open(&false);
+        assert_eq!(c.try_deposit_senior(&lp, &(100 * USDC)).err(), Some(Ok(VaultError::SeniorDepositsClosed.into())));
+        assert_eq!(c.withdraw_senior(&lp, &(100 * USDC)), 100 * USDC);
+    }
+
+    #[test]
+    fn set_senior_deposits_open_requires_admin_and_emits_event() {
+        let s = setup();
+        s.client().set_senior_deposits_open(&false);
+        assert_admin_only(&s, "set_senior_deposits_open");
+        assert_eq!(
+            s.env.events().all().filter_by_contract(&s.pool),
+            [SeniorDepositsOpenSet { open: false }.to_xdr(&s.env, &s.pool)]
+        );
+    }
+
+    /// D2 : sans capital réservé, un LP peut descendre sous le plancher de parts ; aucune
+    /// couverture ne s'ouvre alors tant qu'un dépôt n'a pas reconstitué le plancher.
+    #[test]
+    fn no_hedge_on_pool_below_share_floor() {
+        let s = setup();
+        let lp = s.new_lp(1_000 * USDC);
+        assert_eq!(s.client().withdraw(&lp, &(1_000 * USDC - MIN_JUNIOR_SHARES + 1)), 1_000 * USDC - MIN_JUNIOR_SHARES + 1);
+        assert_eq!(s.total_shares(), MIN_JUNIOR_SHARES - 1);
+        assert_eq!(s.client().capacity(), MIN_JUNIOR_SHARES - 1);
+        let sme = Address::generate(&s.env);
+        s.mint(&sme, USDC);
+        token::Client::new(&s.env, &s.usdc).transfer(&sme, &s.pool, &1);
+        assert!(s.env.try_as_contract::<(), soroban_sdk::Error>(&s.pool, || reserve(&s.env, 1)).is_err());
+        // Un dépôt reconstitue le plancher : l'ouverture repasse.
+        s.new_lp(USDC);
+        s.vault(|env| reserve(env, 1));
+        assert_eq!(s.reserved(), 1);
+    }
+
+    /// B5 : retard de service des intérêts senior, lu par `senior_arrears`, rattrapé par un gain.
+    #[test]
+    fn senior_arrears_appear_and_are_caught_up() {
+        let (s, _, senior) = tranched();
+        let sme = Address::generate(&s.env);
+        s.open_margin(&sme, 190_000 * USDC);
+        assert_eq!(s.client().senior_arrears(), 0);
+        s.advance_secs(YEAR);
+        // Créance 836 000, payable T − R = 810 000 : 26 000 en retard.
+        assert_eq!(s.client().tranche_values().senior, 836_000 * USDC);
+        assert_eq!(s.client().senior_arrears(), 26_000 * USDC);
+        assert_eq!(s.client().senior_balance(&senior), 810_000 * USDC);
+        assert_eq!(s.client().capacity(), 0);
+        // La couverture se règle au profit du pool (toute la marge reste au pool) : le retard disparaît.
+        s.vault(|env| release(env, 190_000 * USDC));
+        s.vault(|env| book_gain(env, 190_000 * USDC));
+        assert_eq!(s.client().senior_arrears(), 0);
+        assert_eq!(s.client().senior_balance(&senior), 836_000 * USDC);
+        s.assert_tranches(0);
     }
 }
